@@ -15,6 +15,8 @@ Lightning, the real sandbox, and grounder choices made on the dev split.
 | --- | --- | --- | --- |
 | Qwen3.5-2B base | 76.4% | **86.3%** (icon 78.1, text 92.5) | Kyle, `gui_grounding` Gym env |
 | Pilot SFT (2k rows raw labels, 5 min) | **81.3%** (+5.0) | — | Every source improved; Linux +11.9, FineWeb +2.2. Answer length 37.6 → 16.7 tokens. |
+| **SFT template** (all 18,652 raw-label train rows, 1 epoch, LoRA r16) | **85.66%** (+9.3) | **89.07%** (+2.8; mobile 92.2 / desktop 89.5 / web 85.1; text 92.3 / **icon 84.8, +6.7**) | Kyle 17:31. The Lightning variant is next (ablation). |
+| Gate D2 GRPO smoke (20 steps) | — | — | **Pass: 31.9 s/step**, 960 `/verify` calls with 0 failures, reward 0.75 → 0.79 |
 | Gate D1 comparison (OS-Atlas sample n=500, pre-cleanup) | Qwen3-VL-2B 80.6 vs Qwen3.5-2B 79.8 | — | `eval_results/qwen3vl_vs_qwen35_osatlas500.csv`. Qwen3.5 +7.0 on desktop. |
 
 ## Agent (sandbox tasks, verified from sandbox state)
