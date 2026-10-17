@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GUI assist</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/console.css">
+  <!-- Loaded in <head> on purpose: it applies the saved theme before first paint. -->
+  <script src="/static/console.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#request">Skip to request</a>
+
+  <header class="app-header">
+    <div class="brand">
+      <h1>GUI assist</h1>
+      <p class="tagline">Say what you want. The agent does it from pixels alone.</p>
+    </div>
+    <div class="header-tools">
+      <p id="agent-badge" class="badge" data-agent="unknown">Agent: …</p>
+      <button id="hc-toggle" class="btn btn-quiet" type="button" aria-pressed="false">High contrast</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel panel-left" aria-labelledby="request-heading">
+      <h2 id="request-heading" class="visually-hidden">Request</h2>
+      <form id="run-form" class="run-form" novalidate>
+        <label class="field-label" for="request">What do you want to do?</label>
+        <textarea id="request" name="request" rows="2" maxlength="500" autocomplete="off" spellcheck="true"
+                  placeholder="For example: Turn on high contrast."
+                  aria-describedby="request-note keyboard-hint"></textarea>
+        <p id="request-note" class="note" aria-live="polite"></p>
+
+        <div class="task-row">
+          <label class="field-label" for="task-select">Sandbox task</label>
+          <select id="task-select" name="task" aria-describedby="task-meta">
+            <option value="">Free text</option>
+          </select>
+        </div>
+        <p id="task-meta" class="note"></p>
+
+        <details id="options" class="options" open>
+          <summary>Options <span id="options-summary" class="options-summary"></span></summary>
+          <div class="options-body">
+            <fieldset class="opt" id="opt-grounder">
+              <legend>Grounder</legend>
+              <div class="seg">
+                <input type="radio" id="grounder-base" name="grounder" value="base" checked>
+                <label for="grounder-base">base</label>
+                <input type="radio" id="grounder-grounder" name="grounder" value="grounder">
+                <label for="grounder-grounder">grounder</label>
+              </div>
+            </fieldset>
+            <fieldset class="opt" id="opt-thinking">
+              <legend>Thinking</legend>
+              <div class="seg">
+                <input type="radio" id="thinking-off" name="thinking" value="off">
+                <label for="thinking-off">off</label>
+                <input type="radio" id="thinking-retry" name="thinking" value="retry" checked>
+                <label for="thinking-retry">retry</label>
+                <input type="radio" id="thinking-on" name="thinking" value="on">
+                <label for="thinking-on">on</label>
+              </div>
+            </fieldset>
+            <fieldset class="opt" id="opt-lightning">
+              <legend>Lightning</legend>
+              <div class="seg">
+                <input type="radio" id="lightning-hosted" name="lightning" value="hosted" checked>
+                <label for="lightning-hosted">hosted</label>
+                <input type="radio" id="lightning-local" name="lightning" value="local">
+                <label for="lightning-local">local</label>
+              </div>
+            </fieldset>
+            <p class="note options-help">grounder = our fine-tuned LoRA on the same 2B VLM · retry = think only after a miss</p>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button id="run-btn" class="btn btn-primary" type="submit">Run</button>
+          <button id="stop-btn" class="btn btn-stop" type="button" disabled>Stop</button>
+          <p id="run-status" class="run-status" data-state="idle">Idle</p>
+        </div>
+        <p id="form-error" class="form-error" role="alert"></p>
+      </form>
+
+      <section class="log" aria-labelledby="log-heading">
+        <div class="log-head">
+          <h2 id="log-heading">Steps</h2>
+          <button id="follow-btn" class="btn btn-small" type="button" hidden>Follow latest step</button>
+        </div>
+        <div id="log-scroll" class="log-scroll">
+          <ol id="step-log" class="step-log" aria-live="polite" aria-labelledby="log-heading"></ol>
+          <p id="log-empty" class="log-empty">Steps appear here while the agent works.</p>
+          <p id="pending" class="pending" hidden></p>
+        </div>
+      </section>
+      <p id="keyboard-hint" class="kbd-hint">
+        <span class="kbd-title">Keyboard:</span> <kbd>Enter</kbd> run · <kbd>Esc</kbd> stop ·
+        <kbd>←</kbd><kbd>→</kbd> screenshots<span class="visually-hidden">. Shift+Enter adds a new line.</span>
+      </p>
+    </section>
+
+    <section class="panel panel-right" aria-labelledby="screen-heading">
+      <section id="banner" class="banner" tabindex="-1" aria-labelledby="banner-title" hidden>
+        <div class="banner-verdict">
+          <span id="banner-icon" class="banner-icon" aria-hidden="true"></span>
+          <div>
+            <h2 id="banner-title" class="banner-title"></h2>
+            <p id="banner-label" class="banner-label"></p>
+            <p id="banner-expl" class="banner-expl"></p>
+            <p id="banner-extra" class="banner-extra"></p>
+          </div>
+        </div>
+        <div class="banner-agent">
+          <p id="banner-summary" class="banner-summary"></p>
+          <p id="banner-claim" class="banner-claim"></p>
+        </div>
+      </section>
+
+      <div class="viewer-bar">
+        <h2 id="screen-heading" class="visually-hidden">Screen</h2>
+        <p id="screen-caption" class="screen-caption">Waiting for a run.</p>
+        <fieldset class="opt view-toggle" id="view-toggle">
+          <legend class="visually-hidden">Show for this step</legend>
+          <div class="seg seg-small">
+            <input type="radio" id="view-before" name="view" value="before">
+            <label for="view-before">Before click</label>
+            <input type="radio" id="view-after" name="view" value="after">
+            <label for="view-after">After action</label>
+          </div>
+        </fieldset>
+        <button id="live-btn" class="btn btn-small btn-live" type="button" aria-pressed="true">Live</button>
+      </div>
+
+      <figure class="screen" aria-labelledby="screen-caption">
+        <div class="screen-wrap">
+          <img id="screen-img" class="screen-img" alt="" hidden>
+          <p id="screen-empty" class="screen-empty">No screenshot yet. Run a request to watch the agent work.</p>
+        </div>
+      </figure>
+
+      <div id="thumbs" class="thumbs" role="toolbar" aria-label="Step screenshots"
+           aria-describedby="keyboard-hint"></div>
+    </section>
+  </main>
+
+  <p id="sr-status" class="visually-hidden" role="status"></p>
+</body>
+</html>
