@@ -93,10 +93,10 @@ Cutaways:
 - **Grounding:** the base 2B model scores **86.3%** on ScreenSpot-v2-clean (1,244 rows). We found and excluded 28 contaminated rows. The tuned model scores **89.07%**.
 - **Fine-tuning:**
   - One LoRA epoch on all 18,652 training rows (54 min on one H200) raised dev accuracy from 76.4% to **85.66% (+9.3)**.
-  - On the held-out test, ScreenSpot-v2-clean went from 86.3% to **89.07% (+2.8)**. **Icons went from 78.1% to 84.8% (+6.7)**, and unlabeled icons are exactly what screen readers miss.
+  - On the held-out test, ScreenSpot-v2-clean went from 86.3% to **89.07% (+2.8)**. **Icons went from 78.1% to 84.8% (+6.7)**. Icon-only controls are often the ones a screen reader can't name: WebAIM finds empty buttons on 30.6% of top home pages and empty links on 46.3% ([WebAIM 2026][webaim]).
   - A 5-minute pilot (2,000 rows) had already given +5.0 on dev, and answers got 2x shorter.
   - Overnight GRPO in NeMo Gym may move these further; the final numbers land Sunday.
-  - In a human audit, 97.7% of the Lightning rewrites that could be checked were faithful.
+  - In a human audit, 97.7% (42/43) of the Lightning rewrites that could be checked were faithful, or 85.7% if "unsure" counts as a failure.
 - **Agent on Acme, verified from the app's state:**
   - On the easy tasks, the base model verified 3/4 and the pilot **4/4**.
   - On all 12 tasks, the base model (before tuning) verified 5/12, or **6/12** with thinking on for retries.
