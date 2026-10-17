@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One command for the demo: start the sandbox (:8090) and the GUI assist console (:8095),
-# check that the VLM (:8001) and Lightning (hosted or :8000) respond, print the URL.
+# check that the VLM (configs/agent.yaml vlm.base_url, normally :8001) and Lightning
+# (hosted or :8000) respond, print the URL.
 # Ctrl-C stops whatever this script started.
 #
 # Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--headed] [--skip-models]
@@ -9,7 +10,7 @@
 #   --lightning       which Lightning the console defaults to and this script checks (default local:
 #                     the official BF16 checkpoint served as `lightning` on :8000; hosted is slow)
 #   --headed          show the Playwright browser window (for the video)
-#   --skip-models     don't check :8001 / Lightning
+#   --skip-models     don't check the VLM / Lightning
 # Logs: runs/demo_logs/{sandbox,console}.log
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -23,7 +24,7 @@ while [ $# -gt 0 ]; do
     --lightning=*) LIGHTNING="${1#*=}"; shift ;;
     --headed) HEADED=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -72,12 +73,15 @@ fi
 # 2. Models (warnings only: the mock agent needs none of them)
 model_ids() { "$PY" -c 'import json,sys; print(" ".join(m["id"] for m in json.load(sys.stdin).get("data", [])))'; }
 if [ "$SKIP_MODELS" = 0 ]; then
-  if ids=$(curl -sf -m 5 http://127.0.0.1:8001/v1/models | model_ids); then
-    echo "vlm      :8001 up, served: ${ids:-none}"
-    case " $ids " in *" base "*) ;; *) echo "warning: served name 'base' missing on :8001 (contracts.md §3)" >&2 ;; esac
+  # The agent's own config decides where the VLM is (env AGENT_VLM_BASE_URL overrides it).
+  VLM_URL=$("$PY" -c 'from agent.config import load_config; print(load_config().vlm.base_url.rstrip("/"))' 2>/dev/null ||
+    echo http://127.0.0.1:8001/v1)
+  if ids=$(curl -sf -m 5 "$VLM_URL/models" | model_ids); then
+    echo "vlm      $VLM_URL up, served: ${ids:-none}"
+    case " $ids " in *" base "*) ;; *) echo "warning: served name 'base' missing at $VLM_URL (contracts.md §3)" >&2 ;; esac
     case " $ids " in *" grounder "*) ;; *) echo "note:    no 'grounder' adapter yet; use Grounder = base in the console" ;; esac
   else
-    echo "warning: VLM :8001 not reachable. Open the tunnel (docs/local-mac.md §3a) or start it locally (§3b)." >&2
+    echo "warning: VLM $VLM_URL not reachable. Open the tunnel (docs/local-mac.md §3a) or start it locally (§3b)." >&2
   fi
   if [ "$LIGHTNING" = local ]; then
     if ids=$(curl -sf -m 5 http://127.0.0.1:8000/v1/models | model_ids); then
