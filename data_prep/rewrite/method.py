@@ -104,6 +104,9 @@ ERROR_DOCS = [
                                        "neighbor and no position word (identical labels need a relation or position)"),
 ]
 WARNING_DOCS = [
+    ("stripped_style_word", "a style name (functional/descriptive/positional) copied at the very start or end of the "
+                            "instruction was removed deterministically (validate.cleanup_instruction)"),
+    ("dehyphenated_grid", "a hyphenated grid token (top-right) was rewritten as plain words (top right)"),
     ("unchanged", "the instruction equals the label"),
     ("length", f"outside the targeted {validate.TARGET_WORDS[0]}-{validate.TARGET_WORDS[1]} words"),
     ("neighbor_swap:<label>", "a functional/descriptive instruction names a neighbor's label and no word of the "
@@ -222,7 +225,10 @@ def _section_provenance(stats: dict) -> list[str]:
             ("requests sent", (stats.get("requests", {}).get("this_run") or {}).get("n")),
             ("response_format", f"requested `{run.get('response_format_requested')}`, final "
                                 f"`{run.get('response_format_final') or run.get('response_format_requested')}`"),
-            ("rows per request / concurrent requests", f"{run.get('batch_size')} / {run.get('concurrency')}")]),
+            ("rows per request / concurrent requests", f"{run.get('batch_size')} / {run.get('concurrency')}"),
+            ("started / finished (UTC)", f"{run.get('started')} / {run.get('finished')}"),
+            ("splits rewritten", ", ".join(run.get("splits") or []) or "all")]),
+        *(["", f"Note: {run['note']}"] if run.get("note") else []),
     ]
 
 

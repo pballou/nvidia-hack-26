@@ -386,6 +386,25 @@ def _lint(s: str, meta: dict) -> tuple[str | None, list[str]]:
     return error, warnings
 
 
+_EDGE_STYLE_RE = re.compile(r"^(?:" + "|".join(STYLES) + r")\s*[:\-–]?\s+|\s*[,;:\-–(]?\s*\(?(?:"
+                            + "|".join(STYLES) + r")\)?$", re.I)
+
+
+def cleanup_instruction(s: str, meta: dict) -> tuple[str, list[str]]:
+    """Deterministic fixes for prompt vocabulary copied into the output, logged as warnings: a style name at the very
+    start or end ("the MAYO text positional" -> "the MAYO text") and hyphenated grid tokens ("top-right" -> "top
+    right"). A style word elsewhere, or one the label has, is left for the style_word error."""
+    fixes = []
+    context = _context(meta)
+    stripped = _EDGE_STYLE_RE.sub("", s).strip()
+    if stripped != s and stripped and not _STYLE_RE.search(context):
+        s, fixes = stripped, fixes + ["stripped_style_word"]
+    dehyph = _GRID_RE.sub(lambda m: re.sub(r"[-‐‑–]", " ", m.group(1)), s)
+    if dehyph != s and not _GRID_RE.search(context):
+        s, fixes = dehyph, fixes + ["dehyphenated_grid"]
+    return s, fixes
+
+
 def validate_item(item, meta) -> tuple[dict | None, str | None, list[str]]:
     """(normalized, error, warnings); normalized = {keep, rewritten, drop_reason}. Model style fields are ignored."""
     if not isinstance(item, dict):
@@ -403,10 +422,11 @@ def validate_item(item, meta) -> tuple[dict | None, str | None, list[str]]:
         return None, "missing_instruction", []
     if "\n" in raw.strip() or "\r" in raw.strip():
         return None, "newline", []
-    s = normalize_instruction(raw)
+    s, fixes = cleanup_instruction(normalize_instruction(raw), meta)
     if not s:
         return None, "missing_instruction", []
     error, warnings = _lint(s, meta)
+    warnings = fixes + warnings
     if error:
         return None, error, warnings
     return {"keep": True, "rewritten": s, "drop_reason": None}, None, warnings

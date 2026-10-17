@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--model", help="override the endpoint's model name")
     ap.add_argument("--model-label", help="model id recorded in rewrites.jsonl and METHOD.md (default: the served "
                     "checkpoint from GET /models, else the model name)")
+    ap.add_argument("--note", default="", help="free-text provenance note recorded in stats.json and METHOD.md")
     ap.add_argument("--splits", type=_csv, default=(),
                     help="only rewrite rows whose split is listed, e.g. train (dev keeps raw labels); default: all")
     ap.add_argument("--limit", type=int, help="only the first N selected rows, ordered by sha256('sample:' + id)")
@@ -428,7 +429,7 @@ def build_stats(*, ctx, args, rows, selected, targets, records, req_this, req_al
                 "max_consecutive_transport_errors": args.max_consecutive_transport_errors,
                 "response_format_requested": args.response_format,
                 "response_format_final": ctx.get("response_format_final") or args.response_format,
-                "dry_run": bool(args.dry_run), "limit": limit, "splits": list(args.splits or ()),
+                "dry_run": bool(args.dry_run), "limit": limit, "splits": list(args.splits or ()), "note": args.note or "",
                 "raw_sources": sorted(meta.RAW_LABEL_SOURCES - extra_natural | extra_raw),
                 "natural_sources": sorted(meta.NATURAL_SOURCES - extra_raw | extra_natural),
                 "select_pct": meta.SELECT_PCT, "style_split": [list(s) for s in meta.STYLE_SPLIT]},

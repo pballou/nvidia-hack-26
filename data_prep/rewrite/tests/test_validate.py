@@ -532,9 +532,11 @@ def test_text_action_verb(text, control, style, error):
 # --- style_word / grid_token: no prompt vocabulary in the output ---------------------------------------------------
 
 @pytest.mark.parametrize("text,label,error", [
-    ("the Screen Time text positional", "Screen Time", "style_word:positional"),
-    ("the note text descriptive", "note", "style_word:descriptive"),
-    ("the wuwei text Functional", "wuwei", "style_word:functional"),
+    ("the Screen Time text positional", "Screen Time", None),     # v4: stripped at the edge (cleanup_instruction)
+    ("the note text descriptive", "note", None),
+    ("the wuwei text Functional", "wuwei", None),
+    ("the positional Screen Time text", "Screen Time", "style_word:positional"),   # mid-sentence: still an error
+    ("the note descriptive text", "note", "style_word:descriptive"),
     ("open the Functional tests", "Functional tests", None),     # in the label
     ("the Screen Time text at the top", "Screen Time", None),
 ])
@@ -553,7 +555,30 @@ def test_style_word(text, label, error):
 ])
 def test_grid_token(text, error):
     label = "Move To Home" if "Move" in text else "Maximize Panel Size"
-    assert err(text, meta(label=label, control="button", style="positional", neighbors=())) == error
+    m = meta(label=label, control="button", style="positional", neighbors=())
+    assert v._grid_token(text, m) == error
+    assert err(text, m) is None  # v4: validate_item rewrites hyphenated grid tokens as plain words
+
+
+@pytest.mark.parametrize("text,label,out,fixes", [
+    ("the MAYO text positional", "MAYO", "the MAYO text", ["stripped_style_word"]),
+    ("Positional: the Cleaner Handbook at the center", "Cleaner Handbook", "the Cleaner Handbook at the center",
+     ["stripped_style_word"]),
+    ("select the FAQs (functional)", "FAQs", "select the FAQs", ["stripped_style_word"]),
+    ("the Time text top-right", "Time", "the Time text top right", ["dehyphenated_grid"]),
+    ("the Donation text middle-left descriptive", "Donation", "the Donation text middle left",
+     ["stripped_style_word", "dehyphenated_grid"]),
+    ("open the Functional tests", "Functional tests", "open the Functional tests", []),
+    ("open the top-left corner", "Top-left corner", "open the top-left corner", []),
+])
+def test_cleanup_instruction(text, label, out, fixes):
+    assert v.cleanup_instruction(text, meta(label=label, neighbors=())) == (out, fixes)
+
+
+def test_cleanup_fixes_are_reported_as_warnings():
+    norm, error, warnings = v.validate_item({"k": 1, "keep": True, "instruction": "the Time text top-right"},
+                                            meta(label="Time", control="text", style="positional", neighbors=()))
+    assert error is None and norm["rewritten"] == "the Time text top right" and warnings[0] == "dehyphenated_grid"
 
 
 def test_grid_token_in_label_is_fine():
@@ -607,5 +632,6 @@ def test_first_failing_check_is_reported():
     assert v.CHECKS[0].__name__ == "_no_label_word"
     errors = [c("the large text field top-center left of Home", m) for c in v.CHECKS]
     assert [e for e in errors if e] == ["wrong_direction:Home", "grid_token:top-center"]   # "field" is in the label
-    assert err("the Donation entry top-center", meta(label="Donation", control="text", neighbors=())) \
+    assert v._grid_token("the Donation entry top-center", meta(label="Donation", control="text", neighbors=())) \
         == "grid_token:top-center"
+    assert err("the Donation entry top-center", meta(label="Donation", control="text", neighbors=())) is None

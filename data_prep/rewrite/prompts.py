@@ -5,7 +5,7 @@ Bump PROMPT_VERSION on any change to SYSTEM_PROMPT, FEW_SHOT or format_batch (th
 
 import json
 
-PROMPT_VERSION = "v3"  # v1 only ever ran for plumbing on a community 4-bit build; v3 fixes the v2 audit failures
+PROMPT_VERSION = "v4"  # v1: 4-bit plumbing only; v3: v2 audit fixes; v4: positions sent as plain words
 
 STYLES = ("functional", "descriptive", "positional")
 DROP_REASONS = ("numeric", "unintelligible", "needs_screen", "duplicate_neighbor")
@@ -24,8 +24,8 @@ Item fields:
 - platform: mobile, web or desktop.
 - control: plain noun for the element type, if known (button, link, tab, text field, checkbox, menu item, \
 dropdown, text, area, element...). kind: text or icon, if known.
-- position: the target's center on a 3x3 screen grid. Say it in plain words, never as the token: top-left -> \
-"at the top left", middle-right -> "on the right", center -> "in the middle".
+- position: where the target's center is on a 3x3 screen grid (top left, top center, ..., center, ..., bottom \
+right). Say it naturally: "at the top left", "on the right", "in the middle".
 - size: small, medium or large, relative to the screen.
 - neighbors: other labeled elements on the same screen, nearest first; not necessarily adjacent. target_is: where \
 the target is relative to that neighbor; copy it as is: target_is right of Search -> "right of Search".
@@ -60,7 +60,7 @@ the thing in its own key words, never the copied sentence: "Bar Chart. Showing A
 points." -> "the app usage bar chart".
 8. Look-alikes: if a neighbor label is identical or starts with the same word ("Download App" vs "Download PDF"), \
 add what tells the target apart: its distinct words ("download the app"), a target_is relation or its position.
-9. Never write a style name (functional, descriptive, positional) or a grid token (top-left, middle-right...).
+9. style only says how to phrase it: never write the words functional, descriptive or positional.
 10. Non-English label: keep its words verbatim inside an English instruction.
 
 Drop an item (keep=false) only when no faithful instruction is possible, with one drop_reason:
@@ -155,6 +155,8 @@ def format_item(k: int, meta: dict) -> str:
             value = " ".join(str(value).split())
             if len(value) > LABEL_MAX_CHARS:
                 value = value[:LABEL_MAX_CHARS].rstrip() + "…"
+        elif key == "position":
+            value = str(value).replace("-", " ")  # "top right", not the "top-right" token (v3 copied it verbatim)
         elif key == "neighbors":
             value = [{"label": n["label"], "target_is": n["target_is"]} for n in value or []]
         item[key] = value

@@ -12,7 +12,7 @@ from data_prep.rewrite.prompts import (DROP_REASONS, FEW_SHOT, FEW_SHOT_ANSWER, 
                                        format_item)
 
 # Bump PROMPT_VERSION whenever the prompt text changes (the rewrite cache is keyed by it), then add the new pin here.
-PROMPT_FINGERPRINTS = {"v1": "ca30d2812a875f50", "v2": "ba789479023ffcd4", "v3": "73fbcdcb90446c55"}
+PROMPT_FINGERPRINTS = {"v1": "ca30d2812a875f50", "v2": "ba789479023ffcd4", "v3": "73fbcdcb90446c55", "v4": "bce5b7ac328ea6e5"}
 
 POSITIONS = {"top-left", "top-center", "top-right", "middle-left", "center", "middle-right", "bottom-left",
              "bottom-center", "bottom-right"}
@@ -84,8 +84,9 @@ def test_format_item_single_line_contract_keys():
     item = json.loads(line)
     assert list(item) == CONTRACT_KEYS
     assert item["k"] == 3 and item["neighbors"] == [{"label": "Search", "target_is": "right of"}]
-    assert {k: item[k] for k in ("label", "platform", "control", "kind", "position", "size", "style")} == \
-        {k: meta[k] for k in ("label", "platform", "control", "kind", "position", "size", "style")}
+    assert {k: item[k] for k in ("label", "platform", "control", "kind", "size", "style")} == \
+        {k: meta[k] for k in ("label", "platform", "control", "kind", "size", "style")}
+    assert item["position"] == "top right"  # v4: plain words, not the top-right token
 
 
 def test_format_item_omits_missing_optional_keys():
@@ -125,7 +126,7 @@ def test_format_batch_on_real_metas():
     for k, line in enumerate(format_batch(metas).split("\n")[2:], 1):
         item = json.loads(line)
         assert item["k"] == k and set(item) <= set(CONTRACT_KEYS)
-        assert item["style"] in STYLES and item["position"] in POSITIONS
+        assert item["style"] in STYLES and item["position"] in {p.replace("-", " ") for p in POSITIONS}
         assert all(set(n) == {"label", "target_is"} and n["target_is"] in TARGET_IS for n in item["neighbors"])
 
 
