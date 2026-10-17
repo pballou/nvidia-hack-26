@@ -22,17 +22,16 @@ import random
 import statistics
 import sys
 import time
-from multiprocessing import Pool
 from pathlib import Path
 
 import torch
 from datasets import Dataset, Image, List
-from PIL import Image as PILImage
 from transformers import AutoModelForImageTextToText, AutoProcessor, TrainerCallback
 from trl import SFTConfig, SFTTrainer
 from trl.data_utils import apply_chat_template, prepare_multimodal_messages
 
 from common import grounding
+from data_prep.images import DEFAULT_CACHE, preresize
 from training.lora import MODELS, lora_config
 
 FAMILY = {"qwen3.5": "qwen3_5", "qwen3-vl": "qwen3_vl"}
@@ -57,23 +56,6 @@ def target_text(row: dict) -> str:
     assert grounding.parse_point(text) == tuple(pt), text
     return text
 
-
-def _resize_one(job: tuple[Path, Path, int]) -> None:
-    src, dst, max_pixels = job
-    if dst.exists():
-        return
-    grounding.MAX_PIXELS = max_pixels  # set per worker; preprocess reads it at call time
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with PILImage.open(src) as im:
-        grounding.preprocess_screenshot(im).save(dst)
-
-
-def preresize(rows: list[dict], root: Path, cache: Path, max_pixels: int) -> dict[str, str]:
-    """Resize each unique screenshot once; returns image_path -> cached PNG path."""
-    out = {p: cache / str(max_pixels) / root.name / Path(p).with_suffix(".png") for p in {r["image_path"] for r in rows}}
-    with Pool(16) as pool:
-        pool.map(_resize_one, [(root / p, dst, max_pixels) for p, dst in out.items()], chunksize=8)
-    return {p: str(dst) for p, dst in out.items()}
 
 
 def build_dataset(rows: list[dict], cached: dict[str, str], model: str) -> Dataset:
@@ -124,7 +106,7 @@ def main():
     ap.add_argument("--train", type=Path, required=True, help="canonical manifest JSONL")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--max-pixels", type=int, default=grounding.MAX_PIXELS)
-    ap.add_argument("--cache", type=Path, default=Path("/home/ubuntu/data/cache/preprocessed"))
+    ap.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     ap.add_argument("--limit", type=int, help="use only the first N rows (after shuffling)")
     ap.add_argument("--max-steps", type=int, default=-1)
     ap.add_argument("--epochs", type=float, default=1.0)
@@ -140,7 +122,7 @@ def main():
 
     rows = load_rows(args.train, args.limit, args.seed)
     t0 = time.perf_counter()
-    cached = preresize(rows, args.train.parent, args.cache, args.max_pixels)
+    cached = preresize({r["image_path"] for r in rows}, args.train.parent, args.cache, args.max_pixels)
     print(f"{len(rows)} rows, {len(cached)} screenshots pre-resized in {time.perf_counter() - t0:.0f}s", flush=True)
     ds = build_dataset(rows, cached, args.model)
 

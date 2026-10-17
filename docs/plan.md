@@ -194,9 +194,9 @@ it.
 - **Gate D1 decided (Sat ~4:30pm): fine-tune `Qwen/Qwen3.5-2B` at 2 MP.**
   - Baselines on Charlie's OS-Atlas sample: Qwen3-VL-2B 80.6% (6% near-miss),
     Qwen3.5-2B 79.8%. That's a statistical tie, so the tie-break rule applies.
-  - Both passed Kyle's D1 checks: LoRA loads in vLLM, including Qwen3.5's
-    linear-attention layers, and the 20-step SFT smoke runs (Qwen3.5 1.75 s/step
-    at 2 MP).
+  - Both passed Kyle's D1 checks (docs/runs.md): LoRA loads in vLLM, including
+    Qwen3.5's linear-attention layers, and the 20-step SFT smoke runs (Qwen3.5
+    1.75 s/step at 2 MP).
   - Qwen3.5 is covered by TRL's VLM GRPO tests and has a published single-H200 TRL
     recipe, which lowers the risk of the GRPO step the Gym bounty depends on.
   - Pixel cap frozen at **2 MP** (`MAX_PIXELS = 2_073_600`) everywhere:
@@ -207,6 +207,8 @@ it.
     both within noise at about 150 rows each. Decision confirmed.
   - Icon split: OS-Atlas has no labels, so it comes from Charlie's zero-shot
     SSv2-clean run of both models. Qwen3.5's result is the official base baseline.
+  - The 500-row sample shares screenshots with the 20k training slice, so
+    checkpoint selection uses the new dev split instead.
 - **Eval (option C):** OS-Atlas `dev` split (by screenshot) for choosing checkpoints.
   The final held-out test is **ScreenSpot-v2-clean**: 1,244 rows, all of SSv2 minus
   the 28 desktop rows captured on the same machines as our Linux/macOS training data
@@ -242,6 +244,8 @@ it.
   1. vLLM `--enable-lora` loads a dummy adapter built from our PEFT config.
   2. A 20-step TRL SFT smoke test runs.
   If it's a tie, take Qwen3.5-2B (best-documented single-H200 recipe).
+  - **Decided 2026-10-17: Qwen3.5-2B at 2 MP.** Details are under "Decisions so far"
+    above.
 - **D2 GRPO:** go only if SFT finished by ~9pm Saturday and the smoke test runs at
   ≤ ~35 s/step, so the run can finish by ~1am. Keep GRPO only if dev accuracy beats
   SFT. Otherwise ship SFT and say so.

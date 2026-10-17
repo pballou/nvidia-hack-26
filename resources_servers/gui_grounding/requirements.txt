@@ -1,0 +1,6 @@
+-e nemo-gym[dev] @ ../../
+fastapi
+pillow==12.3.0
+# Gym swaps the line above for plain nemo-gym==<version>, dropping the [dev] test deps
+pytest==9.1.1
+pytest-asyncio==1.4.0

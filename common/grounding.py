@@ -24,7 +24,7 @@ import re
 
 from PIL import Image
 
-# Placeholder until gate D1 freezes it. MUST equal GROUNDER_MAX_PIXELS /
+# Frozen at gate D1 (2026-10-17): ~2 MP. MUST equal GROUNDER_MAX_PIXELS /
 # GROUNDER_MIN_PIXELS in serving.env (docs/gpu-box.md §1) and the TRL processor cap.
 MAX_PIXELS: int = 2_073_600
 MIN_PIXELS: int = 65_536
