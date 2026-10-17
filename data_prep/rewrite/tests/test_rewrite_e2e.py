@@ -762,3 +762,18 @@ def test_group_retries_reasks_a_failed_batch_in_one_request(manifest, tmp_path):
     assert [len(c["items"]) for c in handler.calls[1:2]] == [4]  # one retry request for the 4 failed rows, k = 1..4
     assert stats["requests"]["this_run"]["by_kind"] == {"batch": math.ceil(len(llm) / 4), "retry": 1}
     assert "together, in one request per failed reply" in (out / "METHOD.md").read_text(encoding="utf-8")
+
+
+def test_method_md_reports_the_human_audit_and_drop_policy(manifest, tmp_path):
+    out = tmp_path / "out"
+    stats = run_rewrite(manifest, out, fake.make_handler())
+    cards = ([{"kind": "kept", "verdict": "faithful"}] * 42 + [{"kind": "kept", "verdict": "unfaithful"}]
+             + [{"kind": "kept", "verdict": "unsure"}] * 6 + [{"kind": "kept", "verdict": None}]
+             + [{"kind": "drop", "verdict": "no", "original": "EXPLORER", "drop_reason": "unintelligible"}] * 13
+             + [{"kind": "drop", "verdict": "yes"}] * 3)
+    (out / "review_verdicts_x.json").write_text(json.dumps(
+        {"sheet": {"pv": stats["run"]["prompt_version"], "seed": "0", "runId": "r1"}, "cards": cards}))
+    assert method.main(["--out", str(out)]) == 0
+    text = (out / "METHOD.md").read_text(encoding="utf-8")
+    assert "42/43 = 97.7%" in text and "42/49 = 85.7%" in text and "3 of 16 sampled drops" in text
+    assert "lightning_drop_reason" in text and '"EXPLORER" (unintelligible)' in text

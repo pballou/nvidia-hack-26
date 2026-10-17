@@ -4,10 +4,16 @@ A pure function of stats.json plus the prompt, metadata and lint code, so the sa
 generated the rows comes from the cached records (stats.json `rewrites`), not from the invocation that wrote the file.
 """
 
+import argparse
 import inspect
 import json
 import re
+import sys
+from collections import Counter
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from data_prep.rewrite import client, meta, prompts, validate
 
@@ -312,7 +318,57 @@ def _generated_by(rw: dict) -> str:
                    rw.get("rule_drops") else ".")
 
 
-def render_method(stats: dict) -> str:
+def load_audit(out_dir: Path, prompt_version: str) -> dict | None:
+    """Summary of the human verdicts exported from review.html (review_verdicts_*.json) for this prompt version."""
+    for path in sorted(Path(out_dir).glob("review_verdicts_*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        sheet, cards = data.get("sheet") or {}, data.get("cards") or []
+        if str(sheet.get("pv") or sheet.get("prompt_version")) != prompt_version:
+            continue
+        kept = Counter(str(c.get("verdict")) for c in cards if c.get("kind") == "kept")
+        drops = Counter(str(c.get("verdict")) for c in cards if c.get("kind") == "drop")
+        overturned = [(c.get("original"), c.get("drop_reason")) for c in cards
+                      if c.get("kind") == "drop" and c.get("verdict") == "no"]
+        return {"file": path.name, "seed": sheet.get("seed"), "run_id": sheet.get("runId"), "kept": dict(kept),
+                "drops": dict(drops), "overturned": overturned}
+    return None
+
+
+def _section_audit(audit: dict | None) -> list[str]:
+    policy = ("How `apply.py` uses drops: only the deterministic numeric rule removes rows. A row Lightning dropped "
+              "(`keep=false`, any `drop_reason`) or that ended as `llm_error` stays in both training files with its raw "
+              "label, `instruction_style` `raw` and the reason in `lightning_drop_reason`.")
+    if not audit:
+        return ["## Human audit and how drops are applied", "", policy, ""]
+    k, d = audit["kept"], audit["drops"]
+    faithful, unfaithful, unsure = k.get("faithful", 0), k.get("unfaithful", 0), k.get("unsure", 0)
+    source_err, unjudged = k.get("source_error", 0), k.get("None", 0)
+    verifiable = faithful + unfaithful
+    rated = verifiable + unsure
+    wrong, right = d.get("no", 0), d.get("yes", 0)
+    examples = ", ".join(f"\"{(o or '')[:40]}\" ({r})" for o, r in audit["overturned"][:10])
+    return [
+        "## Human audit and how drops are applied", "",
+        f"A person reviewed a random sheet from this run (`review_sample.py`, seed {audit['seed']}, run "
+        f"`{audit['run_id']}`; verdicts in `{audit['file']}`): each card shows the screenshot crop with the target box, "
+        "the raw label and the rewrite.", "",
+        _table(["", "cards"], [
+            ("rewrites judged faithful", faithful), ("rewrites judged unfaithful", unfaithful),
+            ("unsure (could not be verified from the crop: hidden text, look-alikes, non-English)", unsure),
+            ("source error (box is not on the labeled element; not a rewrite error)", source_err),
+            ("not judged", unjudged)]), "",
+        f"Faithful: {faithful}/{verifiable} = {100 * faithful / max(verifiable, 1):.1f}% of the cards that could be "
+        f"verified (gate: >= 90%), or {faithful}/{rated} = {100 * faithful / max(rated, 1):.1f}% counting unsure cards "
+        "as not faithful.", "",
+        f"Model drops: {right} of {right + wrong} sampled drops were judged correct and {wrong} wrong; readable labels "
+        f"and file names are valid click targets. Overturned examples: {examples}.", "",
+        policy, ""]
+
+
+def render_method(stats: dict, audit: dict | None = None) -> str:
     run, man, rw = stats.get("run", {}), stats.get("manifest", {}), stats.get("rewrites", {})
     pv = run.get("prompt_version", prompts.PROMPT_VERSION)
     pct = run.get("select_pct", meta.SELECT_PCT)
@@ -460,8 +516,10 @@ def render_method(stats: dict) -> str:
         "a random sample (review_sample.py), not on every row.",
         "- The hosted endpoint's weights and serving stack are controlled by NVIDIA and may change between runs; "
         "`models_reported` records what the server said.",
-        "- Rule drops, model drops (`keep=false`) and `llm_error` rows remove those rows from both training variants, "
-        "which shifts the training mix slightly away from numeric and generic labels.", "",
+        "- Numeric rule drops remove those rows from both training variants, which shifts the training mix slightly "
+        "away from numeric labels. Model drops and `llm_error` rows are kept with their raw label (see the audit "
+        "section).", "",
+        *_section_audit(audit),
         "## Data sources and license", "",
         "- **OS-Atlas** ([OS-Copilot/OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data), "
         "Apache-2.0 per the dataset card). Z. Wu et al., \"OS-ATLAS: A Foundation Action Model for Generalist GUI "
@@ -477,6 +535,21 @@ def render_method(stats: dict) -> str:
 def write_method(out_dir: Path, stats: dict) -> Path:
     path = Path(out_dir) / "METHOD.md"
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(render_method(stats), encoding="utf-8")
+    pv = stats.get("run", {}).get("prompt_version", prompts.PROMPT_VERSION)
+    tmp.write_text(render_method(stats, load_audit(out_dir, pv)), encoding="utf-8")
     tmp.replace(path)
     return path
+
+
+def main(argv=None) -> int:
+    """Re-render OUT/METHOD.md from OUT/stats.json (and any review_verdicts_*.json) without contacting a server."""
+    ap = argparse.ArgumentParser(description=main.__doc__)
+    ap.add_argument("--out", type=Path, required=True)
+    args = ap.parse_args(argv)
+    stats = json.loads((args.out / "stats.json").read_text(encoding="utf-8"))
+    print(f"wrote {write_method(args.out, stats)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -22,7 +22,12 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from data_prep.rewrite import meta
+from data_prep.rewrite import meta, validate
+
+# Policy after the v4 human audit (13 of 16 model drops were valid click targets): a row the MODEL dropped
+# (keep=false, any drop_reason, including llm_error) keeps its raw label with instruction_style "raw" and this field
+# set to the drop_reason; only the deterministic numeric rule (model == validate.RULE_MODEL) removes rows.
+RAW_FALLBACK_KEY = "lightning_drop_reason"
 
 
 class MissingRewriteError(ValueError):
@@ -89,10 +94,13 @@ def _apply(manifest, rewrites, extra_raw, extra_natural, allow_missing):
                 raise ValueError(f"rewrite for {row['id']!r} has source {rec['source']!r}, manifest {row['source']!r}")
             if not isinstance(rec.get("keep"), bool):
                 raise ValueError(f"rewrite for {row['id']!r} has non-boolean keep {rec.get('keep')!r}")
-            if not rec["keep"]:
+            if not rec["keep"] and rec.get("model") == validate.RULE_MODEL:
                 dropped.append((row, rec.get("drop_reason") or "unspecified"))
                 continue
-            if rec.get("rewritten"):
+            if not rec["keep"]:
+                out[RAW_FALLBACK_KEY] = rec.get("drop_reason") or "unspecified"
+                style = "raw"
+            elif rec.get("rewritten"):
                 if not isinstance(rec.get("style"), str) or not rec["style"]:
                     raise ValueError(f"rewrite for {row['id']!r} has no style")
                 out["instruction"] = rec["rewritten"]
@@ -107,7 +115,8 @@ def _apply(manifest, rewrites, extra_raw, extra_natural, allow_missing):
 
 def apply_rewrites(manifest: list[dict], rewrites, *, extra_raw=(), extra_natural=(),
                    allow_missing=False) -> list[dict]:
-    """Mixed training manifest: rewritten instructions where keep && rewritten, keep=false selected rows dropped."""
+    """Mixed training manifest: rewritten instructions where keep && rewritten; rows the numeric rule dropped are
+    removed; rows the model dropped keep their raw label (RAW_FALLBACK_KEY records why)."""
     return _apply(manifest, rewrites, extra_raw, extra_natural, allow_missing)[0]
 
 
@@ -160,7 +169,12 @@ def build_stats(manifest, rewrites, rows, dropped, missing) -> dict:
             "by_style": _counts(r["instruction_style"] for r in rows),
             "by_source": by_source,
             "dropped": {"by_source": _counts(r["source"] for r, _ in dropped),
-                        "by_reason": _counts(reason for _, reason in dropped)},
+                        "by_reason": _counts(reason for _, reason in dropped),
+                        "policy": "only numeric rule drops are removed; model drops keep the raw label"},
+            "model_drop_raw_fallback": {
+                "rows": sum(RAW_FALLBACK_KEY in r for r in rows),
+                "by_reason": _counts(r[RAW_FALLBACK_KEY] for r in rows if RAW_FALLBACK_KEY in r),
+                "by_source": _counts(r["source"] for r in rows if RAW_FALLBACK_KEY in r)},
             "missing": {"by_source": _counts(r["source"] for r in missing)}}
 
 
