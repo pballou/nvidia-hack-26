@@ -222,3 +222,16 @@ def test_script_entrypoint_runs_from_repo_root(tmp_path):
                          cwd=REPO, capture_output=True, text=True, timeout=60)
     assert res.returncode == 0, res.stderr
     assert html_path.is_file()
+
+
+def test_unofficial_banner_and_only_boolean_gate_chips(tmp_path):
+    _, out = make_run(tmp_path)
+    stats = json.loads((out / "stats.json").read_text(encoding="utf-8"))
+    stats["run"].update(unofficial_model=True, unofficial_roots=["mlx-community/Lightning-4bit"])
+    stats["gate"].update(first_try_valid_min=0.95, faithfulness="manual: review_sample.py --n 50")
+    (out / "stats.json").write_text(json.dumps(stats), encoding="utf-8")
+    text = rs.build_review(out).read_text(encoding="utf-8")
+    assert "NOT FOR PUBLICATION: unofficial/community checkpoint (mlx-community/Lightning-4bit)" in text
+    assert "first_try_valid_min:" not in text and "faithfulness:" not in text and "drop_rate_ok: FAIL" in text
+    clean = rs.build_review(make_run(tmp_path / "b")[1]).read_text(encoding="utf-8")
+    assert "NOT FOR PUBLICATION" not in clean

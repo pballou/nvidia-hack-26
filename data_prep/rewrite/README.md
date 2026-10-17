@@ -4,9 +4,11 @@ Nemotron 3.5 Lightning rewrites raw OS-Atlas labels ("More options") into short 
 options"). It only sees metadata, never the image. The spec is
 [docs/tasks/T3-lightning-data-engine.md](../../docs/tasks/T3-lightning-data-engine.md).
 
-Which rows get rewritten: 60% of the raw-label rows (`os_atlas/windows`, `androidworld`, `fineweb`), chosen by hash of
-`id`. Natural-instruction sources (`uibert`, `widget_captioning`, `groundcua`) pass through unchanged. The manifest load
-aborts if it finds any ScreenSpot, GroundUI or OS-Atlas Linux/macOS row.
+Which rows get rewritten: 60% of the raw-label rows (`os_atlas/linux`, `macos`, `androidworld`, `fineweb`, `windows`),
+chosen by hash of `id`. Natural-instruction sources (`uibert`, `widget_captioning`, `groundcua`) pass through unchanged.
+The manifest load aborts if it finds any ScreenSpot or GroundUI row. OS-Atlas Linux/macOS are training data (eval option
+C in AGENTS.md): the 28 ScreenSpot-v2 desktop rows captured on the same machines are excluded from the test set instead
+(`benchmarks/screenspot_v2/excluded_rows.json`).
 
 ## Setup
 
@@ -60,6 +62,7 @@ you are:
 - `0`: all rows done.
 - `2`: some rows pending (rerun to finish them).
 - `1`: a fatal error, such as a bad key (401), a bad URL or model (404), or a rejected manifest.
+- `3`: refused: the local server is not serving the official checkpoint (see below).
 
 Rows that failed validation three times are cached as `drop_reason=llm_error`. `--retry-errors` sends them again. If
 a manifest label changes for an id, the cached row is redone.
@@ -73,13 +76,24 @@ a manifest label changes for an id, the cached row is redone.
 | `h200` | `http://127.0.0.1:8000/v1` | `lightning` | `ssh -N -L 8000:localhost:8000 permanent-tan-marmot`, only if the GPU is idle and Kyle agrees |
 
 - `--base-url` and `--model` override the defaults.
-- For local servers whose served name is an alias, set `--model-label` so the real model id is recorded, e.g.
-  `--model-label nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`.
+- **Provenance check.** Only the official `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` checkpoint, or NVIDIA's
+  own hosted endpoint, may produce data we report. Before sending anything, `rewrite.py` reads `GET /models` and records
+  the `root` of the served name (`stats.json` `run.served_model_root`). On `local`/`h200` it refuses with exit code 3
+  unless that root starts with `nvidia/` and has no community/quantization marker (`mlx-community`, `4bit`, `8bit`,
+  `gguf`, `awq`, `gptq`, `-q4`, `-q8`). Serve the checkpoint by its HF id, not a local path, or the check can't see it.
+- `--allow-unofficial-model` is for **plumbing only**. The rows are flagged in the cache, `METHOD.md` and `review.html`
+  carry a NOT FOR PUBLICATION banner, and a later run without the flag regenerates those rows instead of reusing them.
+  Use a separate `OUT` for plumbing anyway.
+- `--model-label` defaults to the served checkpoint (else the model name). It is the `model` written in each row.
 - Every request uses temperature 0.7, top_p 0.95, thinking off, and `--response-format json_object` by default. If the
   server rejects the response format, the client steps down `json_schema` -> `json_object` -> `none`.
-- `--batch-size 20` and `--concurrency 6` are the defaults. 429/5xx responses back off with jitter and honor
-  `Retry-After`. The run stops after 5 consecutive transport failures; tune this with
-  `--max-consecutive-transport-errors`. Rate-limit headers the server sends appear in the summary and in `stats.json`.
+- `--batch-size 20` is the default. `--concurrency` defaults per endpoint: hosted 16, local 4, h200 8.
+- Hosted is slow and queue-bound. Measured 2026-10-17 ~18:05 UTC: 25-126 s per call even for 8-token replies, about 12%
+  of calls over 120 s, no 429 at up to 40 concurrent, no rate-limit headers, and both `json_object` and `json_schema`
+  accepted. So the per-request timeout is 300 s and hosted gets more slots.
+- 429/5xx responses back off with jitter and honor `Retry-After`. The run stops after 5 consecutive transport failures;
+  tune this with `--max-consecutive-transport-errors`. Rate-limit headers the server sends appear in the summary and
+  in `stats.json`.
 
 ## Outputs (in OUT)
 

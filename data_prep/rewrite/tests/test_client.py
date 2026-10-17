@@ -326,6 +326,59 @@ def test_retry_after_parsing():
     assert 0.0 <= cl._retry_after("Wed, 21 Oct 2015 07:28:00 GMT") <= cl.RETRY_AFTER_MAX
 
 
+# --- defaults and served-checkpoint provenance --------------------------------------------------------------------
+
+def test_default_timeout_and_per_endpoint_concurrency():
+    c = LightningClient("local", transport=httpx.MockTransport(Script()))
+    assert c._http.timeout.read == 300.0  # hosted calls took 25-126 s on 2026-10-17
+    asyncio.run(c.aclose())
+    assert cl.DEFAULT_CONCURRENCY == {"hosted": 16, "local": 4, "h200": 8}
+
+
+MODELS = {"object": "list", "data": [
+    {"id": "lightning", "object": "model", "root": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit"},
+    {"id": "other", "object": "model", "root": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"}]}
+
+
+def list_models(handler, **kw):
+    c, _ = make(handler, **kw)
+
+    async def go():
+        try:
+            return await c.list_models()
+        finally:
+            await c.aclose()
+    return asyncio.run(go())
+
+
+def test_list_models_get_and_auth():
+    h = Script(httpx.Response(200, json=MODELS))
+    assert list_models(h, endpoint="hosted", api_key=KEY) == MODELS["data"]
+    [req] = h.requests
+    assert req.method == "GET" and str(req.url) == "https://integrate.api.nvidia.com/v1/models"
+    assert req.headers["authorization"] == f"Bearer {KEY}"
+
+
+@pytest.mark.parametrize("step", [httpx.Response(404, text="not found"), httpx.Response(500, text="boom"),
+                                  httpx.Response(200, text="not json"), httpx.Response(200, json={"data": "x"}),
+                                  httpx.Response(200, json=[1, 2]), httpx.ConnectError, httpx.ReadTimeout])
+def test_list_models_tolerates_failure(step):
+    assert list_models(Script(step)) == []
+
+
+def test_served_root_and_official_check():
+    assert cl.served_root(MODELS["data"], "lightning") == "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit"
+    assert cl.served_root(MODELS["data"], "other") == cl.OFFICIAL_CHECKPOINT
+    assert cl.served_root(MODELS["data"], "missing") is None and cl.served_root([], "lightning") is None
+    assert cl.served_root([{"id": "lightning"}, "junk"], "lightning") is None
+    assert cl.is_official_root(cl.OFFICIAL_CHECKPOINT)
+    for root in (None, "", "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", "nvidia/Lightning-4bit",
+                 "nvidia/Lightning-8bit", "nvidia/Lightning-GGUF", "nvidia/Lightning-AWQ", "nvidia/Lightning-GPTQ",
+                 "nvidia/Lightning-Q4_K_M", "nvidia/x-Q8", "NVIDIA/Nemotron",
+                 "/home/ubuntu/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16", "unsloth/Nemotron-BF16"):
+        assert not cl.is_official_root(root), root
+
+
 # --- load_api_key -------------------------------------------------------------------------------------------------
 
 ENV = "T3_TEST_LIGHTNING_KEY"

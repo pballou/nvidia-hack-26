@@ -6,6 +6,9 @@ import re
 import httpx
 
 MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+OFFICIAL_ROOT = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+COMMUNITY_ROOT = "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit"
+SERVED_IDS = ("lightning", MODEL)
 NUMERIC = re.compile(r"[\d\s.,:%$+\-/]+")
 MALFORMED = 'Sure! Here are the rewrites: {"items": [{"k": 1, "keep": tru'
 
@@ -52,9 +55,17 @@ def completion(text: str, *, finish_reason="stop", usage=(900, 120), model=MODEL
         "usage": {"prompt_tokens": usage[0], "completion_tokens": usage[1], "total_tokens": usage[0] + usage[1]}})
 
 
+def models_list(root=OFFICIAL_ROOT, ids=SERVED_IDS) -> dict:
+    """A vLLM-style GET /models body; root=None leaves the "root" key out (as hosted APIs do)."""
+    return {"object": "list", "data": [{"id": i, "object": "model", "owned_by": "vllm",
+                                        **({"root": root} if root is not None else {})} for i in ids]}
+
+
 def make_handler(behavior="ok", *, malformed_first=0, length_first=0, drop_k=(), fail_first=0, fail_status=429,
-                 retry_after=None, invalid_labels=(), usage=(900, 120), model=MODEL):
-    """Return handler(request) for httpx.MockTransport. handler.calls records every request (body, headers, items).
+                 retry_after=None, invalid_labels=(), usage=(900, 120), model=MODEL, served_root=OFFICIAL_ROOT,
+                 models_status=200):
+    """Return handler(request) for httpx.MockTransport. handler.calls records every chat request (body, headers,
+    items); GET .../models is answered separately (served_root, models_status) and recorded in handler.model_calls.
 
     behavior: "ok"; "unauthorized" (always 401); "down" (always 503); "offline" (always raises httpx.ConnectError);
       or callable(request, body, call_index) -> httpx.Response | None (None falls through to the knobs below).
@@ -63,10 +74,15 @@ def make_handler(behavior="ok", *, malformed_first=0, length_first=0, drop_k=(),
     drop_k: item numbers omitted from multi-item replies (single-row retries answer normally).
     invalid_labels: labels that always get an invalid item (empty instruction), to force llm_error.
     """
-    calls, answered = [], [0]
+    calls, model_calls, answered = [], [], [0]
     drop_k, invalid_labels = set(drop_k if not isinstance(drop_k, int) else [drop_k]), set(invalid_labels)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith("/models"):
+            model_calls.append({"headers": dict(request.headers), "url": str(request.url)})
+            if models_status != 200:
+                return httpx.Response(models_status, json={"detail": "no models for you"})
+            return httpx.Response(200, json=models_list(served_root))
         body = json.loads(request.content)
         items = batch_items(body)
         n = len(calls)
@@ -100,5 +116,5 @@ def make_handler(behavior="ok", *, malformed_first=0, length_first=0, drop_k=(),
                 out.append(plausible(item))
         return completion(json.dumps({"items": out}), usage=usage, model=model)
 
-    handler.calls = calls
+    handler.calls, handler.model_calls = calls, model_calls
     return handler

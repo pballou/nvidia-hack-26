@@ -23,6 +23,7 @@ COLOR_WORDS = frozenset("red green blue yellow orange purple pink black white gr
                         "golden silver".split())
 SHAPE_WORDS = frozenset("gear cog magnifying magnifier hamburger kebab star heart bell trash pencil arrow chevron "
                         "circle circular square triangle triangular round rounded oval plus checkmark tick".split())
+STOPWORDS = frozenset("a an and the of to in on for at by with from or your my this that is it".split())
 MIN_WORDS, MAX_WORDS = 2, 12
 TARGET_WORDS = (3, 8)
 
@@ -115,6 +116,27 @@ def _proper_tokens(label: str) -> list[str]:
     return out
 
 
+def _content_tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) >= 2 and t not in STOPWORDS]
+
+
+def _neighbor_swap(s: str, meta: dict) -> str | None:
+    """Neighbor label named by a functional/descriptive instruction that shares no content word with the target's
+    label: the model probably described the neighbor ("Camera" -> "open more options"). Positional styles may name
+    neighbors, so they are not checked."""
+    if meta.get("style") == "positional":
+        return None
+    low, label = s.lower(), " ".join(str(meta.get("label") or "").split())
+    if any(t in low for t in _content_tokens(label)):
+        return None
+    for n in meta.get("neighbors") or ():
+        other = " ".join(str(n.get("label") or "").split()) if isinstance(n, dict) else ""
+        if (other and other.lower() != label.lower() and _content_tokens(other)
+                and re.search(r"(?<!\w)" + re.escape(other.lower()) + r"(?!\w)", low)):
+            return other
+    return None
+
+
 def _lint(s: str, meta: dict) -> tuple[str | None, list[str]]:
     label = meta.get("label") or ""
     neighbor_labels = [str(n.get("label") or "") for n in meta.get("neighbors") or () if isinstance(n, dict)]
@@ -142,6 +164,9 @@ def _lint(s: str, meta: dict) -> tuple[str | None, list[str]]:
     if s.lower() == normalize_instruction(label).lower():
         warnings.append("unchanged")
     warnings += [f"proper_noun:{tok}" for tok in _proper_tokens(label) if tok.lower() not in s.lower()]
+    swapped = _neighbor_swap(s, meta)
+    if swapped:
+        warnings.append(f"neighbor_swap:{swapped}")
     return error, warnings
 
 

@@ -202,8 +202,13 @@ def header_html(stats: dict, rewrites: list[dict], n_kept_pop: int, n_drop_pop: 
     run, quality, gate = stats.get("run") or {}, stats.get("quality") or {}, stats.get("gate") or {}
     lines = [f"rewrites <b>{len(rewrites)}</b> · kept <b>{kept}</b> · dropped <b>{len(rewrites) - kept}</b>"
              + (f" ({reason_txt})" if reason_txt else "")]
+    if run.get("unofficial_model"):
+        roots = ", ".join(run.get("unofficial_roots") or [str(run.get("served_model_root") or "unverified")])
+        lines.insert(0, f'<span class="chip bad">NOT FOR PUBLICATION: unofficial/community checkpoint ({esc(roots)}); '
+                        'plumbing only</span>')
     if stats:
-        gates = " ".join(chip(f"{k}: {'ok' if v else 'FAIL'}", "ok" if v else "bad") for k, v in sorted(gate.items()))
+        gates = " ".join(chip(f"{k}: {'ok' if v else 'FAIL'}", "ok" if v else "bad")
+                         for k, v in sorted(gate.items()) if isinstance(v, bool))
         lines.append(f"first-try valid <b>{pct(quality.get('first_try_valid_rate'))}</b> · batch JSON ok "
                      f"<b>{pct(quality.get('batch_json_ok_rate'))}</b> · drop rate (raw, excl. llm_error) "
                      f"<b>{pct(quality.get('drop_rate_raw'))}</b> · endpoint {esc(run.get('endpoint'))}"

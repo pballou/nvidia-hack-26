@@ -277,3 +277,20 @@ def test_warnings_returned_with_valid_item_only_in_batch():
     text = json.dumps({"items": [item(1, "open the repository page")]})
     ok, errors, warnings, _ = v.validate_batch(text, [meta(label="GitHub repo")])
     assert list(ok) == [1] and errors == {} and warnings == {1: ["proper_noun:GitHub"]}
+
+
+@pytest.mark.parametrize("label,neighbors,style,text,warning", [
+    ("Camera", ("More options", "Gmail"), "functional", "open more options", "neighbor_swap:More options"),
+    ("iPhone 15 Pro", ("USB-C cable",), "descriptive", "read about USB-C cable", "neighbor_swap:USB-C cable"),
+    ("Camera", ("More options",), "positional", "the button above More options", None),   # positional may name them
+    ("Camera", ("More options",), "functional", "open the camera options", None),         # shares a label word
+    ("Navigate up", ("Search",), "functional", "go back", None),                          # synonym, no neighbor
+    ("Share", ("Share", "Menu"), "functional", "open the share sheet", None),
+    ("Image", ("Image",), "descriptive", "the large image", None),                       # same label as the target
+    ("Inbox", ("Search",), "functional", "open the research inbox", None),
+    ("Back", ("Search",), "functional", "start a research query", None),                 # "search" inside a word
+])
+def test_neighbor_swap_warning(label, neighbors, style, text, warning):
+    rewritten, error, warnings = check(text, meta(label=label, neighbors=neighbors, style=style))
+    assert error is None and rewritten == text
+    assert [w for w in warnings if w.startswith("neighbor_swap")] == ([warning] if warning else [])

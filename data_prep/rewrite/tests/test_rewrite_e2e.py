@@ -75,7 +75,7 @@ def test_happy_path_writes_outputs_with_expected_counts(manifest, tmp_path):
         assert list(rec) == list(rewrite.PUBLIC_FIELDS)
         assert rec["original"] == row["instruction"] and rec["source"] == row["source"]
         assert rec["style"] == meta.assign_style(row["id"]) and rec["prompt_version"] == PV
-        assert rec["model"] == "lightning" and rec["ts"] == TS
+        assert rec["model"] == fake.OFFICIAL_ROOT and rec["ts"] == TS  # --model-label defaults to the served root
         assert (rec["rewritten"] is not None) == rec["keep"]
         assert rec["keep"] or rec["drop_reason"] in validate.DROP_REASONS
         if fake.NUMERIC.fullmatch(row["instruction"]):
@@ -101,6 +101,10 @@ def test_happy_path_writes_outputs_with_expected_counts(manifest, tmp_path):
     assert stats["manifest"]["rows"] == len(read_jsonl(manifest))
     assert stats["manifest"]["sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert stats["run"]["models_reported"] == [fake.MODEL] and stats["run"]["prompt_version"] == PV
+    assert stats["run"]["served_model_root"] == fake.OFFICIAL_ROOT and stats["run"]["unofficial_model"] is False
+    assert stats["run"]["concurrency"] == 4 and len(handler.model_calls) == 1  # local default; one GET /models
+    assert stats["rewrites"]["unofficial_records"] == 0
+    assert stats["rewrites"]["served_model_roots"] == {fake.OFFICIAL_ROOT: len(sel)}
     assert set(stats) >= {"run", "manifest", "rewrites", "quality", "requests", "throughput", "pending_rows", "gate"}
     assert json.loads((out / "stats.json").read_text()) == json.loads(json.dumps(stats))
     text = (out / "METHOD.md").read_text(encoding="utf-8")
@@ -108,6 +112,8 @@ def test_happy_path_writes_outputs_with_expected_counts(manifest, tmp_path):
     assert all(m["content"] in text for m in prompts.FEW_SHOT)
     entry = cached(out)[sel[0]["id"]]
     assert entry["attempts"] == 1 and entry["first_try_valid"] and entry["endpoint"] == "local"
+    assert entry["served_model_root"] == fake.OFFICIAL_ROOT and entry["unofficial_model"] is False
+    assert "NOT FOR PUBLICATION" not in text
 
 
 def test_resume_makes_zero_requests_and_identical_output(manifest, tmp_path):
@@ -293,7 +299,7 @@ def test_show_prompt_prints_first_batch_without_requests(manifest, tmp_path, cap
 
 @pytest.mark.parametrize("bad", [
     {"id": "screenspot:web_1:0", "source": "screenspot/web", "image_path": "images/screenspot/web_1.png"},
-    {"id": "linux:shot_1:0", "source": "os_atlas/linux", "image_path": "images/linux/shot_1.png"},
+    {"id": "groundui:shot_1:0", "source": "groundui_18k", "image_path": "images/groundui/shot_1.png"},
 ])
 def test_contaminated_manifest_aborts_before_any_request(manifest, tmp_path, bad):
     row = {"img_w": 640, "img_h": 400, "instruction": "Settings", "bbox": [1, 1, 50, 20], "platform": "desktop",
@@ -351,3 +357,97 @@ def test_cli_runs_as_a_script_from_the_repo_root(manifest, tmp_path):
     proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout)[0]["content"] == prompts.SYSTEM_PROMPT
+
+
+def test_linux_macos_rows_are_selected_and_rewritten(tmp_path):
+    """Eval option C: OS-Atlas Linux/macOS are raw-label training sources like the others."""
+    manifest = synth.make_manifest(tmp_path / "desk", n_images=6, per_image=6, write_images=False,
+                                   sources=("os_atlas/linux", "os_atlas/macos"))
+    sel = selected(manifest)
+    assert {r["source"] for r in sel} == {"os_atlas/linux", "os_atlas/macos"}
+    stats = run_rewrite(manifest, tmp_path / "out", fake.make_handler())
+    assert stats["exit_code"] == 0 and stats["manifest"]["targets"] == len(sel)
+    assert set(stats["rewrites"]["by_source"]) == {"os_atlas/linux", "os_atlas/macos"}
+    assert {r["source"] for r in read_jsonl(tmp_path / "out" / "rewrites.jsonl")} == {"os_atlas/linux", "os_atlas/macos"}
+    assert stats["run"]["raw_sources"] == sorted(meta.RAW_LABEL_SOURCES)
+
+
+# --- served-checkpoint provenance (only the official NVIDIA checkpoint or NVIDIA's hosted API may be reported) ---
+
+@pytest.mark.parametrize("root,models_status", [(fake.COMMUNITY_ROOT, 200), ("someone/Lightning-30B-gguf", 200),
+                                                ("nvidia/Lightning-AWQ", 200), ("/Users/me/models/lightning", 200),
+                                                (None, 200), (fake.OFFICIAL_ROOT, 404)])
+def test_unofficial_or_unverified_checkpoint_is_refused(manifest, tmp_path, capsys, root, models_status):
+    out = tmp_path / "out"
+    handler = fake.make_handler(served_root=root, models_status=models_status)
+    stats = run_rewrite(manifest, out, handler)
+    assert stats["exit_code"] == 3 and "--allow-unofficial-model" in stats["error"]
+    assert handler.calls == [] and len(handler.model_calls) == 1
+    assert not (out / "rewrites.jsonl").exists() and not (out / "METHOD.md").exists()
+    assert fake.OFFICIAL_ROOT in stats["error"] and "--allow-unofficial-model" in capsys.readouterr().err
+    args = ["--manifest", str(manifest), "--out", str(out), "--endpoint", "h200"]
+    assert asyncio.run(rewrite.run(rewrite.build_parser().parse_args(args), transport=httpx.MockTransport(handler),
+                                   now=lambda: TS))["exit_code"] == 3
+
+
+def test_allow_unofficial_model_marks_outputs_and_never_leaks_into_an_official_run(manifest, tmp_path):
+    out, sel = tmp_path / "out", selected(manifest)
+    plumb = fake.make_handler(served_root=fake.COMMUNITY_ROOT)
+    stats = run_rewrite(manifest, out, plumb, "--allow-unofficial-model")
+    assert stats["exit_code"] == 0 and plumb.calls
+    run = stats["run"]
+    assert run["unofficial_model"] is True and run["unofficial_roots"] == [fake.COMMUNITY_ROOT]
+    assert run["served_model_root"] == run["model_label"] == fake.COMMUNITY_ROOT
+    text = (out / "METHOD.md").read_text(encoding="utf-8")
+    assert text.startswith(f"**NOT FOR PUBLICATION: generated with an unofficial/community checkpoint "
+                           f"({fake.COMMUNITY_ROOT}); plumbing only**")
+    assert {r["model"] for r in read_jsonl(out / "rewrites.jsonl")} == {fake.COMMUNITY_ROOT}
+    assert all(r["unofficial_model"] for r in cached(out).values())
+
+    # Same cache, official checkpoint, no flag: every plumbing row is stale and is re-generated.
+    official = fake.make_handler()
+    stats = run_rewrite(manifest, out, official)
+    assert stats["exit_code"] == 0 and stats["run"]["unofficial_model"] is False
+    assert sum(len(c["items"]) for c in official.calls) == len(sel)
+    assert {r["model"] for r in read_jsonl(out / "rewrites.jsonl")} == {fake.OFFICIAL_ROOT}
+    assert not any(r["unofficial_model"] for r in cached(out).values())
+    assert stats["requests"]["all_runs"]["n"] == stats["requests"]["this_run"]["n"] == len(official.calls)
+    assert len(logged(out)) == len(plumb.calls) + len(official.calls)  # the log keeps both, flagged
+    assert "NOT FOR PUBLICATION" not in (out / "METHOD.md").read_text(encoding="utf-8")
+
+
+def test_unofficial_server_with_complete_official_cache_sends_nothing_and_stays_publishable(manifest, tmp_path):
+    out = tmp_path / "out"
+    run_rewrite(manifest, out, fake.make_handler())
+    before = (out / "rewrites.jsonl").read_bytes()
+    plumb = fake.make_handler(served_root=fake.COMMUNITY_ROOT)
+    stats = run_rewrite(manifest, out, plumb)  # nothing pending: no refusal, no requests
+    assert stats["exit_code"] == 0 and plumb.calls == [] and stats["run"]["unofficial_model"] is False
+    assert (out / "rewrites.jsonl").read_bytes() == before
+    assert stats["run"]["served_model_root"] == fake.COMMUNITY_ROOT
+    assert "NOT FOR PUBLICATION" not in (out / "METHOD.md").read_text(encoding="utf-8")
+
+
+def test_hosted_is_official_without_a_root_and_uses_hosted_concurrency(manifest, tmp_path):
+    handler = fake.make_handler(served_root=None)
+    stats = run_rewrite(manifest, tmp_path / "out", handler, endpoint="hosted")
+    run = stats["run"]
+    assert stats["exit_code"] == 0 and run["unofficial_model"] is False and run["served_model_root"] is None
+    assert run["model_label"] == fake.MODEL and run["concurrency"] == 16
+    assert handler.model_calls[0]["url"] == "https://integrate.api.nvidia.com/v1/models"
+    assert handler.model_calls[0]["headers"]["authorization"] == f"Bearer {KEY}"
+    stats = run_rewrite(manifest, tmp_path / "o2", fake.make_handler(served_root=None), "--concurrency", 3,
+                        "--model-label", "custom-label", endpoint="hosted")
+    assert stats["run"]["concurrency"] == 3 and stats["run"]["model_label"] == "custom-label"
+
+
+def test_hosted_endpoint_pointed_at_a_local_server_is_checked(manifest, tmp_path):
+    handler = fake.make_handler(served_root=fake.COMMUNITY_ROOT)
+    stats = run_rewrite(manifest, tmp_path / "out", handler, "--base-url", "http://127.0.0.1:8000/v1",
+                        endpoint="hosted")
+    assert stats["exit_code"] == 3 and handler.calls == []
+
+
+def test_h200_default_concurrency(manifest, tmp_path):
+    stats = run_rewrite(manifest, tmp_path / "out", fake.make_handler(), endpoint="h200")
+    assert stats["exit_code"] == 0 and stats["run"]["concurrency"] == 8

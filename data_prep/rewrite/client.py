@@ -32,6 +32,10 @@ ENDPOINTS = {
     "local": Endpoint("local", "http://127.0.0.1:8000/v1", "lightning", None),
     "h200": Endpoint("h200", "http://127.0.0.1:8000/v1", "lightning", None),  # box :8000 via ssh tunnel
 }
+# Hosted is slow and queue-bound (2026-10-17: 25-126 s per call, no 429 up to 40 concurrent), so it gets more slots.
+DEFAULT_CONCURRENCY = {"hosted": 16, "local": 4, "h200": 8}
+OFFICIAL_CHECKPOINT = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+UNOFFICIAL_MARKERS = ("mlx-community", "4bit", "8bit", "gguf", "awq", "gptq", "-q4", "-q8")
 SAMPLING = {"temperature": 0.7, "top_p": 0.95, "max_tokens": 4096, "chat_template_kwargs": {"enable_thinking": False}}
 RESPONSE_FORMATS = ("json_schema", "json_object", "none")  # downgrade order
 DOWNGRADE_STATUS = frozenset({400, 422})
@@ -108,6 +112,19 @@ def _retry_after(value: str | None) -> float | None:
     return min(max(secs, 0.0), RETRY_AFTER_MAX)
 
 
+def served_root(models: list[dict], model: str) -> str | None:
+    """The checkpoint ("root") a vLLM-style /models list reports for served name `model`, or None."""
+    for m in models:
+        if isinstance(m, dict) and m.get("id") == model and isinstance(m.get("root"), str) and m["root"].strip():
+            return m["root"].strip()
+    return None
+
+
+def is_official_root(root: str | None) -> bool:
+    """True only for an nvidia/ checkpoint id without a community/quantization marker (bounty provenance rule)."""
+    return bool(root) and root.startswith("nvidia/") and not any(m in root.lower() for m in UNOFFICIAL_MARKERS)
+
+
 def _retryable(status: int) -> bool:
     return status in (408, 429) or status >= 500
 
@@ -117,7 +134,7 @@ class LightningClient:
 
     def __init__(self, endpoint: Endpoint | str, *, api_key: str | None = None, base_url: str | None = None,
                  model: str | None = None, concurrency: int = 6, max_attempts: int = 6, backoff_base: float = 2.0,
-                 backoff_max: float = 60.0, timeout_s: float = 180.0, response_format: str = "json_object",
+                 backoff_max: float = 60.0, timeout_s: float = 300.0, response_format: str = "json_object",
                  transport: httpx.AsyncBaseTransport | None = None, sleep=asyncio.sleep):
         if response_format not in RESPONSE_FORMATS:
             raise ValueError(f"response_format must be one of {RESPONSE_FORMATS}, got {response_format!r}")
@@ -127,6 +144,7 @@ class LightningClient:
         self.base_url = (base_url or self.endpoint.base_url).rstrip("/")
         self.model = model or self.endpoint.model
         self.url = f"{self.base_url}/chat/completions"
+        self.models_url = f"{self.base_url}/models"
         self.response_format = response_format
         self.concurrency, self.max_attempts = concurrency, max_attempts
         self.backoff_base, self.backoff_max = backoff_base, backoff_max
@@ -151,6 +169,15 @@ class LightningClient:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+    async def list_models(self, timeout_s: float = 30.0) -> list[dict]:
+        """GET {base_url}/models -> its "data" list; any failure (HTTP error, timeout, bad JSON) -> []."""
+        try:
+            resp = await self._http.get(self.models_url, timeout=timeout_s)
+            data = resp.json().get("data") if resp.status_code == 200 else None
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return []
+        return [m for m in data if isinstance(m, dict)] if isinstance(data, list) else []
 
     async def complete(self, messages: list[dict], *, json_schema: dict | None = None) -> Completion:
         """POST one chat completion; the concurrency slot is held through retries so backoff also throttles."""
