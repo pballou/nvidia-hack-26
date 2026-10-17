@@ -17,7 +17,56 @@ aren't accessible.
 
 ## Quick start
 
-*TBD (Patrick): commands to run the localhost app and the models.*
+Tested on macOS (Apple silicon) with [uv](https://docs.astral.sh/uv/). It needs
+Python 3.13.14, which uv downloads for you.
+
+**1. Setup (once).**
+
+```bash
+git clone https://github.com/pballou/nvidia-hack-26.git && cd nvidia-hack-26
+uv venv --python 3.13.14 .venv-gym
+uv pip install --python .venv-gym/bin/python "nemo-gym==0.7.0" -r sandbox/requirements.txt -r console/requirements.txt
+.venv-gym/bin/playwright install chromium
+cp .env.example .env        # then set NVIDIA_API_KEY (build.nvidia.com) for hosted Lightning
+```
+
+**2. Try it without any models.** This starts the sandbox app (:8090) and the GUI
+assist console (:8095) with a scripted mock agent that clicks by pixel coordinates:
+
+```bash
+scripts/demo_up.sh --agent mock
+```
+
+Open <http://127.0.0.1:8095>, pick **"Turn on high contrast."** in the task list and
+press Enter. You'll see each step, where the agent clicked, and a ✓/✗ checked against
+the sandbox's own state (the agent never sees that state).
+
+**3. Bring up the models** (details: [docs/local-mac.md](docs/local-mac.md)).
+
+- **Grounder VLM on :8001.** Tunnel to the GPU box (served names `base` and
+  `grounder`, [docs/gpu-box.md](docs/gpu-box.md) §3):
+  `ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 permanent-tan-marmot`.
+  Or serve it on the Mac (docs/local-mac.md §3b).
+- **Lightning:** either hosted (only `NVIDIA_API_KEY` in `.env`; slow, 25–80 s per
+  step), or local on :8000 via vllm-metal (docs/local-mac.md §2).
+
+**4. Run the real agent.**
+
+```bash
+scripts/demo_up.sh --agent real --lightning hosted     # or --lightning local; add --headed to watch the browser
+```
+
+The script checks that :8001 and Lightning respond, then prints the console URL. In
+the console, choose Grounder `base` (before SFT) or `grounder`, then run an easy task
+such as "Make the text bigger, I can't read this."
+
+Run the pieces separately with `scripts/run_sandbox.sh` and
+`scripts/run_console.sh --agent mock|real [--headed]`.
+
+Tests:
+`.venv-gym/bin/python -m pytest sandbox/tests console/tests -q`. They cover the
+scripted oracle that solves all 12 tasks, wrong-action checks, session isolation,
+pixel determinism, the no-egress check, and the console API.
 
 ## Tech stack & architecture
 
