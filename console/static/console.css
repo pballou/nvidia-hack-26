@@ -103,13 +103,13 @@ html.hc :focus-visible { outline-width: 4px; }
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.6rem 1.25rem;
+  padding: 0.45rem 1.25rem;
   background: var(--header-bg);
   color: var(--header-text);
 }
 html.hc .app-header { border-bottom: 2px solid #ffffff; }
 .brand { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
-.brand h1 { font-size: 1.55rem; font-weight: 800; letter-spacing: -0.01em; }
+.brand h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.01em; }
 .tagline { color: var(--header-muted); font-size: 1rem; }
 .header-tools { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
 
@@ -223,11 +223,11 @@ html.hc #request-note { border: 1px solid var(--warn); }
 }
 .options-summary { font-weight: 400; color: var(--muted); margin-left: 0.35rem; font-size: 0.9rem; }
 .options[open] .options-summary { display: none; }
-.options-body { display: grid; gap: 0.3rem; margin-top: 0.3rem; }
-.opt { border: 0; margin: 0; padding: 0; min-width: 0; display: flow-root; }
-.opt legend { float: left; width: 6rem; padding: 0.3rem 0 0; font-weight: 650; }
+.options-body { display: grid; gap: 0.45rem; margin-top: 0.3rem; }
+.opt { border: 0; margin: 0; padding: 0; min-width: 0; }
+.opt legend { padding: 0 0 0.15rem; font-weight: 700; font-size: 0.95rem; line-height: 1.3; }
+.legend-hint { font-weight: 400; font-size: 0.8rem; color: var(--muted); margin-left: 0.3rem; }
 .opt:disabled .seg label { opacity: 0.55; cursor: not-allowed; }
-.options-help { margin-top: 0.1rem; }
 
 .seg { display: inline-flex; flex-wrap: wrap; }
 .seg input {
@@ -239,8 +239,9 @@ html.hc #request-note { border: 1px solid var(--warn); }
 }
 .seg label {
   position: relative;
-  padding: 0.2rem 0.95rem;
+  padding: 0.2rem 0.85rem;
   min-height: 2.15rem;
+  white-space: nowrap;
   display: inline-flex; align-items: center;
   border: 2px solid var(--border-strong);
   margin-left: -2px;
@@ -306,7 +307,7 @@ kbd {
 
 /* --- step log ---------------------------------------------------------------- */
 
-.log { flex: 1; min-height: 9rem; display: flex; flex-direction: column; border-top: 1px solid var(--border); padding-top: 0.6rem; }
+.log { flex: 1; min-height: 6rem; display: flex; flex-direction: column; border-top: 1px solid var(--border); padding-top: 0.6rem; }
 html.hc .log { border-top-width: 2px; }
 .log-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; }
 .log-head h2 { font-size: 1.15rem; }
@@ -332,6 +333,32 @@ html.hc .step[data-state="warn"] { border-left-color: var(--warn); }
 .step[data-state="active"] { border-left-color: var(--accent); }
 .step.is-shown { background: var(--accent-weak); }
 html.hc .step.is-shown { border-color: var(--accent); }
+
+/* Older steps shrink to their plain-words line, so the whole run reads as a list. The newest step
+   (or the one being replayed) shows everything. Errors and warnings stay visible. */
+.step.is-compact { padding-top: 0.3rem; padding-bottom: 0.3rem; cursor: pointer; }
+.step.is-compact .step-reason,
+.step.is-compact .step-meta,
+.step.is-compact .step-screen,
+.step.is-compact .step-lines > :not(.step-error):not(.step-warn) { display: none; }
+.step.is-compact .step-num { width: 1.6rem; height: 1.6rem; font-size: 0.8rem; margin: 0.1rem 0 0 0.2rem; }
+.step.is-compact .step-action {
+  font-size: 0.95rem; font-weight: 600;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.step.is-compact .chip-ok, .step.is-compact .chip-info { display: none; }  /* the green border already says it */
+.step.is-compact:hover { background: var(--accent-weak); }
+
+/* A soft fade where the log is scrolled under its top edge (a sticky overlay, so focus outlines are untouched). */
+.log-scroll::before {
+  content: "";
+  position: sticky; top: 0; z-index: 3;
+  display: block; height: 1.6rem; margin-bottom: -1.6rem;
+  background: linear-gradient(var(--panel), transparent);
+  pointer-events: none;
+  visibility: hidden;
+}
+.log-scroll.is-scrolled::before { visibility: visible; }
 
 .step-num {
   width: 2rem; height: 2rem;
@@ -377,11 +404,14 @@ html.hc .step.is-shown { border-color: var(--accent); }
   color: var(--accent); text-decoration: underline; font-size: inherit; cursor: pointer;
 }
 
-.pending {
+.pending {  /* sticky: what the agent is doing now stays readable even when the newest step is tall */
+  position: sticky; bottom: 0; z-index: 2;
   margin-top: 0.5rem;
   padding: 0.45rem 0.7rem;
   border: 2px dashed var(--accent);
   border-radius: 0.4rem;
+  background: var(--panel);
+  box-shadow: 0 -0.6rem 0.6rem var(--panel);
   color: var(--accent);
   font-weight: 600;
   font-size: 0.95rem;
@@ -434,20 +464,26 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   color: var(--muted);
   font-size: 1.05rem;
 }
-.screen-caption { flex: 1; min-width: 0; font-size: 1.05rem; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.screen-caption {
+  flex: 1; min-width: 0;
+  font-size: 1.05rem; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.viewer-bar { min-height: 2.75rem; }
 .view-toggle, .btn-live { flex: none; }
 .screen-caption .chip { margin-left: 0.4rem; vertical-align: 0.1rem; }
 
 .thumbs {
   display: flex;
+  flex: none;
   gap: 0.5rem;
   overflow-x: auto;
   padding: 0.3rem 0.2rem 0.4rem;
-  min-height: 0;
+  min-height: calc(5.5rem * 800 / 1280 + 0.7rem + 4px);
 }
-.thumbs:empty { display: none; }
 .thumb {
-  flex: 0 0 auto;
+  flex: 0 1 5.5rem;
+  min-width: 3.6rem;
   position: relative;
   padding: 0;
   border: 2px solid var(--border);
@@ -456,7 +492,7 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   cursor: pointer;
   line-height: 0;
 }
-.thumb img { width: 5.5rem; aspect-ratio: 1280 / 800; display: block; border-radius: 0.2rem; }
+.thumb img { width: 100%; aspect-ratio: 1280 / 800; display: block; border-radius: 0.2rem; }
 .thumb-num {
   position: absolute; left: 0.2rem; top: 0.2rem;
   padding: 0.05rem 0.35rem;
@@ -488,8 +524,16 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
 .banner[data-tone="error"] .banner-icon, .banner[data-tone="error"] .banner-title { color: var(--bad); }
 .banner[data-tone="stopped"] .banner-icon, .banner[data-tone="stopped"] .banner-title { color: var(--warn); }
 .banner-title { font-size: 1.35rem; font-weight: 800; line-height: 1.2; }
-.banner-label { font-size: 0.78rem; font-weight: 700; margin-top: 0.1rem; }
-.banner-expl { font-size: 0.8rem; color: var(--muted); margin-top: 0.1rem; overflow-wrap: anywhere; }
+.banner-label { font-size: 0.85rem; font-weight: 700; margin-top: 0.15rem; text-wrap: balance; }
+.banner-expl { font-size: 0.85rem; color: var(--muted); margin-top: 0.1rem; overflow-wrap: anywhere; }
+.banner-expl .btn-link { margin-left: 0.15rem; font-weight: 600; }
+.banner-details {
+  margin: 0.25rem 0 0; padding: 0.3rem 0.5rem 0.3rem 1.4rem;
+  max-height: 7.5rem; overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.74rem; line-height: 1.35;
+  overflow-wrap: anywhere;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 0.3rem;
+}
 .banner-agent { border-left: 2px solid var(--border); padding-left: 0.9rem; }
 .banner-summary { font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; line-height: 1.35; }
 .banner-claim, .banner-extra { font-size: 0.8rem; color: var(--muted); margin-top: 0.15rem; }
@@ -515,4 +559,6 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   .seg input:checked + label { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .btn:disabled { color: GrayText; border-color: GrayText; }
   .thumb[aria-current="true"] { outline: 3px solid Highlight; outline-offset: 1px; }
+  .log-scroll::before { display: none; }
+  .pending { box-shadow: none; }
 }

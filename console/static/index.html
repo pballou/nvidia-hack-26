@@ -45,16 +45,16 @@
           <summary>Options <span id="options-summary" class="options-summary"></span></summary>
           <div class="options-body">
             <fieldset class="opt" id="opt-grounder">
-              <legend>Grounder</legend>
+              <legend>Grounder <span class="legend-hint">the 2B vision model that finds each click</span></legend>
               <div class="seg">
                 <input type="radio" id="grounder-base" name="grounder" value="base" checked>
-                <label for="grounder-base">base</label>
+                <label for="grounder-base">base (adapter off)</label>
                 <input type="radio" id="grounder-grounder" name="grounder" value="grounder">
-                <label for="grounder-grounder">grounder</label>
+                <label for="grounder-grounder">grounder (LoRA)</label>
               </div>
             </fieldset>
             <fieldset class="opt" id="opt-thinking">
-              <legend>Thinking</legend>
+              <legend>Thinking <span class="legend-hint">retry = think only after a miss</span></legend>
               <div class="seg">
                 <input type="radio" id="thinking-off" name="thinking" value="off">
                 <label for="thinking-off">off</label>
@@ -65,15 +65,14 @@
               </div>
             </fieldset>
             <fieldset class="opt" id="opt-lightning">
-              <legend>Lightning</legend>
+              <legend>Lightning <span class="legend-hint">the planner</span></legend>
               <div class="seg">
-                <input type="radio" id="lightning-hosted" name="lightning" value="hosted" checked>
-                <label for="lightning-hosted">hosted</label>
-                <input type="radio" id="lightning-local" name="lightning" value="local">
-                <label for="lightning-local">local</label>
+                <input type="radio" id="lightning-local" name="lightning" value="local" checked>
+                <label for="lightning-local">Local (BF16 on :8000)</label>
+                <input type="radio" id="lightning-hosted" name="lightning" value="hosted">
+                <label for="lightning-hosted">Hosted API</label>
               </div>
             </fieldset>
-            <p class="note options-help">grounder = our fine-tuned LoRA on the same 2B VLM · retry = think only after a miss</p>
           </div>
         </details>
 
@@ -110,6 +109,7 @@
             <h2 id="banner-title" class="banner-title"></h2>
             <p id="banner-label" class="banner-label"></p>
             <p id="banner-expl" class="banner-expl"></p>
+            <ul id="banner-details" class="banner-details" hidden></ul>
             <p id="banner-extra" class="banner-extra"></p>
           </div>
         </div>

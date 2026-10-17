@@ -11,6 +11,7 @@
   const HC_KEY = 'gui-assist.high-contrast';
   const RUN_KEY = 'gui-assist.run';
   const REASON_MAX = 200;
+  const CHECK_HEAD_MAX = 110;  // longer sandbox-check explanations are cut, with the full text one click away
   const OPTION_NAMES = ['grounder', 'thinking', 'lightning'];
   const DIFFICULTIES = ['easy', 'medium', 'hard'];
   const TAG_WORDS = { icon_only: 'unlabeled icon buttons', canvas: 'canvas widget', scroll: 'needs scrolling' };
@@ -20,6 +21,12 @@
   const STATUS_TEXT = {
     idle: 'Idle', starting: 'Starting', running: 'Running', reconnecting: 'Reconnecting',
     done: 'Done', stopped: 'Stopped', error: 'Error',
+  };
+  // The collapsed Options line, e.g. "base · thinking retry · local Lightning".
+  const OPTION_SHORT = {
+    grounder: { base: 'base', grounder: 'LoRA grounder' },
+    thinking: { off: 'thinking off', retry: 'thinking retry', on: 'thinking on' },
+    lightning: { local: 'local Lightning', hosted: 'hosted Lightning' },
   };
   const REASON_WORDS = {
     max_steps: 'Stopped: reached the step limit before finishing.',
@@ -245,7 +252,7 @@
     for (const id of [
       'request', 'request-note', 'task-select', 'task-meta', 'run-form', 'run-btn', 'stop-btn', 'run-status',
       'form-error', 'follow-btn', 'log-scroll', 'step-log', 'log-empty', 'pending', 'banner', 'banner-icon',
-      'banner-title', 'banner-label', 'banner-expl', 'banner-summary', 'banner-claim', 'banner-extra',
+      'banner-title', 'banner-label', 'banner-expl', 'banner-details', 'banner-summary', 'banner-claim', 'banner-extra',
       'options', 'options-summary', 'live-btn', 'view-toggle', 'view-before', 'view-after', 'screen-img', 'screen-empty',
       'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge',
     ]) ui[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = $(id);
@@ -281,9 +288,10 @@
     ui.logScroll.setAttribute('aria-label', 'Step log, scrollable');
     ui.logScroll.addEventListener('scroll', () => {
       const el = ui.logScroll;
-      S.autoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      S.autoScroll = el.scrollTop >= followTop() - 24;
       ui.followBtn.hidden = S.autoScroll || !isRunning();
-    });
+      el.classList.toggle('is-scrolled', el.scrollTop > 2);
+    }, { passive: true });
     ui.followBtn.addEventListener('click', () => {
       S.autoScroll = true;
       ui.logScroll.focus();
@@ -293,7 +301,9 @@
     ui.liveBtn.addEventListener('click', () => {
       S.selected = null;
       S.viewPref = 'auto';
+      S.autoScroll = true;
       renderViewer();
+      scrollLog();
     });
     for (const input of [ui.viewBefore, ui.viewAfter]) {
       input.addEventListener('change', () => {
@@ -378,7 +388,8 @@
 
   function renderOptionsSummary() {
     const o = readOptions();
-    setText(ui.optionsSummary, OPTION_NAMES.map((n) => o[n] || '?').join(' · '));
+    setText(ui.optionsSummary, OPTION_NAMES.map((n) => (OPTION_SHORT[n] && OPTION_SHORT[n][o[n]]) || o[n] || '?')
+      .join(' · '));
   }
 
   function readOptions() {
@@ -678,6 +689,7 @@
     for (const s of S.steps.values()) renderStep(s);
     renderBanner();
     renderViewer();
+    scrollLog();
     if (run.focusOnEnd) ui.banner.focus();
   }
 
@@ -736,6 +748,7 @@
     S.viewPref = 'auto';
     S.autoScroll = true;
     ui.stepLog.replaceChildren();
+    ui.logScroll.classList.remove('is-scrolled');
     ui.thumbs.replaceChildren();
     ui.logEmpty.hidden = false;
     ui.followBtn.hidden = true;
@@ -884,6 +897,12 @@
     const pre = h('pre', { class: 'step-screen', id: screenId, hidden: true });
     const body = h('div', { class: 'step-body' }, head, reason, lines, meta, pre);
     s.el = h('li', { class: 'step', 'data-step': String(s.n) }, num, body);
+    s.el.addEventListener('click', (e) => {  // a compact step opens it in the viewer; the open one is left alone
+      if (!s.el.classList.contains('is-compact') || e.target.closest('button, a, pre')) return;
+      if (String(window.getSelection ? window.getSelection() : '')) return;  // the user is selecting text
+      if (s.overlayUrl || s.shotUrl) selectStep(s.n);
+      else if (s.n === lastStepNumber()) ui.liveBtn.click();
+    });
     s.slots = { action, chips, reason, reasonTxt, reasonBtn, lines, meta, timing, screenBtn, pre };
   }
 
@@ -985,9 +1004,19 @@
     return '';
   }
 
+  /** Where "following" puts the log: the bottom, but never past the newest step's first line. */
+  function followTop() {
+    const el = ui.logScroll;
+    const bottom = el.scrollHeight - el.clientHeight;
+    const newest = S.steps.get(lastStepNumber());
+    if (!newest) return bottom;
+    const top = newest.el.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 6;
+    return Math.max(0, Math.min(bottom, top));
+  }
+
   function scrollLog() {
     if (S.autoScroll) {
-      ui.logScroll.scrollTop = ui.logScroll.scrollHeight;
+      ui.logScroll.scrollTop = followTop();
     } else {
       ui.followBtn.hidden = !isRunning();
     }
@@ -1067,7 +1096,11 @@
     }
 
     const shownStep = cur ? cur.step : null;
-    for (const s of S.steps.values()) s.el.classList.toggle('is-shown', s.n === shownStep && !live);
+    const open = live ? lastStepNumber() : S.selected;
+    for (const s of S.steps.values()) {
+      s.el.classList.toggle('is-shown', s.n === shownStep && !live);
+      s.el.classList.toggle('is-compact', s.n !== open);
+    }
     const thumbs = [...ui.thumbs.children];
     const focusThumb = thumbs.find((t) => Number(t.dataset.step) === shownStep) || thumbs[thumbs.length - 1];
     for (const t of thumbs) {
@@ -1078,6 +1111,14 @@
     if (live && focusThumb && document.activeElement !== focusThumb && !ui.thumbs.contains(document.activeElement)) {
       ui.thumbs.scrollLeft = ui.thumbs.scrollWidth;
     }
+  }
+
+  /** Scroll the log just enough to show `el` (not scrollIntoView: that would scroll the page too). */
+  function revealStep(el) {
+    const box = ui.logScroll.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.top < box.top) ui.logScroll.scrollTop -= box.top - r.top + 4;
+    else if (r.bottom > box.bottom) ui.logScroll.scrollTop += Math.min(r.bottom - box.bottom + 4, r.top - box.top - 4);
   }
 
   function ensureThumb(s) {
@@ -1095,6 +1136,8 @@
   function selectStep(n) {
     S.selected = n;
     renderViewer();
+    const s = S.steps.get(n);
+    if (s) revealStep(s.el);
   }
 
   function onThumbKey(e) {
@@ -1129,12 +1172,19 @@
     let title;
     let label = '';
     let expl = '';
-    if (v) {
+    const check = v ? checkParts(oneLine(v.explanation)) : { head: '', details: [] };
+    if (v && st === 'stopped') {  // the stop is the headline; the sandbox check still says where things stand
+      tone = 'stopped';
+      icon = '■';
+      title = v.passed ? 'Stopped, but the task is done' : 'Stopped: the task is not done';
+      label = oneLine(v.label) || 'verified by sandbox state, not seen by the agent';
+      expl = `${v.passed ? '✓' : '✗'} ${check.head}`;
+    } else if (v) {
       tone = v.passed ? 'pass' : 'fail';
       icon = v.passed ? '✓' : '✗';
       title = v.passed ? 'Verified: the task is done' : 'Not verified: the task is not done';
       label = oneLine(v.label) || 'verified by sandbox state, not seen by the agent';
-      expl = oneLine(v.explanation);
+      expl = check.head;
     } else if (st === 'error') {
       tone = 'error';
       icon = '!';
@@ -1156,7 +1206,7 @@
     setText(ui.bannerIcon, icon);
     setText(ui.bannerTitle, title);
     setText(ui.bannerLabel, label);
-    setText(ui.bannerExpl, expl);
+    renderCheck(expl, check.details, check.more);
 
     setText(ui.bannerSummary, summary ? `Agent’s summary: “${summary}”` : 'The agent gave no summary.');
     const claim = [];
@@ -1186,6 +1236,38 @@
       ui.bannerExtra.append(h('a', { href, target: '_blank', rel: 'noopener', text: 'Open this session in the sandbox' }));
     }
     ui.banner.hidden = false;
+  }
+
+  /** A sandbox/checks.py explanation as a short headline plus details shown on request (keeps the banner small). */
+  function checkParts(text) {
+    let m = /^all (\d+) conditions? passed$/.exec(text);
+    if (m) return { head: `Sandbox check: ${m[1]}/${m[1]} condition${m[1] === '1' ? '' : 's'} passed.`, details: [] };
+    m = /^(\d+) of (\d+) conditions? failed: (.+)$/.exec(text);
+    if (m) return { head: `Sandbox check: ${m[1]} of ${m[2]} conditions failed.`, details: m[3].split('; ') };
+    m = /^any: none passed: (.+)$/.exec(text);
+    if (m) return { head: 'Sandbox check: none of the alternatives passed.', details: m[1].split('; ') };
+    if (text.length > CHECK_HEAD_MAX) {
+      return { head: `Sandbox check: ${text.slice(0, CHECK_HEAD_MAX).trimEnd()}…`, details: [text], more: 'details' };
+    }
+    return { head: text ? `Sandbox check: ${text}` : '', details: [] };
+  }
+
+  function renderCheck(expl, details, more = 'which') {
+    const run = S.run;
+    ui.bannerExpl.replaceChildren(document.createTextNode(expl));
+    ui.bannerDetails.replaceChildren(...details.map((d) => h('li', { text: d })));
+    ui.bannerDetails.hidden = !(details.length && run.checkOpen);
+    if (!details.length) return;
+    const btn = h('button', {
+      type: 'button', class: 'btn-link', 'aria-expanded': String(Boolean(run.checkOpen)), 'aria-controls': 'banner-details',
+      text: run.checkOpen ? 'Hide' : (more === 'which' ? `Show which${details.length > 1 ? '' : ' one'}` : 'Show details'),
+    });
+    btn.addEventListener('click', () => {
+      run.checkOpen = !run.checkOpen;
+      renderCheck(expl, details, more);
+      ui.bannerExpl.querySelector('button').focus();
+    });
+    ui.bannerExpl.append(' ', btn);
   }
 
   function safeHttpUrl(u) {

@@ -12,9 +12,9 @@ console/tools/calibrate_mock.py. A request picks a script by its exact text (cas
 whitespace don't matter). Anything else gets a short generic run that looks at the
 screen and gives up with done(success=false).
 
-Every payload carries "mock": true. The summary/plan/ground timings are representative
-simulated numbers; act timings are measured. cfg.step_delay_s paces the steps so the
-console demo looks live.
+Every payload carries "mock": true. Only measured timings are reported (act); the mock
+doesn't run Lightning or a VLM, so it reports no plan/summary/ground latency rather than
+inventing one. cfg.step_delay_s paces the steps so the console demo looks live.
 
 Self-contained on purpose (no agent/ imports), so it keeps working while agent/ changes.
 """
@@ -25,10 +25,8 @@ import asyncio
 import io
 import json
 import logging
-import random
 import secrets
 import time
-import zlib
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -50,6 +48,10 @@ FALLBACK_PLAN = "Mock agent: no scripted plan for this request"
 FALLBACK_SUMMARY = ("This is the mock agent. It only replays the scripted sandbox tasks, "
                     "so it did not do anything for this request.")
 NO_SUMMARY = "(mock agent: no screen description for this step)"
+NO_CHANGE_NOTE = (  # same words as agent/observation.py
+    "The screen did NOT change after your last action. The click probably missed or the "
+    "element is not interactive: describe the target differently or try another way."
+)
 
 
 @dataclass
@@ -248,7 +250,7 @@ def render_observation(o: dict) -> str:
     if o["last_action_result"]:
         lines.append(f"Last action: {o['last_action_result']}")
     if o["screen_changed"] is False:
-        lines.append("The screen did NOT change after your last action.")
+        lines.append(NO_CHANGE_NOTE)
     elif o["screen_changed"] is True:
         lines.append("The screen changed.")
     lines += ["Screen:", o["screen_summary"] or NO_SUMMARY]
@@ -286,7 +288,6 @@ class _Run:
         self.dir = cfg.run_dir_root / self.run_id
         self.dir.mkdir(parents=True, exist_ok=True)
         self._events = (self.dir / "events.jsonl").open("a", encoding="utf-8")
-        self.rng = random.Random(zlib.crc32(_norm(request).encode()))
         self.t0 = time.perf_counter()
         self.step = 0
         self.stats = {"actions": 0, "clicks": 0, "failed": 0}
@@ -306,9 +307,6 @@ class _Run:
                 await self.on_event(ev)
             except Exception:
                 log.exception("on_event failed for %s", kind)
-
-    def sim(self, lo: float, hi: float) -> float:
-        return self.rng.uniform(lo, hi)
 
     async def pace(self, frac: float) -> None:
         if self.cfg.step_delay_s > 0:
@@ -332,7 +330,7 @@ class _Run:
         obs = {"step": self.step, "url": page.url, "title": title, "screen_changed": changed,
                "last_action_result": last_result, "screen_summary": summary or NO_SUMMARY}
         await self.emit("observation", {"observation": obs, "text": render_observation(obs)},
-                        screenshot_path=self.save(img), timings_ms={"summary": self.sim(650, 1400)})
+                        screenshot_path=self.save(img))
 
     async def finish(self, success: bool, summary: str, reason: str) -> dict:
         if self.finished is None:
@@ -372,8 +370,7 @@ class _Run:
             thinking = self.cfg.thinking == "on" or (self.cfg.thinking == "retry" and last_changed is False)
             await self.pace(0.5)
             await self.emit("plan", {"content": step.get("content", ""), "reasoning": step.get("reasoning", ""),
-                                     "thinking": thinking, "tool_calls": [{"name": tool, "arguments": args}]},
-                            timings_ms={"plan": self.sim(1400, 3800) * (1.8 if thinking else 1.0)})
+                                     "thinking": thinking, "tool_calls": [{"name": tool, "arguments": args}]})
             await self.emit("tool_call", {"name": tool, "arguments": args, "valid": True,
                                           "description": describe(tool, args)})
             if tool == "done":
@@ -390,8 +387,8 @@ class _Run:
                 pt = [round(x / VIEWPORT["width"] * 1000), round(y / VIEWPORT["height"] * 1000)]
                 await self.emit("grounding", {"target": target, "x": x, "y": y, "point_1000": pt,
                                               "raw": json.dumps({"point_2d": pt}),
-                                              "model": f"mock ({self.cfg.grounder_model})"},
-                                overlay_path=overlay, timings_ms={"ground": self.sim(220, 520)})
+                                              "model": f"{self.cfg.grounder_model}, mock"},
+                                overlay_path=overlay)
                 click = {"x": x, "y": y}
             t = time.perf_counter()
             result = await perform(page, step, self.step)
@@ -420,8 +417,7 @@ class _Run:
         args = {"summary": FALLBACK_SUMMARY, "success": False}
         await self.pace(0.5)
         await self.emit("plan", {"content": FALLBACK_PLAN, "reasoning": "", "thinking": False,
-                                 "tool_calls": [{"name": "done", "arguments": args}]},
-                        timings_ms={"plan": self.sim(900, 1600)})
+                                 "tool_calls": [{"name": "done", "arguments": args}]})
         await self.emit("tool_call", {"name": "done", "arguments": args, "valid": True,
                                       "description": describe("done", args)})
         await self.emit("action", {"name": "done", "arguments": args, "ok": True, "screen_changed": None, "done": True})

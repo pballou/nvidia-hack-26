@@ -13,7 +13,8 @@ Run from the repo root, with the sandbox up (`uvicorn sandbox.app:app --port 809
 .venv-gym/bin/python -m console --agent mock              # scripted mock agent, no models needed
 .venv-gym/bin/python -m console --agent real              # T2's agent.core (Lightning + grounder VLM)
 .venv-gym/bin/python -m console --agent real --headed     # also show the Playwright window (video)
-# options: --host 127.0.0.1 --port 8095 --sandbox-url http://127.0.0.1:8090 --runs-dir runs --step-delay 0.8
+# options: --lightning local|hosted (initial toggle, default local) --host 127.0.0.1 --port 8095
+#          --sandbox-url http://127.0.0.1:8090 --runs-dir runs --step-delay 0.8
 ```
 
 Then open http://127.0.0.1:8095.
@@ -21,15 +22,24 @@ Then open http://127.0.0.1:8095.
 - `--runs-dir` and `--step-delay` only affect the mock. The real agent writes traces
   to its own `runs_dir` (`configs/agent.yaml`). The console serves images from wherever
   the events point.
-- Tests: `.venv-gym/bin/python -m pytest console/tests -q`. They start a real sandbox
-  and console on free ports; the mock tests launch headless Chromium.
+- **Tests:** `.venv-gym/bin/python -m pytest console/tests -q` (about 70 s). They
+  start a real sandbox and console on free ports; the mock tests launch headless
+  Chromium. Two files carry the `e2e` marker. Skip both with `-m "not e2e"` (about
+  15 s).
+  - `test_mock_e2e.py` (about 45 s) runs all 12 sandbox tasks through
+    `POST /api/run` and the SSE stream with the real mock agent, and checks that each
+    verdict passes. The mock only clicks pixels, so this proves every task can be
+    solved from pixels alone.
+  - `test_console_ui.py` (about 10 s) drives the page by keyboard only: pick a task,
+    Enter to run, see the ✓ banner, Escape to stop, free text. It also checks for no
+    console errors and no off-host requests.
 
 ## HTTP API (binding for `console/static`)
 
 | Route | Returns |
 | --- | --- |
 | `GET /`, `GET /static/*` | `console/static/index.html` and assets |
-| `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "base", thinking: "retry", lightning: "hosted"}}` |
+| `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "base", thinking: "retry", lightning: "local"}}` (`--lightning` sets the last one) |
 | `GET /api/tasks` | `[{id, request, start_path, tags, steps_min}]` from `sandbox/tasks.json` (no checks) |
 | `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local}}` → `{run_id: "c-<hex>", sid, start_url}`. Errors: 400 `{error}` (validation), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
 | `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, options, agent_run_id, result, verdict, n_events}`. `n_events` counts stream messages (it equals the last `id`). |
@@ -81,9 +91,13 @@ agent, and every payload carries `"mock": true`.
   emits an `error` event and then `done(reason="error")`. A script is stale when the page
   path after a step doesn't match the recorded one.
 - **Stopping:** stopping a run emits `done(reason="stopped")`, then closes the browser.
-- **Timings:** `screen_changed` is a downsampled image diff, and `act` timings are
-  measured. `summary`, `plan` and `ground` timings are representative simulated numbers.
-  `--step-delay` paces the steps.
+- **Events:** every click, and every `type_text` with a target, gets a `grounding` event
+  (`target, x, y, point_1000, raw, model`) and a `step_XX_overlay.png`. Every
+  `tool_call` carries `name, arguments, valid, description` (the plain-words line).
+- **Timings:** `screen_changed` is a downsampled image diff. Only measured `act`
+  timings are reported. The mock runs no Lightning or VLM, so it reports no `plan`,
+  `summary` or `ground` latency rather than making numbers up. `--step-delay` paces
+  the steps.
 
 **Calibration.** `console/tools/calibrate_mock.py` writes `mock_scripts.json`:
 
@@ -91,16 +105,33 @@ agent, and every payload carries `"mock": true`.
 .venv-gym/bin/python -m console.tools.calibrate_mock --sandbox-url http://127.0.0.1:8090 [--tasks id,id] [--headed] [--no-replay]
 ```
 
-It has a hand-written step list for each of the 12 tasks: the tool, a target description
-in the grounder's style, plain-words reasoning, and a screen summary. For each task it:
+It has a hand-written plan for each of the 12 tasks: the path a pixel agent would take,
+written from screenshots of the real pages. Each step has:
+- the tool call, with the target description in the grounder's style (short, visual,
+  positional, e.g. "the download icon at the right end of the September 2026 row");
+- plain-words reasoning;
+- the screen description the VLM would write afterwards, in `SUMMARY_PROMPT`'s
+  PAGE / ELEMENTS / STATE / OVERLAYS sections.
+
+Targets below the fold get explicit mouse-wheel scroll steps (`star-landlord-message`,
+`stop-promotions`). For each task the tool:
 1. resets a fresh sid;
 2. measures each target's center with DOM locators at that moment;
-3. adds scroll steps for targets below the fold, and a dismiss step if a toast covers one;
-4. performs each step the way the mock will (pixel clicks);
-5. checks `evaluate()`;
-6. replays every script through the mock agent and prints a table.
+3. checks the point is really clickable (`elementFromPoint`). If it isn't, it adds a
+   scroll or toast-dismiss step and reports it in the `auto` column; make it explicit in
+   the plan instead;
+4. performs each step the way the mock will (pixel clicks, wheel, keys);
+5. validates the script against the agent's tool schema (`agent/prompts.py`), checks the
+   viewport bounds, and checks that only replay keys appear (no selectors);
+6. checks `evaluate()`;
+7. replays every script through the mock agent from a fresh reset. A replay must have no
+   errors, end in `done(success=true)`, change the screen on every action, and give
+   every click a grounding event and an overlay; then `evaluate()` must pass;
+8. prints a table (steps, auto-added steps, walk, replay, seconds, explanation).
 
-The JSON holds only pixel coordinates and text. Re-run it after any sandbox layout change.
+It exits 1 if any task fails, and 2 if the sandbox is unreachable. The JSON holds only
+pixel coordinates and text. Re-run it after any sandbox layout change, then re-run
+`test_mock_e2e.py`.
 
 ## The no-DOM rule
 

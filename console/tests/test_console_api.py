@@ -1,4 +1,6 @@
-"""Console API tests: fake agents for the API contract, plus the real mock agent end to end (headless Chromium)."""
+"""Console API tests: fake agents for the API contract, plus mock agent units (headless Chromium).
+
+The 12 sandbox tasks end to end through the console with the real mock agent are in test_mock_e2e.py."""
 
 from __future__ import annotations
 
@@ -273,37 +275,7 @@ def test_real_agent_unavailable_503(console, monkeypatch):
     assert httpx.get(f"{base}/api/config").json()["agent"] == "real"
 
 
-# --- the real mock agent (headless Chromium against the live sandbox) ---------------------------
-
-
-def test_mock_agent_fallback_end_to_end(console, tmp_path):
-    runs = tmp_path / "runs"
-    base, _ = console(None, runs_dir=runs, step_delay_s=0.0)
-    run = start(base, request="Please water my plants")
-    stream = messages(read_sse(f"{base}/api/runs/{run['run_id']}/events", timeout=60))
-    steps = [m["data"] for m in stream if m["event"] == "step"]
-    kinds = [s["kind"] for s in steps]
-    assert kinds[0] == "start" and kinds[-4:] == ["plan", "tool_call", "action", "done"] and "observation" in kinds
-    assert all(s["payload"]["mock"] is True for s in steps)
-    plan = next(s for s in steps if s["kind"] == "plan")
-    assert plan["payload"]["content"] == mock_agent.FALLBACK_PLAN
-    assert plan["payload"]["tool_calls"][0]["name"] == "done"
-    done = steps[-1]["payload"]
-    assert done["success_claimed"] is False and done["reason"] == "done"
-    result = next(m["data"] for m in stream if m["event"] == "result")
-    assert result["success_claimed"] is False and result["run_id"] == steps[0]["run_id"]
-    assert stream[-2]["data"]["status"] == "done"
-
-    obs = next(s for s in steps if s["kind"] == "observation")
-    assert obs["payload"]["observation"]["url"].startswith(run["start_url"].split("?")[0])
-    assert obs["timings_ms"]["summary"] > 0
-    r = httpx.get(base + obs["screenshot_url"])
-    assert r.status_code == 200
-    img_path = runs / steps[0]["run_id"] / "step_00.png"
-    with Image.open(img_path) as im:
-        assert im.size == (1280, 800)
-    lines = (runs / steps[0]["run_id"] / "events.jsonl").read_text().splitlines()
-    assert [json.loads(x)["kind"] for x in lines] == kinds
+# --- mock agent units (headless Chromium against the live sandbox; the 12 tasks are in test_mock_e2e.py) ---
 
 
 def _write_script(tmp_path, steps, request="Mock test: click the middle"):

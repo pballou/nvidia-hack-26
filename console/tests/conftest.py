@@ -14,6 +14,11 @@ import uvicorn
 from console.app import ConsoleSettings, create_app
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "e2e: headless Chromium with the real mock agent (12-task console run, "
+                                       "keyboard-only UI tests); in the default suite, skip with -m 'not e2e'")
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
