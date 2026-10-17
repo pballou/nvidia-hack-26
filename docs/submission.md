@@ -34,13 +34,13 @@ The README skeleton has a section for each:
 
 ## Publishing (required for this track: "publish it openly so others can reuse it")
 
-Patrick sets up the Hugging Face account and a **write** token. It stays in `.env`
+Patrick publishes under the Hugging Face account **`patrickballou`**, using a **write** token. It stays in `.env`
 on **Patrick's laptop only**: never on the shared Brev box, and never committed.
 
 | Artifact | Where | Contents |
 | --- | --- | --- |
-| Model | HF model repo | Merged model and/or LoRA adapter, plus a model card: base model, data and licenses, training config, SSv2 results (3 ways), intended use (accessibility), limitations |
-| Data | HF dataset repo | Our slice manifest (source + image filename + bbox + split), the **Lightning-rewritten instructions**, and any other model-generated training data (Lightning keep/drop filter decisions, rejection-sampled reward=1 rollouts), each with the exact prompt, command and config that made it. Images stay referenced by source filename, not re-hosted. |
+| Model | `patrickballou/gui-assist-grounder` (HF model repo) | Merged model and/or LoRA adapter, plus a model card: base model, data and licenses, training config, SSv2 results (3 ways), intended use (accessibility), limitations |
+| Data | `patrickballou/gui-assist-data` (HF dataset repo) | Our slice manifest (source + image filename + bbox + split), the **Lightning-rewritten instructions**, and any other model-generated training data (Lightning keep/drop filter decisions, rejection-sampled reward=1 rollouts), each with the exact prompt, command and config that made it. Images stay referenced by source filename, not re-hosted. |
 | Code + envs | This repo | `resources_servers/gui_grounding`, `resources_servers/web_agent`, data prep, training configs, eval results |
 
 ## Video (3–5 min, camera on, show the team)

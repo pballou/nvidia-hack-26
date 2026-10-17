@@ -35,11 +35,13 @@ a user describes what they want, and the agent does it from pixels alone.
     Lightning's model card, because its recipes enable DSpark.
   - **Never serve the base and the fine-tuned VLM as two full copies;** they'd count
     twice (30 + 2 + 2 > 33). Use one base model plus a LoRA adapter. Our reading is
-    that this counts once; that's unconfirmed with the organizers.
+    that this counts once; that's unconfirmed with the organizers. Keep the
+    screen-summary model name configurable (`base` or `grounder`), so we can switch
+    to the tuned model for both roles.
 - **Code provenance:** all code must be written during the hackathon.
   - Rule text: "Open source code is allowed only if it's been open-sourced for 2+
-    weeks." Our reading is that this applies to the project, not each release.
-    That's unconfirmed, so ask in Discord.
+    weeks." **Confirmed: it applies per project, not per release.** So current
+    releases of NeMo Gym, vLLM and TRL are fine, and so is the vLLM fix file.
   - When copying code, record the upstream commit SHA and that path's last-changed
     date (`git log -1 <sha> -- <path>`).
 - **Open data:** cite every data source. Any model-generated training data must be
@@ -140,7 +142,7 @@ a user describes what they want, and the agent does it from pixels alone.
 - **Pinned GPU stack:** vLLM image v0.31.0 (by digest), torch 2.13.0+cu130,
   transformers 5.17.0, TRL 1.16.0. Never `pip install -U` these.
   - Self-hosting Lightning on the H200 requires the vLLM #61603 patch
-    (docs/gpu-box.md §1). Check its compliance note first.
+    (docs/gpu-box.md §1). It's allowed under the per-project 2-week rule.
 - **One shared Brev H200** (`permanent-tan-marmot`) at ~$6.90/hr; about 23 GPU-hours
   for the whole event.
   - Stream B (Kyle) owns serving and the GPU schedule.

@@ -51,12 +51,9 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e HF_HOME=/hf -e HF_TOK
 makes Lightning return NaN or empty output on sm90 GPUs like the H200. The fix (PR
 #61718, merged 2026-10-17) isn't in any release yet. Backport the fixed file.
 
-> **Compliance:** this file comes from a vLLM fix opened 2026-10-15 and merged
-> 2026-10-17. Under the event's 2-week open-source rule, that's the riskiest
-> reused code we have.
-> - Use it only after the organizers OK it in Discord.
-> - Otherwise, run the final agent eval and the demo on hosted Lightning (no patch
->   needed) or Mac-local (docs/plan.md "Hosting").
+> **Compliance:** this file comes from the vLLM project (fix merged 2026-10-17). The
+> 2-week open-source rule applies per project, not per release, so it's allowed.
+> Record the commit SHA above when you use it.
 
 ```bash
 curl -fsSL -o /home/ubuntu/patches/ssd_chunk_scan.py \

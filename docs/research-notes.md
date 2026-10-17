@@ -21,11 +21,10 @@ and the official rules on the [Luma page](https://luma.com/nvidia-redhat-small-m
     (~0.83B). Serve without speculative decoding.
 - **Code:** all code must be written during the hackathon. Rule text: "Open source
   code is allowed only if it's been open-sourced for 2+ weeks."
-  - The team reads this as applying to the project (the repo), not to each release.
-    That's **unconfirmed**; ask in Discord.
-  - Under a strict per-release reading, our pinned stack would fail: nemo-gym 0.7.0
-    (10-12), vllm 0.31.0 (10-05), trl 1.16.0 (10-15). So would the vLLM #61718
-    Lightning patch (merged 10-17).
+  - **Confirmed (2026-10-17): it applies per project, not per release.**
+  - So the pinned stack is fine: nemo-gym 0.7.0, vllm 0.31.0, trl 1.16.0. So is the
+    vLLM #61718 Lightning patch, a file from the vLLM project, which has been public
+    for years.
 - **Base + LoRA counted once:** our reading is that the screen-summary role (base
   weights, adapter off) and the grounder (adapter on) are one model. That's
   **unconfirmed**; ask alongside the 2-week question.

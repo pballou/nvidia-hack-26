@@ -121,8 +121,10 @@ it.
   - **Never serve the base and the tuned model as two full copies.** They would count
     twice toward the 33B cap (card counts: 30 + 2 + 2 = 34 > 33).
   - Serve one base model plus the LoRA adapter from a single vLLM process
-    (`--enable-lora`; stream B verifies this for the chosen model). The fallback is
-    to use the tuned model for both roles.
+    (`--enable-lora`; stream B verifies this for the chosen model).
+  - The env reads the screen-summary model name from config (`summary_model: base`).
+    If the organizers count base + adapter as two models, switch it to `grounder`
+    (the tuned model for both roles) and spot-check summary quality.
 - **Data and training flow:** set everything up, then a small POC run end to end,
   then size the full run from the POC's measured throughput.
 - **Training data mix (A), by share of targets:**
