@@ -54,6 +54,14 @@ docs/                    plan, research notes, results
 
 - **Canonical grounding sample** (one JSON object per target):
   `{id, source, image_path, img_w, img_h, instruction, bbox: [x1, y1, x2, y2] (pixels), platform: mobile|desktop|web, data_type: text|icon|null, split: train|dev|test}`.
+  - **As built:** in the OS-Atlas manifest, `data_type` holds the source's *control
+    type* (e.g. `push-button`, `AXStaticText`, `android.widget.TextView`; null for
+    UIBert and FineWeb). T3 uses it for rewrites. Only ScreenSpot-v2 rows use
+    `text|icon`. `data_prep/gym_rows.py` maps OS-Atlas rows to `data_type: null` in
+    Gym rows, so the metric slices stay text/icon.
+  - **Final manifest:** `/home/ubuntu/data/os_atlas_20k/manifest.jsonl`, 19,621 rows
+    (train 18,652 / dev 969), after the overlay drop, dedup and split
+    (`data_prep/finalize_manifest.py`).
 - **One module owns the model interface:** `common/grounding.py` holds the prompt
   template per base model, the output parser, and the 0–1000 ↔ pixel conversion. The
   Gym envs, TRL rewards, the agent's `click` tool, and the eval scripts all import it,
