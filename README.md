@@ -55,15 +55,14 @@ adapter turned off (one 2B model plus an adapter).
 
 | Data | Use | License / notes |
 | --- | --- | --- |
-| [OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data): Windows, AndroidWorld, UIBert, Widget Captioning, FineWeb subsets | Training | Apache-2.0 (dataset card). **Linux and macOS desktop subsets excluded:** they were captured on the same machines as ScreenSpot-v2's desktop test screenshots (details in [docs/research-notes.md](docs/research-notes.md) §5). |
-| [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) | Training (desktop) | MIT |
+| [OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data): Linux, macOS, AndroidWorld, UIBert, FineWeb subsets | Training | Apache-2.0 (dataset card). The Linux/macOS desktop data was captured on the same machines as 28 ScreenSpot-v2 desktop screenshots, so those 28 rows are excluded from our test set (see below). |
 | Lightning-rewritten instructions | Training | Synthetic; published with its prompt and script (*TBD link*) |
-| [ScreenSpot-v2](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2) (revision `5efbb1f1b5`) | **Held-out test only** | Apache-2.0 |
+| [ScreenSpot-v2](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2) (revision `5efbb1f1b5`) | **Held-out test only**, as **SSv2-clean**: 1,244 of 1,272 rows. The excluded 28 are listed in `benchmarks/screenspot_v2/excluded_rows.json`. | Apache-2.0 |
 
 ## Results
 
-*TBD.* ScreenSpot-v2 for base vs. SFT vs. SFT+GRPO, reported three ways (all 1,272
-rows / 1,128 rows on v1 images / 144 new rows), split by mobile/desktop/web × text/icon.
+*TBD.* ScreenSpot-v2-clean (1,244 rows) for base vs. SFT vs. SFT+GRPO, split by
+mobile/desktop/web × text/icon, plus the OS-Atlas dev split.
 Plus browser-task completion with the base grounder vs. the tuned grounder, all
 produced with `gym eval run` and `gym eval compare`.
 

@@ -10,7 +10,7 @@ a tool by Nemotron 3.5 Lightning in a browser agent.
 
 Headline results we want:
 
-1. **ScreenSpot-v2:** base vs. SFT vs. SFT+GRPO, overall and split by
+1. **ScreenSpot-v2-clean (1,244 rows):** base vs. SFT vs. SFT+GRPO, overall and split by
    mobile/desktop/web × text/icon, produced with `gym eval run` and compared with
    `gym eval compare`.
 2. **Agent task completion:** the same Lightning planner with the base grounder vs.
@@ -80,7 +80,7 @@ publishing.
 | --- | --- | --- |
 | M0 Setup | Sat 1pm | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
 | M1 Baseline | Sat 3pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
-| M2 Data + SFT | Sat 3pm → 8pm | Training slice built **without OS-Atlas Linux/macOS** (contaminated; see research-notes §5): Sized from the pilot, using the Training data mix table below. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
+| M2 Data + SFT | Sat 3pm → 8pm | Training slice built with `data_prep/sample_os_atlas.py` (Linux/macOS **included**; their 28 overlapping SSv2 rows are excluded from eval instead), sized from the pilot, per the Training data mix table below. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
 | M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Hard stop at ~1am. **Gate D2: keep GRPO only if dev improves.** |
 | M4 Agent | Sat afternoon → night (parallel, mostly without the GPU) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with hosted Lightning. Run it against the `base` grounder before ~5pm and in the gaps between training runs; click-overlay traces. **Base-vs-tuned agent runs move to M5.** |
 | M5 Ship | Sun 7am → 10:30am | Base-vs-tuned agent runs, final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |
@@ -135,14 +135,15 @@ it.
 
 | Platform | Source | Share | Instructions |
 | --- | --- | --- | --- |
-| Desktop 40% | OS-Atlas **Windows** | 20% | Raw labels; Lightning rewrites ~60% |
-| | **GroundCUA** (MIT) | 20% | Its own natural instructions |
-| Mobile 30% | OS-Atlas AndroidWorld | 10% | Raw labels; Lightning rewrites ~60% |
-| | OS-Atlas UIBert | 10% | Natural (keep) |
-| | OS-Atlas Widget Captioning | 10% | Natural (keep) |
-| Web 30% | OS-Atlas FineWeb (range-extracted) | 30% | HTML text; Lightning rewrites ~60% |
+| Desktop ~35% | OS-Atlas **Linux** | ~17.5% | Raw a11y labels; Lightning rewrites ~60% |
+| | OS-Atlas **macOS** | ~17.5% | Raw a11y labels; Lightning rewrites ~60% |
+| | *(optional)* OS-Atlas Windows / GroundCUA | — | Only if time allows |
+| Mobile ~30% | OS-Atlas AndroidWorld | ~15% | Raw labels; Lightning rewrites ~60% |
+| | OS-Atlas UIBert | ~15% | Natural (keep) |
+| Web ~35% | OS-Atlas FineWeb (range-extracted) | ~35% | HTML text; Lightning rewrites ~60% |
 
-  - Excluded: OS-Atlas Linux and macOS (contaminated) and RICOSCA (redundant).
+  - This matches the defaults in Charlie's `sample_os_atlas.py`. RICOSCA and Widget
+    Captioning are left out to keep it simple.
   - Aim for ≥ 40% icon-like targets per platform. OS-Atlas has no text/icon label;
     its `data_type` is the control type. So use a proxy: small, near-square boxes,
     or icon-like control types.
@@ -192,8 +193,10 @@ it.
 - **Gates D1 and D2:** agreed as written below.
 - **Base models:** baseline both Qwen3.5-2B and Qwen3-VL-2B (cheap). Train only one
   (gate D1).
-- **Eval:** OS-Atlas `dev` split (by screenshot) for choosing checkpoints;
-  **ScreenSpot-v2 stays the final held-out test**, reported three ways.
+- **Eval (option C):** OS-Atlas `dev` split (by screenshot) for choosing checkpoints.
+  The final held-out test is **ScreenSpot-v2-clean**: 1,244 rows, all of SSv2 minus
+  the 28 desktop rows captured on the same machines as our Linux/macOS training data
+  (`benchmarks/screenspot_v2/excluded_rows.json`).
 - **Hosting:**
   - Training and eval run on Brev (vLLM).
   - **Demo: hybrid first** (details in [local-mac.md](local-mac.md)).

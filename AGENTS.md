@@ -50,20 +50,22 @@ a user describes what they want, and the agent does it from pixels alone.
   published together with the exact command and config that made it. That includes
   Lightning-rewritten instructions, Lightning keep/drop filter decisions, and
   reward=1 rollouts used as SFT data.
-- **Never train on ScreenSpot-v2 (or v1).** It is the held-out benchmark; pin
-  revision `5efbb1f1b5`. Deduplicate all training images against it (perceptual
-  hash) before training.
-  - **Never filter SSv2 itself.** Assert 1,272 rows after conversion.
-  - **Report SSv2 three ways:** all 1,272 rows, the 1,128 rows on v1 images, and the
-    144 new rows.
-- **Don't use OS-Atlas Linux/macOS desktop data** (`linux_splited.json`,
-  `macos_splited.json`).
-  - It was captured on the same machines as SSv2's new desktop screenshots, and the
-    test targets are labeled in it. Dedup can't remove that.
-  - Also never use Wave-UI `source=="screenspot"` rows or GroundUI-18K.
-  - Details: docs/research-notes.md §5.
+- **Evaluation (decided 2026-10-17, "option C"):**
+  - An OS-Atlas `dev` split (by screenshot) is for choosing checkpoints.
+  - **ScreenSpot-v2-clean** is the final held-out test: SSv2 (revision `5efbb1f1b5`)
+    minus the 28 desktop rows listed in `benchmarks/screenspot_v2/excluded_rows.json`, so **1,244 rows**.
+  - Never train on ScreenSpot-v2 or v1. Deduplicate training images against SSv2
+    with a perceptual hash.
+- **Why 28 rows are excluded:** we *do* train on OS-Atlas Linux/macOS desktop data,
+  and those 28 SSv2 screenshots were captured on the same machines. That
+  exclusion is the only filtering of SSv2.
+  - Assert 1,272 rows on load and 1,244 after the exclusion.
+  - Report SSv2-clean as the headline, with per-platform and text/icon splits.
+    State the exclusion openly.
+- **Never use** Wave-UI `source=="screenspot"` rows or GroundUI-18K (they contain
+  ScreenSpot). Details: docs/research-notes.md §5.
 - **Choose checkpoints on the `dev` split** (held out from the training sources by
-  screenshot; grouping rules in docs/plan.md), never on ScreenSpot-v2.
+  screenshot; grouping rules in docs/plan.md), never on ScreenSpot-v2-clean.
 - **Public repo:** commit only public datasets and the sandbox app. No proprietary
   screenshots, customer data, credentials, or internal-system details. Secrets live
   in `.env` and NeMo Gym's `env.yaml`, both gitignored. Never paste tokens into a

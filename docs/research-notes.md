@@ -220,8 +220,9 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
 
 - Rows are `{img_filename, instruction, bbox}`. `bbox` is `[left, top, right, bottom]`
   normalized to [0, 1]. Desktop and AndroidWorld rows also have `data_type`.
-- **⚠ Contamination: do not use OS-Atlas Linux or macOS desktop data**
-  (`linux_splited.json`, `macos_splited.json`).
+- **⚠ Contamination between OS-Atlas Linux/macOS and SSv2.** **Decision (option C):**
+  we *keep* Linux/macOS in training, and exclude the 28 affected SSv2 desktop rows
+  from every reported number (`benchmarks/screenspot_v2/excluded_rows.json`), giving SSv2-clean = 1,244 rows. The evidence:
   - SSv2's 28 new desktop screenshots (20 Ubuntu at 2560×1440, 8 macOS at 2880×1800)
     were captured on the same machines and desktop setups, 1–3 weeks after the
     OS-Atlas captures. Same wallpaper, same desktop files.
@@ -229,7 +230,8 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   - The test targets themselves are labeled in training. For example, the test row
     "adjust font color" matches the training element "Font Color" at IoU 0.83.
   - The same app layouts recur across many training screenshots, so a perceptual-hash
-    dedup **cannot** remove the leak. Exclude both files entirely (about 2.5k images).
+    dedup **cannot** remove the leak from the training side. Excluding the 28 test
+    rows is the clean fix.
   - Neither OS-Atlas nor any later paper documents this; it's our own finding,
     verified by two independent checks.
 - **Other sources look low-risk** (sampled, not exhaustive):
@@ -243,7 +245,8 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
 
 | Subset | Screenshots | Targets | How to get images | Instruction style |
 | --- | --- | --- | --- | --- |
-| ~~Linux / macOS desktop~~ | — | — | **Excluded (contaminated)** | — |
+| Linux desktop | 1.2k | 43k | `linux_images.zip` (3.1 GB) | Raw a11y labels |
+| macOS desktop | 1.3k | 18k | `macos_images.zip` (5.5 GB) | Raw labels; ~10% numeric |
 | Windows desktop | 50k unique | many | Range-extract 3–4k images from the split archive (71 GB) | Raw a11y labels |
 | AndroidWorld | 15.9k | 90k | `mobile_images.zip` (2.3 GB) | Raw labels |
 | UIBert | 5.7k | 17k | `UIBert.zip` (0.5 GB) | Natural |
@@ -261,8 +264,8 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   - instructions over 12 words;
   - any instruction that appears twice on the same screenshot (14% of Widget
     Captioning rows).
-- **Team's choice:** 40% desktop / 30% mobile / 30% web, RICOSCA dropped. See the
-  docs/plan.md data-mix table.
+- **Team's choice:** ~35% desktop (Linux + macOS) / ~30% mobile / ~35% web, which
+  matches Charlie's sampler defaults. See the docs/plan.md data-mix table.
 - **`data_type` isn't text/icon:** where OS-Atlas has `data_type`, it's the control
   type (e.g. `android.widget.Button`), not ScreenSpot's text/icon label. Use a proxy
   for icon-ness.
@@ -282,7 +285,7 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   - Split train/dev by base screenshot (strip `_subN`), by Rico ID across
     UIBert/WC/RICOSCA, and by page for web.
   - Use the same `max_pixels` (~1–2.1 MP) in training and eval.
-- **Desktop replacement for Linux/macOS:** OS-Atlas Windows, plus
+- **Optional extra desktop data:** OS-Atlas Windows, plus
   [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) (MIT, desktop, ~1.15M
   LLM-written instructions; download per-app folders with `allow_patterns`).
 

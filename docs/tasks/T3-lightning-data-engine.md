@@ -12,7 +12,7 @@ data-mix table), `docs/tasks/contracts.md`.
 
 ## Why this exists
 
-OS-Atlas desktop, AndroidWorld and FineWeb "instructions" are raw accessibility or
+OS-Atlas Linux/macOS desktop, AndroidWorld and FineWeb "instructions" are raw accessibility or
 HTML labels, often a single word ("System", "More options menu"). ScreenSpot-v2, and
 real users, phrase requests as instructions ("open the settings", "download the
 September statement").
@@ -34,8 +34,9 @@ be **published with its method**.
 
 ## What to rewrite
 
-- **Raw-label sources:** `os_atlas/windows`, `os_atlas/androidworld`,
-  `os_atlas/fineweb`, and any source whose instructions are bare labels.
+- **Raw-label sources:** `os_atlas/linux`, `os_atlas/macos`, `os_atlas/androidworld`,
+  `os_atlas/fineweb` (and `os_atlas/windows` if added), plus any source whose
+  instructions are bare labels.
   - Select **~60%** of their rows deterministically: hash of `id` mod 100 < 60.
   - The rest keep the raw label.
 - **Natural-instruction sources** (`uibert`, `widget_captioning`, `groundcua`) pass
@@ -122,8 +123,8 @@ OS-Atlas; images aren't re-hosted.
       `train_lightning.jsonl` are produced. They're deterministic given the same
       cache.
 - [ ] No ScreenSpot data anywhere in the inputs. Assert that the manifest has no
-      `screenspot` source and no OS-Atlas `linux`/`macos` rows (contaminated; see
-      AGENTS.md).
+      `screenspot` source. OS-Atlas Linux/macOS are allowed under option C; see
+      AGENTS.md.
 - [ ] The numbers for the Lightning bounty write-up are logged: rows rewritten,
       throughput, tokens, drop reasons.
 

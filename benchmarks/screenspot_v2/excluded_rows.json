@@ -1,0 +1,149 @@
+{
+ "dataset": "OS-Copilot/ScreenSpot-v2",
+ "revision": "5efbb1f1b5463a575f2eb7bc30fe29e49c15f93c",
+ "file": "screenspot_desktop_v2.json",
+ "reason": "These 28 desktop screenshots (added in ScreenSpot-v2; 6-character filename stems) were captured on the same machines and desktop setups as OS-Atlas-data linux/macos, which we train on. Excluded from every reported ScreenSpot-v2 number.",
+ "count": 28,
+ "rows": [
+  {
+   "split": "desktop",
+   "img_filename": "pc_1inyhi.png",
+   "instruction": "open vscode"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_8g2jf6.png",
+   "instruction": "adjust font color"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_b5q1tt.png",
+   "instruction": "view battery usage of last 10 days"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_drcjo3.png",
+   "instruction": "download microsoft word from cloud"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_dyxzuj.png",
+   "instruction": "adjust mouse speed"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_dzpr8m.png",
+   "instruction": "empty the trash"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_f6eng1.png",
+   "instruction": "play dance pop station music"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_gtda7d.png",
+   "instruction": "open google drive"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_j6tmln.png",
+   "instruction": "install LXD app"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_js1st2.png",
+   "instruction": "click to restart the computer"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_krzgko.png",
+   "instruction": "add current webpage to favourites"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_nuyjna.png",
+   "instruction": "Add a wired connection device"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_o4nd16.png",
+   "instruction": "select all folders"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_odcu20.png",
+   "instruction": "search in this folder"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_oyo43s.png",
+   "instruction": "center the selected text"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_p4xo8z.png",
+   "instruction": "add a new input method"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_pl3ry1.png",
+   "instruction": "update all available apps"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_qao1zc.png",
+   "instruction": "open nac client "
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_rvnx5q.png",
+   "instruction": "select a new time format"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_st4s1n.png",
+   "instruction": "view get more help"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_suf989.png",
+   "instruction": "do not save this file"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_u77zz1.png",
+   "instruction": "open the map app"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_umvv32.png",
+   "instruction": "switch to NAT network connections"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_uuhwlx.png",
+   "instruction": "open the calculator"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_vcud9k.png",
+   "instruction": "insert a new slide"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_z7ydq8.png",
+   "instruction": "view more information about bomber"
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_zuyj00.png",
+   "instruction": "adjust the options of  \"show previous\""
+  },
+  {
+   "split": "desktop",
+   "img_filename": "pc_aaaaaa.png",
+   "instruction": "enter my full name"
+  }
+ ]
+}
