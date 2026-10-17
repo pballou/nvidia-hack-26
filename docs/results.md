@@ -34,7 +34,9 @@ First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
 
 - **Claimed vs verified gap:** the planner sometimes doesn't claim success when
   the sandbox shows success (e.g. `mark-all-read`, where the read state wasn't
-  visible in the summary). T2 fixed this in summary prompt v4 and planner
-  prompt agent-v3. This is useful material for BLADE and the Lightning write-up.
+  visible in the summary). **Still open:** with the base summary model, the
+  planner sometimes can't see that its action worked. The pilot-adapter run did
+  claim it (6 steps). Tracked in the claimed-vs-verified column. This is useful
+  material for BLADE and the Lightning write-up.
 - **Next:** the Gym `web_agent` eval with `--num-repeats 3`, base vs final
   grounder (tonight, once :8001 serves `grounder`).
