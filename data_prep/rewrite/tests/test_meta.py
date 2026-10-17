@@ -306,6 +306,23 @@ def test_neighbors_use_original_label():
 def test_normalize_label():
     assert meta.normalize_label("  a\tb \n c ") == "a b c"
     assert meta.normalize_label(42) == "42"
+    assert meta.normalize_label("\u200e\u2068Classic\u2069") == "Classic"  # macOS bidi marks
+    assert meta.normalize_label("Wi\u200b-Fi\ufeff") == "Wi-Fi"
+
+
+@pytest.mark.parametrize("raw,noun", [
+    ("push-button", "button"), ("link", "link"), ("menu", "menu"), ("tree-item", "tree item"), ("label", "text"),
+    ("table-cell", "table cell"), ("page-tab", "tab"), ("check-box", "checkbox"), ("toggle-button", "toggle button"),
+    ("combo-box", "dropdown"), ("menu-item", "menu item"), ("AXStaticText", "text"), ("AXTextField", "text field"),
+    ("AXRadioButton", "radio button"), ("AXButton", "button"), ("AXGroup", "area"), ("AXCheckBox", "checkbox"),
+    ("AXLink", "link"), ("AXPopUpButton", "dropdown"), ("AXTabGroup", "tab"), ("AXMenuItem", "menu item"),
+    ("android.widget.TextView", "text"), ("android.widget.EditText", "text field"),
+    ("android.widget.CheckBox", "checkbox"), ("android.widget.Button", "button"),
+    ("android.widget.FrameLayout", "area"), ("android.widget.LinearLayout", "area"),
+    ("android.widget.ImageButton", "button"), ("Hyperlink", "link"), ("something-new", "element"), (None, None),
+])
+def test_control_noun(raw, noun):
+    assert meta.control_noun(raw if raw is None else meta.control_type({"role": raw})) == noun
 
 
 def test_row_meta_shape_and_style():
@@ -316,7 +333,7 @@ def test_row_meta_shape_and_style():
     by = meta.index_by_image([target, other])
     m = meta.row_meta(target, by)
     assert list(m) == ["label", "platform", "control", "position", "size", "neighbors", "style"]
-    assert m == {"label": "More options", "platform": "mobile", "control": "ImageButton", "position": "top-right",
+    assert m == {"label": "More options", "platform": "mobile", "control": "button", "position": "top-right",
                  "size": "small", "neighbors": [{"label": "Search", "direction": "left"}],
                  "style": meta.assign_style("a:s:0")}
     assert meta.row_meta(target, by, style="positional")["style"] == "positional"

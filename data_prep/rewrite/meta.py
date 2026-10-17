@@ -7,6 +7,7 @@ the same machines are excluded from the test set instead (benchmarks/screenspot_
 import hashlib
 import json
 import math
+import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -155,6 +156,43 @@ def control_type(row) -> str | None:
     return None
 
 
+def _control_key(raw: str) -> str:
+    """'android.widget.EditText' -> 'edittext', 'AXPopUpButton' -> 'popupbutton', 'push-button' -> 'pushbutton'."""
+    name = raw.strip().split(".")[-1]
+    if len(name) > 2 and name.startswith("AX") and name[2].isupper():
+        name = name[2:]
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+# Plain nouns Lightning sees instead of raw AT-SPI (Linux), AX* (macOS), Android and UIA (Windows) control types.
+# "text" and "area" are labels/containers, never buttons; anything unknown is "element".
+CONTROL_NOUNS = {
+    **dict.fromkeys(("pushbutton", "button", "imagebutton", "splitbutton"), "button"),
+    "togglebutton": "toggle button", "radiobutton": "radio button", "menubutton": "menu button",
+    **dict.fromkeys(("link", "hyperlink"), "link"),
+    "menu": "menu", "menubar": "menu bar",
+    **dict.fromkeys(("menuitem", "menubaritem", "checkmenuitem", "radiomenuitem"), "menu item"),
+    "treeitem": "tree item", "listitem": "list item", **dict.fromkeys(("tablecell", "cell"), "table cell"),
+    **dict.fromkeys(("pagetab", "tab", "tabitem", "tabgroup", "tabwidget"), "tab"),
+    "checkbox": "checkbox", "checkedtextview": "option", "switch": "switch", "compoundbutton": "toggle",
+    **dict.fromkeys(("combobox", "popupbutton", "spinner"), "dropdown"),
+    **dict.fromkeys(("textfield", "edittext", "edit", "entry", "autocompletetextview"), "text field"),
+    **dict.fromkeys(("passwordtext", "securetextfield"), "password field"), "searchfield": "search field",
+    "textarea": "text area", **dict.fromkeys(("slider", "seekbar"), "slider"), "scrollbar": "scroll bar",
+    "spinbutton": "spin box", **dict.fromkeys(("image", "imageview"), "image"), "icon": "icon",
+    **dict.fromkeys(("statictext", "label", "textview", "heading", "paragraph"), "text"),
+    **dict.fromkeys(("group", "framelayout", "linearlayout", "relativelayout", "constraintlayout", "viewgroup",
+                     "view", "pane", "panel", "filler", "canvas", "frame", "section", "scrollarea", "scrollview",
+                     "scrollpane", "recyclerview"), "area"),
+    **dict.fromkeys(("list", "listview"), "list"), "table": "table", "toolbar": "toolbar", "statusbar": "status bar",
+}
+
+
+def control_noun(control: str | None) -> str | None:
+    """Plain noun for a raw control type (None stays None, so the prompt omits it)."""
+    return None if control is None else CONTROL_NOUNS.get(_control_key(control), "element")
+
+
 def element_kind(row) -> str | None:
     """ScreenSpot-style 'text'/'icon' if the row carries it (data_type, else role), otherwise None."""
     for key in ("data_type", "role"):
@@ -200,7 +238,8 @@ def relative_direction(target_bbox, other_bbox) -> str:
 
 
 def normalize_label(text) -> str:
-    return " ".join(str(text).split())
+    """Collapse whitespace and drop invisible format characters (bidi marks like U+200E/U+2068, zero-width chars)."""
+    return " ".join("".join(ch for ch in str(text) if unicodedata.category(ch) != "Cf").split())
 
 
 def _original(row) -> str:
@@ -225,7 +264,7 @@ def neighbors(row, image_rows, k=MAX_NEIGHBORS) -> list[dict]:
 def row_meta(row, by_image, style=None) -> dict:
     """Everything Lightning is told about one target. It never sees the image."""
     meta = {"label": _original(row), "platform": row["platform"]}
-    control, kind = control_type(row), element_kind(row)
+    control, kind = control_noun(control_type(row)), element_kind(row)
     if control is not None:
         meta["control"] = control
     if kind is not None:
