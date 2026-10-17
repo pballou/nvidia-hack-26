@@ -174,6 +174,13 @@ TRL notes:
 - `gradient_checkpointing` defaults to True.
 - Set `vllm_max_model_length`; the default allocates the full 262k context.
 
+**Verified stack** ([gpu-box.md](gpu-box.md)): vLLM v0.31.0 image, torch 2.13.0+cu130,
+transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
+- On one GPU, TRL GRPO must use `vllm_mode="colocate"`. Server mode needs NCCL across
+  two GPUs.
+- `AsyncGRPOTrainer` refuses Qwen3.5.
+- VLM SFT can't use `packing`, `padding_free` or `assistant_only_loss` on this stack.
+
 **Gym-native improvement loop** (the "model improvement with Gym" story):
 
 1. Run `gym eval run --num-repeats 8 --temperature 1.0` on training rows (never on
@@ -285,6 +292,9 @@ TRL notes:
     BF16 is ~66 GB.
   - KV cache is tiny (~0.2 GB per 64K-token sequence in FP8), so it co-resides easily
     with the VLM.
+- **Known Hopper bug:** vLLM [#61603](https://github.com/vllm-project/vllm/issues/61603)
+  gives NaN or empty output on H200. The fix (PR #61718) isn't released yet;
+  gpu-box.md §1 backports it.
 - **vLLM flags:** `--enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3`
   (plus `--trust-remote-code --kv-cache-dtype fp8 --mamba-cache-mode align --enable-prefix-caching`).
 - **Thinking:** toggle per request with `chat_template_kwargs: {enable_thinking: true|false}`.

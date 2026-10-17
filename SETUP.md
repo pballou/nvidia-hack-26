@@ -70,9 +70,13 @@ mkdir -p ~/.local/bin && mv brev ~/.local/bin/ && chmod 755 ~/.local/bin/brev
 
 **Log in:**
 
-1. Brev console → your avatar → Settings → **CLI**. Copy the
-   `brev login --token ...` line and run it in your own terminal. Don't paste the
-   token into chat or a coding agent.
+1. Run **`brev login`**. This is the browser flow, and its session refreshes itself.
+   - **Don't use the `brev login --token …` line from the console.** That session
+     expires after about 15 minutes and can't refresh.
+   - Symptoms of an expired login: `WARN: malformed refresh token`, or
+     `Could not resolve hostname permanent-tan-marmot` when you SSH. Fix it by
+     running `brev login` again.
+   - `brev login --skip-browser` prints the login URL instead of opening a browser.
 2. Run `brev ls`. You should see `permanent-tan-marmot` (H200). If you're in several
    orgs, switch with `brev set <org-name>`.
 
@@ -148,32 +152,63 @@ each other's working tree:
 | `/home/ubuntu/data` | Shared datasets: OS-Atlas slice, ScreenSpot-v2 |
 | `/home/ubuntu/hf` | Shared Hugging Face cache. Set `export HF_HOME=/home/ubuntu/hf`. Don't use `~/.cache`, which is a symlink to `/ephemeral`. |
 | `/home/ubuntu/ckpt` | Checkpoints |
-| `/home/ubuntu/venvs/{gym,train}` | Shared Python environments (see §6) |
+| `/home/ubuntu/venvs/train` | Shared training venv ([docs/gpu-box.md](docs/gpu-box.md) §5). Gym venvs live in each clone (`.venv-gym`). |
 
 Run long jobs in tmux (`tmux new -s <your-name>`), and log GPU jobs in
 [docs/runs.md](docs/runs.md).
 
 ## 6. Python environments
 
-[uv](https://docs.astral.sh/uv/) manages Python, on both the laptop and the box:
+[uv](https://docs.astral.sh/uv/) manages Python, on both the laptop and the box. Gym
+also shells out to `uv`, so it must be on your PATH.
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh     # then open a new shell
+curl -LsSf https://astral.sh/uv/0.13.1/install.sh | sh && source $HOME/.local/bin/env
+uv --version                                   # 0.13.1
 ```
 
-**NeMo Gym environment** (Python ≥ 3.13.14, required by `nemo-gym` 0.7.0). Gym is
-CPU-only, so it also runs on your laptop against remote models.
+**NeMo Gym** (`nemo-gym==0.7.0` needs Python ≥ 3.13.14) goes in its own venv in the
+repo root. **Always run `gym` from the repo root:** its config lookup, server venvs,
+`./cache` and `./results` all depend on the current directory. Gym is CPU-only, so it
+runs on a laptop against remote models.
 
 ```bash
-uv venv --python 3.13.14 ~/venvs/gym && source ~/venvs/gym/bin/activate
+cd nvidia-hack-26
+uv venv --python 3.13.14 .venv-gym && source .venv-gym/bin/activate   # always pin the patch version
 uv pip install "nemo-gym==0.7.0"
-gym --help
+export NEMO_GYM_EXTRA_ROOTS="$(git rev-parse --show-toplevel)"        # finds our resources_servers/ from anywhere
+gym --version                                                         # NeMo Gym v0.7.0 / Python 3.13.14
+cp env.yaml.example env.yaml                                          # gitignored; set the model endpoint
 ```
 
-**Training and serving stack on the box.** This section is being finalized: exact
-torch/transformers/TRL/vLLM pins and the vLLM serving commands for the grounder and
-Lightning will land here. Until then, coordinate with workstream B (docs/plan.md)
-before installing anything into the shared `/home/ubuntu/venvs/train`.
+**Gym hello world.** This proves the install, the tunnel and the model wiring. With
+the grounder served on the box ([docs/gpu-box.md](docs/gpu-box.md) §3) and a tunnel
+open for port 8001 (§7 there):
+
+```bash
+# env.yaml: policy_base_url: http://127.0.0.1:8001/v1, policy_api_key: EMPTY, policy_model_name: grounder
+gym env start --resources-server gui_coordinate --model-type vllm_model ++server_spinup_timeout_seconds=1800
+#   first start builds ~4 server venvs; wait for "servers ready". Later starts: add ++skip_venv_if_present=true
+# second terminal (same dir, venv active):
+gym eval run --no-serve --agent gui_coordinate_simple_agent \
+  --input resources_servers/gui_coordinate/data/example.jsonl --output results/hello_gui.jsonl --limit 5 --concurrency 5
+cat results/hello_gui_aggregate_metrics.json
+```
+
+If the GPU box is stopped, smoke-test Gym against hosted Lightning with a text env:
+`gym env start --resources-server mcqa --model-type vllm_model --model-url https://integrate.api.nvidia.com/v1 --model-api-key "$NVIDIA_API_KEY" --model nvidia/nemotron-3.5-lightning-30b-a3b`,
+then `gym eval run --no-serve --agent mcqa_simple_agent --input resources_servers/mcqa/data/example.jsonl --output results/hello_mcqa.jsonl --limit 5`.
+
+**Other tools:**
+
+| Tool | Install | Notes |
+| --- | --- | --- |
+| Hugging Face CLI | `uv tool install 'hf==2.2.0'`, then `hf auth login` | `export HF_XET_HIGH_PERFORMANCE=1` for fast downloads |
+| Playwright (stream C) | `uv pip install 'playwright==1.62.0'`, then `playwright install chromium` (`--with-deps` on Ubuntu) | Gym's `interactive_browser` pins `>=1.62,<1.63`; matching the browser build matters |
+
+**Training and serving stack on the GPU box:** [docs/gpu-box.md](docs/gpu-box.md)
+(pinned vLLM image, Lightning and grounder serving commands, training venv, GPU
+memory plans).
 
 ## 7. Coding agents
 
@@ -191,4 +226,4 @@ The repo ships agent context. Claude Code and Codex pick it up automatically:
 - [ ] `ssh -T git@github.com` authenticates, and you can clone and push the repo.
 - [ ] `brev ls` shows `permanent-tan-marmot`, and `ssh permanent-tan-marmot 'nvidia-smi -L'` works.
 - [ ] The hosted Lightning smoke test prints a message.
-- [ ] `gym --help` works in `~/venvs/gym`.
+- [ ] `gym --version` works in `.venv-gym` (and, once the grounder is served, the Gym hello world runs).

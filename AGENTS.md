@@ -11,7 +11,8 @@ plans browser tasks and calls the grounder as a tool.
 - Plan, milestones, workstreams: [docs/plan.md](docs/plan.md).
 - Verified facts and sources: [docs/research-notes.md](docs/research-notes.md).
   Read it before re-researching anything.
-- Tool setup: [SETUP.md](SETUP.md).
+- Tool setup: [SETUP.md](SETUP.md). GPU box serving and training (pinned stack):
+  [docs/gpu-box.md](docs/gpu-box.md).
 
 ## Hard constraints
 
@@ -93,6 +94,11 @@ plans browser tasks and calls the grounder as a tool.
   prompt or verifier change. Use `nemo-gym-reward-profiling` to choose GRPO prompts.
 
 ## Compute
+
+- **Pinned GPU stack:** vLLM image v0.31.0 (by digest), torch 2.13.0+cu130,
+  transformers 5.17.0, TRL 1.16.0. Never `pip install -U` these.
+  - Serving Lightning on the H200 requires the vLLM #61603 patch (docs/gpu-box.md §1).
+  - Use `brev login` (browser flow), not `--token`.
 
 - **One shared Brev H200** (`permanent-tan-marmot`) at ~$6.90/hr; about 23 GPU-hours
   for the whole event.

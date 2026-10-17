@@ -4,6 +4,9 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.venv*
+**/.venv
+**/.venv.setup.lock
 .python-version
 .pytest_cache/
 .mypy_cache/
@@ -25,6 +28,7 @@ env.yaml
 /results/
 /runs/
 /wandb/
+/cache/
 *.safetensors
 *.bin
 *.pt
