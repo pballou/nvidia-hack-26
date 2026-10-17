@@ -47,13 +47,14 @@ the sandbox's own state (the agent never sees that state).
   `grounder`, [docs/gpu-box.md](docs/gpu-box.md) §3):
   `ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 permanent-tan-marmot`.
   Or serve it on the Mac (docs/local-mac.md §3b).
-- **Lightning:** either hosted (only `NVIDIA_API_KEY` in `.env`; slow, 25–80 s per
-  step), or local on :8000 via vllm-metal (docs/local-mac.md §2).
+- **Lightning:** local on :8000, served as `lightning` (the official NVIDIA BF16
+  checkpoint, docs/local-mac.md §2; ~1.2 s per planner step). Or hosted, which needs
+  only `NVIDIA_API_KEY` in `.env` but is slow (25–80 s per step).
 
 **4. Run the real agent.**
 
 ```bash
-scripts/demo_up.sh --agent real --lightning hosted     # or --lightning local; add --headed to watch the browser
+scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API; --headed to watch the browser
 ```
 
 The script checks that :8001 and Lightning respond, then prints the console URL. In

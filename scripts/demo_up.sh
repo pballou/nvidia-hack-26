@@ -6,14 +6,15 @@
 # Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--headed] [--skip-models]
 #   --agent mock      scripted stand-in agent, no models needed (default)
 #   --agent real      T2's agent (agent/core.py): Lightning plans, the VLM grounds
-#   --lightning       which Lightning the console defaults to and this script checks (default hosted)
+#   --lightning       which Lightning the console defaults to and this script checks (default local:
+#                     the official BF16 checkpoint served as `lightning` on :8000; hosted is slow)
 #   --headed          show the Playwright browser window (for the video)
 #   --skip-models     don't check :8001 / Lightning
 # Logs: runs/demo_logs/{sandbox,console}.log
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-AGENT=mock LIGHTNING=hosted HEADED=0 SKIP_MODELS=0
+AGENT=mock LIGHTNING=local HEADED=0 SKIP_MODELS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent) AGENT="${2:?--agent needs mock|real}"; shift 2 ;;
@@ -22,7 +23,7 @@ while [ $# -gt 0 ]; do
     --lightning=*) LIGHTNING="${1#*=}"; shift ;;
     --headed) HEADED=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
