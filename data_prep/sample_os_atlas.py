@@ -141,8 +141,9 @@ class MultiPartFile(io.RawIOBase):
 
 
 class Sampler:
-    def __init__(self, raw, out, cap, keep_prob, rng, sink):
+    def __init__(self, raw, out, cap, keep_prob, rng, sink, exclude_groups=frozenset()):
         self.raw, self.out, self.cap, self.keep_prob, self.rng, self.sink = raw, out, cap, keep_prob, rng, sink
+        self.exclude_groups = exclude_groups
         self.stats = defaultdict(Counter)
         self.rows_per_image = Counter()
         self.fs = HfFileSystem()
@@ -170,6 +171,9 @@ class Sampler:
 
     def emit(self, source, img_name, group, fetch, elements, quota, pixel_boxes=False):
         """Write one screenshot and up to `cap` cleaned targets; elements carry normalized boxes unless pixel_boxes."""
+        if group in self.exclude_groups:
+            self.stats[source]["excluded"] += 1
+            return
         dest = self.out / "images" / source / img_name.replace("/", "_")
         dest.parent.mkdir(parents=True, exist_ok=True)
         fresh = not dest.exists()
@@ -297,7 +301,8 @@ class Sampler:
 
 
 def strip_sub(name):
-    return re.sub(r"_sub\d+(?=\.\w+$)", "", name)
+    """Base screenshot id: drop the extension and any `_subN` crop suffix."""
+    return re.sub(r"_sub\d+$", "", Path(name).stem)
 
 
 def main():
@@ -309,16 +314,24 @@ def main():
     ap.add_argument("--keep-prob", type=float, default=0.25,
                     help="per-screenshot keep probability while streaming Windows/FineWeb, to spread the sample")
     ap.add_argument("--quotas", type=json.loads, default=DEFAULT_QUOTAS, help="JSON {source: max targets}")
+    ap.add_argument("--exclude-ids", type=Path, default=None,
+                    help="file of `group` values (one per line, e.g. 'linux:output_..._screenshot') to skip "
+                         "entirely, e.g. T3's burned-in-annotation flagged list (docs/research-notes.md section 5)")
     args = ap.parse_args()
 
     unknown = sorted(set(args.quotas) - set(PLATFORM))
     if unknown:
         raise SystemExit(f"unknown sources {unknown}; choose from {sorted(PLATFORM)}")
 
+    exclude = set()
+    if args.exclude_ids:
+        exclude = {line.strip() for line in args.exclude_ids.read_text().splitlines() if line.strip()}
+        print(f"excluding {len(exclude)} flagged screenshots from {args.exclude_ids}", flush=True)
+
     args.out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(args.seed)
     with open(args.out / "manifest.jsonl", "w") as sink:
-        s = Sampler(args.raw, args.out, args.cap_per_screenshot, args.keep_prob, rng, sink)
+        s = Sampler(args.raw, args.out, args.cap_per_screenshot, args.keep_prob, rng, sink, exclude)
         for source, quota in args.quotas.items():
             print(f"sampling {source} (quota {quota})", flush=True)
             if source in LOCAL_ZIPS:

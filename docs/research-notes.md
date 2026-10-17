@@ -236,6 +236,20 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
     rows is the clean fix.
   - Neither OS-Atlas nor any later paper documents this; it's our own finding,
     verified by two independent checks.
+- **Checked and not found: burned-in annotation boxes/text on Linux screenshots.**
+  A concern was raised that some Linux captures might have OS-Atlas's own
+  annotation overlay (box or `role: label` text) burned into the pixels, which
+  would teach the grounder to read printed labels it won't see in real use. We
+  looked for this twice and found no evidence:
+  - A pixel-level scan of 346 `linux` rows with `data_type == "label"` found no
+    saturated-color drawn border at the stored bbox edge.
+  - A scan of 50 Linux screenshots (25 with a `role: label` target, 25 random) for
+    saturated annotation-tool-style colors, with the 4 highest-scoring images
+    visually checked: all 4 were legitimate UI content (product thumbnails, a
+    shape gallery, icons, a reddish wallpaper gradient), not overlays.
+  - If a concrete example turns up later, `data_prep/sample_os_atlas.py
+    --exclude-ids <file>` (one `group` value per line) drops flagged screenshots
+    from both train and dev, mirroring `benchmarks/screenspot_v2/excluded_rows.json`.
 - **Other sources look low-risk** (sampled, not exhaustive):
   - AndroidWorld, RICO, Widget Captioning, UIBert and SeeClick web.
   - Windows desktop (different resolution, Aug 2024 captures).
