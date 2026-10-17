@@ -47,7 +47,24 @@ test-results/
 playwright-report/
 playwright/.cache/
 
-# Claude Code local settings
+# Trainer / tool outputs written relative to the working directory
+**/wandb/
+**/trainer_output/
+**/outputs/
+**/.hydra/
+*.log
+nohup.out
+
+# Gym env data: only small examples are committed
+resources_servers/*/data/*
+!resources_servers/*/data/example*.jsonl
+!resources_servers/*/data/example_metrics.json
+!resources_servers/*/data/.gitignore
+
+# Agent / tool local files
+.playwright-mcp/
+CLAUDE.local.md
+.claude/worktrees/
 .claude/settings.local.json
 
 # OS / editors

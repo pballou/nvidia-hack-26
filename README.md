@@ -1,4 +1,6 @@
-# nvidia-hack-26
+# GUI assist
+
+Team **sherpas**: Patrick, Kyle, Charlie.
 
 **Say what you want, and the agent does it, in any app, from pixels alone.**
 
@@ -39,7 +41,8 @@ user request ─► Nemotron 3.5 Lightning (planner, tool calls) ──► click
 | Playwright | Sandbox browser automation |
 
 Total generative parameters stay within the event's 33B cap: Lightning 30B plus the
-grounder ≤ 3B.
+grounder ≤ 3B. The screen-summary role uses the same base weights with the LoRA
+adapter turned off (one 2B model plus an adapter).
 
 ## How to reproduce
 
@@ -53,7 +56,7 @@ grounder ≤ 3B.
 | Data | Use | License / notes |
 | --- | --- | --- |
 | [OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data): Windows, AndroidWorld, UIBert, Widget Captioning, FineWeb subsets | Training | Apache-2.0 (dataset card). **Linux and macOS desktop subsets excluded:** they were captured on the same machines as ScreenSpot-v2's desktop test screenshots (details in [docs/research-notes.md](docs/research-notes.md) §5). |
-| [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) (if used) | Training (desktop) | MIT |
+| [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) | Training (desktop) | MIT |
 | Lightning-rewritten instructions | Training | Synthetic; published with its prompt and script (*TBD link*) |
 | [ScreenSpot-v2](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2) (revision `5efbb1f1b5`) | **Held-out test only** | Apache-2.0 |
 
@@ -70,11 +73,11 @@ produced with `gym eval run` and `gym eval compare`.
 
 ## Team
 
-| Name | Role |
-| --- | --- |
-| Patrick | Agent and Lightning integration, sandbox app, demo |
-| Kyle | Training and serving (TRL, vLLM, GPU budget) |
-| Charlie | Data and evaluation (data prep, NeMo Gym envs, BLADE) |
+| Name | Role | Contact |
+| --- | --- | --- |
+| Patrick | Agent and Lightning integration, `web_agent` env, sandbox app, demo | TBD |
+| Kyle | Training and serving (TRL, vLLM, GPU budget) | TBD |
+| Charlie | Data and evaluation (data prep, `gui_grounding` env, ScreenSpot eval, BLADE) | TBD |
 
 ## Docs
 

@@ -19,10 +19,16 @@ and the official rules on the [Luma page](https://luma.com/nvidia-redhat-small-m
     its MTP (multi-token prediction) head. The rule uses the card number.
   - Don't enable Lightning's external draft models, DSpark (~0.97B) or DFlash
     (~0.83B). Serve without speculative decoding.
-- **Code:** all code must be written during the hackathon. Open-source code is allowed
-  only if it has been open-sourced for 2+ weeks. The team reads this as applying to
-  the project (the repo), not to each release, so the latest NeMo Gym release is
-  fine: Gym has been public since 2025.
+- **Code:** all code must be written during the hackathon. Rule text: "Open source
+  code is allowed only if it's been open-sourced for 2+ weeks."
+  - The team reads this as applying to the project (the repo), not to each release.
+    That's **unconfirmed**; ask in Discord.
+  - Under a strict per-release reading, our pinned stack would fail: nemo-gym 0.7.0
+    (10-12), vllm 0.31.0 (10-05), trl 1.16.0 (10-15). So would the vLLM #61718
+    Lightning patch (merged 10-17).
+- **Base + LoRA counted once:** our reading is that the screen-summary role (base
+  weights, adapter off) and the grounder (adapter on) are one model. That's
+  **unconfirmed**; ask alongside the 2-week question.
 - **Data:** must meaningfully use open data and cite sources. Synthetic data must be
   published together with its methodology.
 - **Judging:** "systems engineering", meaning a working end-to-end system. Criteria:
@@ -53,8 +59,12 @@ with the prompt and harness, so **measure our own baselines** before choosing.
 | `Qwen/Qwen3.5-0.8B` | 0.87B | not measured on the full set (mobile subset 71.1) | SS-Pro 46.5. |
 | `OpenGVLab/InternVL3_5-2B` | 2.35B | ~82.0 (Liquid) | `<box>[[x1,y1,x2,y2]]</box>` on 0–1000. |
 
-- **Over budget:** `Qwen/Qwen2.5-VL-3B-Instruct` is 3.75B. Many "3B" GUI models are
-  built on it.
+- **Avoid `Qwen/Qwen2.5-VL-3B-Instruct`.** Its card says 3B, so it's legal only at
+  exactly 33B, with zero headroom (HF counts 3.75B). Its `qwen-research` license
+  also conflicts with "publish openly". Many "3B" GUI models are built on it.
+- **Card counts vs HF counts:** eligibility uses card counts. Qwen3.5-2B and
+  Qwen3-VL-2B are both "2B" on their cards; the HF totals in the table are for
+  reference.
 - **Comparators to cite:**
   - Qwen3-VL-4B base 93.1 ([KV-Ground](https://huggingface.co/vocaela/KV-Ground-4B-BaseQw3vl)).
   - MAI-UI-2B 92.5, UI-Venus-1.5-2B 92.8, UI-TARS-2B-SFT 84.7.
@@ -252,6 +262,19 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   - instructions over 12 words;
   - any instruction that appears twice on the same screenshot (14% of Widget
     Captioning rows).
+- **Team's choice:** 40% desktop / 30% mobile / 30% web, RICOSCA dropped. See the
+  docs/plan.md data-mix table.
+- **`data_type` isn't text/icon:** where OS-Atlas has `data_type`, it's the control
+  type (e.g. `android.widget.Button`), not ScreenSpot's text/icon label. Use a proxy
+  for icon-ness.
+- **⚠ FineWeb wasn't checked for SSv2 overlap,** and it supplies all of our web
+  share. Before training on it, stream A runs the same check used for Linux/macOS
+  on the sampled FineWeb images, against the 437 SSv2 web images:
+  - pHash distance;
+  - instruction text plus bbox IoU against SSv2 targets.
+  Pay particular attention to the 64 new SSv2 web screenshots of popular sites
+  (GitHub, Steam, PyTorch, YouTube, Amazon…). Drop anything that matches. If FineWeb
+  looks risky, switch the web share to SeeClick web, which was checked as low-risk.
 - **Recipe from the review:**
   - About 20–30k element queries, packed 3–6 per screenshot.
   - Mix ~40–45% desktop, ~25% mobile, ~30% web, with 40–50% icon-like targets.
@@ -296,7 +319,7 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   gives NaN or empty output on H200. The fix (PR #61718) isn't released yet;
   gpu-box.md §1 backports it.
 - **vLLM flags:** `--enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3`
-  (plus `--trust-remote-code --kv-cache-dtype fp8 --mamba-cache-mode align --enable-prefix-caching`).
+  (plus `--kv-cache-dtype fp8 --mamba-cache-mode align --enable-prefix-caching`; `--trust-remote-code` isn't needed). Full command: gpu-box.md §2.
 - **Thinking:** toggle per request with `chat_template_kwargs: {enable_thinking: true|false}`.
   The hosted API also accepts `reasoning_budget`.
 - **Sampling:** temperature 1.0, top_p 0.95.
@@ -327,8 +350,9 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   - The full SSv2 set is ~3.4M tokens at default resolution, or ~1.15M capped.
 - **Throughput:**
   - SSv2 eval: ~2–5 min per model.
-  - SFT: ~25–50 min per 10k samples. Pack several targets per screenshot into one
-    sample.
+  - SFT: ~25–50 min per 10k **packed** samples (several targets per screenshot).
+    Our pilot is unpacked (one target per example, so each target re-encodes the
+    image), so measure it rather than using this estimate.
   - GRPO: ~20–35 s/step on 1×H200, ≈ 1–2 h for 200 steps.
 
 **Planned H200-hours:**
@@ -337,7 +361,7 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
 | --- | --- |
 | Session overhead | 1 |
 | Base evals | 1 |
-| Lightning data generation | 1 |
+| Lightning data generation (hosted by default, so ~0) | 0–1 |
 | SFT | 4 |
 | GRPO (gated) | 6 |
 | Re-evals | 1 |

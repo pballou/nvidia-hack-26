@@ -1,6 +1,6 @@
 # Plan
 
-Proposed plan for the hackathon weekend; adjust it at kickoff. Background facts are
+Agreed plan (as of Sat 2026-10-17). Background facts are
 in [research-notes.md](research-notes.md), and tool setup is in [SETUP.md](../SETUP.md).
 
 ## Goal
@@ -63,7 +63,8 @@ docs/                    plan, research notes, results
     choose checkpoints.
   - `test` is ScreenSpot-v2 only.
 - **Endpoints on the Brev box:**
-  - grounder vLLM at `:8001`, served-model-name `grounder`;
+  - VLM vLLM at `:8001`, with served names `base` (base weights: baselines and
+    screen summaries) and `grounder` (the LoRA adapter, after SFT);
   - Lightning vLLM at `:8000`, served-model-name `lightning`.
   - During development, use hosted Lightning instead of the `:8000` server.
 - **Box paths:** see [SETUP.md](../SETUP.md#5-shared-paths-on-the-brev-box).
@@ -79,13 +80,13 @@ publishing.
 | --- | --- | --- |
 | M0 Setup | Sat 1pm | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
 | M1 Baseline | Sat 3pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
-| M2 Data + SFT | Sat 3pm → 8pm | Training slice built **without OS-Atlas Linux/macOS** (contaminated; see research-notes §5): ~20–30k targets, ~40–45% desktop (Windows plus GroundCUA), ~25% mobile, ~30% web. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
+| M2 Data + SFT | Sat 3pm → 8pm | Training slice built **without OS-Atlas Linux/macOS** (contaminated; see research-notes §5): Sized from the pilot, using the Training data mix table below. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
 | M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Hard stop at ~1am. **Gate D2: keep GRPO only if dev improves.** |
-| M4 Agent | Sat afternoon → Sat night (parallel) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with Lightning; base vs. tuned grounder runs; click-overlay traces. |
-| M5 Ship | Sun 7am → 10:30am | Final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |
+| M4 Agent | Sat afternoon → night (parallel, mostly without the GPU) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with hosted Lightning. Run it against the `base` grounder before ~5pm and in the gaps between training runs; click-overlay traces. **Base-vs-tuned agent runs move to M5.** |
+| M5 Ship | Sun 7am → 10:30am | Base-vs-tuned agent runs, final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |
 
-**Budget vs. clock:** running the H200 nonstop from now until 11am Sunday would
-use almost the whole $160 at ~$6.90/hr. Stop it whenever no job is running,
+**Budget vs. clock:** running the H200 nonstop from Sat 1pm to Sun 11am (~22 h)
+would cost ≈ $152 at ~$6.90/hr, almost the whole $160. Stop it whenever no job is running,
 including overnight once GRPO and the evals finish.
 
 ## Workstreams (for dividing the work)
@@ -118,7 +119,7 @@ it.
   - The base VLM is the same weights as the grounder with the LoRA adapter turned
     off.
   - **Never serve the base and the tuned model as two full copies.** They would count
-    twice toward the 33B cap (30 + 2.3 + 2.3 > 33).
+    twice toward the 33B cap (card counts: 30 + 2 + 2 = 34 > 33).
   - Serve one base model plus the LoRA adapter from a single vLLM process
     (`--enable-lora`; stream B verifies this for the chosen model). The fallback is
     to use the tuned model for both roles.
@@ -136,14 +137,24 @@ it.
 | Web 30% | OS-Atlas FineWeb (range-extracted) | 30% | HTML text; Lightning rewrites ~60% |
 
   - Excluded: OS-Atlas Linux and macOS (contaminated) and RICOSCA (redundant).
-  - Aim for ≥ 40% icon-like targets per platform. OS-Atlas has no text/icon label,
-    so use a proxy: small, near-square boxes or icon control types.
+  - Aim for ≥ 40% icon-like targets per platform. OS-Atlas has no text/icon label;
+    its `data_type` is the control type. So use a proxy: small, near-square boxes,
+    or icon-like control types.
+  - **FineWeb must pass a ScreenSpot-overlap check before use** (research-notes §5).
+    The fallback is SeeClick web.
   - Pilot: about 2k targets in these proportions. Full run: sized from the pilot,
     probably 20–30k.
-  - `dev`: 5% of screenshots per source, held out by screenshot.
-  - One target per training example for the pilot. Packing several targets per
-    screenshot needs a custom collator, because `assistant_only_loss` isn't
-    available on our stack. Only do it if time allows.
+  - `dev`: 5% of **base screenshots** per source, grouped so no screenshot is in
+    both train and dev:
+    - by Rico ID across UIBert and Widget Captioning, which share images;
+    - by page for FineWeb;
+    - by base screenshot (strip `_subN`) for Windows and AndroidWorld;
+    - by app for GroundCUA.
+    The first dev slice must exist **before 3pm** (gate D1 uses it).
+  - One target per training example for the pilot. Packing (several targets per
+    screenshot) is faster, but it needs either a custom collator (`assistant_only_loss`
+    isn't available on our stack) or a multi-target prompt/completion format that
+    differs from eval. Only do it if the pilot shows the unpacked run is too slow.
 - **Image preprocessing contract (A owns it; everyone imports it):**
   - **One function** in `common/grounding.py`, used by data prep, Gym eval rows, TRL
     and the MVP app: `preprocess_screenshot(img) -> img_resized`.
@@ -179,11 +190,18 @@ it.
   **ScreenSpot-v2 stays the final held-out test**, reported three ways.
 - **Hosting:**
   - Training and eval run on Brev (vLLM).
-  - For the demo, Patrick wants everything local on his M4 Max (128 GB). Feasibility
-    is being checked; see the demo-hosting note in
-    [research-notes.md](research-notes.md) §6.
-  - The safe fallback is models served with vLLM on Brev, and the app plus browser
-    on the laptop through an SSH tunnel.
+  - **Committed demo path:** models served with vLLM on the Brev H200; the app,
+    Playwright and Gym run on Patrick's laptop through an SSH tunnel.
+  - **Mac-local (M4 Max, 128 GB) is a stretch goal.** It replaces the committed path
+    only if it passes a check by **Sat 8pm**: Lightning tool calls work, and the
+    grounder's accuracy on dev matches vLLM. See research-notes §6.
+  - The video's "runs locally" line depends on that check. Otherwise say "fits on
+    one GPU (~32B total)".
+- **Lightning data generation (instruction rewriting):** hosted Lightning by default.
+  Batch several labels per request and check the rate limit early. Self-host only if
+  the rate limit blocks it.
+- **BLADE packages:** commit only small sampled rollouts that use `file://` paths
+  (no base64) under `benchmarks/screenspot_v2/rollouts/`. Full rollouts go to HF.
 - **Publishing:** required by the track. Patrick owns the HF account. Details are in
   [submission.md](submission.md).
 - **Submission:** the form has bounty checkboxes for Lightning, NeMo Gym and vLLM;
@@ -193,14 +211,18 @@ it.
 
 ## Decision gates
 
-- **D1 base model:** use the higher dev/SSv2 score that still leaves headroom (the
-  icon splits). Prefer the model whose TRL GRPO smoke test passes. If it's a tie, take
-  Qwen3.5-2B (best-documented single-H200 recipe).
+- **D1 base model (by 3pm):** choose on the **dev** score. Report SSv2 baselines,
+  but don't select on them. Prefer headroom on the icon splits. Both checks must
+  pass for the chosen model:
+  1. vLLM `--enable-lora` loads a dummy adapter built from our PEFT config.
+  2. A 20-step TRL SFT smoke test runs.
+  If it's a tie, take Qwen3.5-2B (best-documented single-H200 recipe).
 - **D2 GRPO:** go only if SFT finished by ~9pm Saturday and the smoke test runs at
   ≤ ~35 s/step, so the run can finish by ~1am. Keep GRPO only if dev accuracy beats
   SFT. Otherwise ship SFT and say so.
-- **Demo hardware:** run Lightning NVFP4 and the grounder co-resident on the H200.
-  Stop all training first.
+- **Demo hardware:** see "Hosting" above. The committed path is the H200 (Lightning
+  NVFP4 plus the grounder co-resident, all training stopped). Mac-local only if its
+  Sat 8pm check passes.
 
 ## GPU etiquette (one shared H200, ~23 GPU-hours total)
 

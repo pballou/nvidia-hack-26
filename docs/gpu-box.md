@@ -28,13 +28,19 @@ cat > /home/ubuntu/serving.env <<'EOF'
 export VLLM_IMAGE=vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
 export VLLM_PKG=/usr/local/lib/python3.12/dist-packages/vllm
 export HF_HOME=/home/ubuntu/hf
+export PLAYWRIGHT_BROWSERS_PATH=/home/ubuntu/ms-playwright
+# Grounder image cap: MUST equal MAX_PIXELS / MIN_PIXELS in common/grounding.py.
+# M1 compares ~1 MP (1003520) vs ~2 MP (2073600); update this after D1.
+export GROUNDER_MAX_PIXELS=2073600
+export GROUNDER_MIN_PIXELS=65536
 EOF
 source /home/ubuntu/serving.env          # re-run in EVERY new shell / tmux pane
 id -nG | grep -qw docker || echo "not in docker group: prefix docker commands with sudo"
-mkdir -p /home/ubuntu/hf /home/ubuntu/vllm-cache /home/ubuntu/data /home/ubuntu/patches /home/ubuntu/ckpt
+mkdir -p /home/ubuntu/hf /home/ubuntu/vllm-cache /home/ubuntu/data /home/ubuntu/patches /home/ubuntu/ckpt /home/ubuntu/ms-playwright
 docker pull "$VLLM_IMAGE"                # ~9 GB
 
-# Pre-download weights as ubuntu (not root), so the training venv can share the cache
+# Pre-download weights as ubuntu (not root), so the training venv can share the cache.
+# HF_TOKEN: export a READ-ONLY token in your shell first. Never `hf auth login` with a write token on this shared box.
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e HF_HOME=/hf -e HF_TOKEN \
   -v /home/ubuntu/hf:/hf --entrypoint python3 "$VLLM_IMAGE" -c \
   "from huggingface_hub import snapshot_download as d; [print(d(r)) for r in ['nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4','Qwen/Qwen3.5-2B','Qwen/Qwen3-VL-2B-Instruct']]"
@@ -43,7 +49,14 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e HF_HOME=/hf -e HF_TOK
 
 **Lightning on Hopper needs a patch.** vLLM [#61603](https://github.com/vllm-project/vllm/issues/61603)
 makes Lightning return NaN or empty output on sm90 GPUs like the H200. The fix (PR
-#61718, merged 2026-10-17) isn't in any release yet. Backport the fixed file:
+#61718, merged 2026-10-17) isn't in any release yet. Backport the fixed file.
+
+> **Compliance:** this file comes from a vLLM fix opened 2026-10-15 and merged
+> 2026-10-17. Under the event's 2-week open-source rule, that's the riskiest
+> reused code we have.
+> - Use it only after the organizers OK it in Discord.
+> - Otherwise, run the final agent eval and the demo on hosted Lightning (no patch
+>   needed) or Mac-local (docs/plan.md "Hosting").
 
 ```bash
 curl -fsSL -o /home/ubuntu/patches/ssd_chunk_scan.py \
@@ -76,8 +89,9 @@ docker exec vllm-lightning grep -c _drop_racy_wgmma_configs $VLLM_PKG/model_exec
 until curl -sf localhost:8000/health >/dev/null; do docker ps -q -f name=vllm-lightning | grep -q . || { docker logs --tail 80 vllm-lightning; break; }; sleep 5; done
 ```
 
-- **No speculative decoding.** We don't use the DSpark/DFlash drafters, because they
-  count toward the 33B cap.
+- **No speculative decoding of any kind:** no DSpark, no DFlash, no built-in MTP,
+  and no `--speculative-config`. They count toward the 33B cap. Don't copy the
+  model card's serve commands; they enable DSpark.
 - **If startup fails in the humming or SSU code:** drop
   `-e VLLM_HUMMING_MOE_GEMM_TYPE=indexed --moe-backend humming --linear-backend humming --mamba-ssu-algorithm horizontal`.
 - **Thinking** is on by default. Turn it off per request with
@@ -95,30 +109,54 @@ for i in 1 2 3 4 5; do python3 -c 'import json;print(json.dumps({"model":"lightn
 
 ## 3. Serve the grounder on :8001
 
-**Qwen3.5-2B:**
+**Served names (the contract everyone codes against):**
+- `base` is the base weights. Use it for baselines and for the screen summaries
+  Lightning reads.
+- `grounder` is the current LoRA adapter on top of `base`. It exists only after SFT.
+
+Before SFT, serve the base model only (Qwen3.5-2B shown):
 
 ```bash
 source /home/ubuntu/serving.env
 docker run -d --name vllm-vlm --gpus all --ipc=host -p 127.0.0.1:8001:8001 \
   -v /home/ubuntu/hf:/root/.cache/huggingface -v /home/ubuntu/vllm-cache:/root/.cache/vllm \
-  -v /home/ubuntu/data:/home/ubuntu/data:ro \
+  -v /home/ubuntu/data:/home/ubuntu/data:ro -v /home/ubuntu/ckpt:/home/ubuntu/ckpt:ro \
   "$VLLM_IMAGE" \
-  --model Qwen/Qwen3.5-2B --served-model-name grounder Qwen/Qwen3.5-2B \
+  --model Qwen/Qwen3.5-2B --served-model-name base Qwen/Qwen3.5-2B \
   --port 8001 --gpu-memory-utilization 0.30 \
   --max-model-len 16384 --max-num-seqs 128 --max-num-batched-tokens 16384 \
   --limit-mm-per-prompt '{"image": 1, "video": 0}' \
-  --mm-processor-kwargs '{"size": {"longest_edge": 4194304, "shortest_edge": 65536}}' \
+  --mm-processor-kwargs "{\"size\": {\"longest_edge\": ${GROUNDER_MAX_PIXELS:?source serving.env}, \"shortest_edge\": ${GROUNDER_MIN_PIXELS:?}}}" \
   --allowed-local-media-path /home/ubuntu/data \
   --default-chat-template-kwargs '{"enable_thinking": false}'
 until curl -sf localhost:8001/health >/dev/null; do docker ps -q -f name=vllm-vlm | grep -q . || { docker logs --tail 80 vllm-vlm; break; }; sleep 5; done
 ```
 
+After SFT, recreate the container with the same command plus the adapter, so one
+process serves both `base` and `grounder`:
+
+```bash
+docker rm -f vllm-vlm
+# same docker run as above, plus these flags (the rank must be >= the trained LoRA rank):
+#   --enable-lora --max-lora-rank 64 --lora-modules grounder=/home/ubuntu/ckpt/<run>/adapter
+curl -s localhost:8001/v1/models    # expect both "base" and "grounder"
+```
+
+- **Gate D1 check (before 3pm):** vLLM must load a dummy adapter for the chosen base
+  model. Make it with the *exact* PEFT config you'll train with.
+  - Target only the language-model modules, never the vision tower.
+  - If vLLM rejects Qwen3.5's linear-attention projections, limit `target_modules`
+    to the MLP and full-attention projections.
+  - Record which adapter each eval used in docs/runs.md.
+
 - **Don't pass a `--reasoning-parser` for Qwen3.5.** It would return the answer as
   `reasoning` with `content: null` (vLLM #53284).
 - **Pixel cap:** `size.longest_edge` / `shortest_edge` are max and min total pixels.
-  Always pass both. One token covers 32×32 px, so this cap is ≤ 4096 image tokens.
-  **Use the same cap in TRL** (decision #8: choose ~1 MP vs ~2 MP vs this 4 MP
-  during baselines).
+  Always pass both. One token covers 32×32 px, so 2 MP is about 2,025 image tokens.
+  - The values come from `GROUNDER_MAX_PIXELS` / `GROUNDER_MIN_PIXELS` in
+    `serving.env`. They must match `common/grounding.py` and the TRL processor; see
+    the image preprocessing contract in docs/plan.md "Decisions so far".
+  - M1 baselines run at ~1 MP and at ~2 MP. Freeze the winner.
 - **If requests hang under load** (#37729): add `--gdn-prefill-backend triton`; if it
   still hangs, add `--no-enable-prefix-caching`.
 - **Tool calling** (if needed): `--enable-auto-tool-choice --tool-call-parser qwen3_coder`.
@@ -127,7 +165,7 @@ until curl -sf localhost:8001/health >/dev/null; do docker ps -q -f name=vllm-vl
 
 **Qwen3-VL-2B instead:**
 - Use the same command with
-  `--model Qwen/Qwen3-VL-2B-Instruct --served-model-name grounder Qwen/Qwen3-VL-2B-Instruct`,
+  `--model Qwen/Qwen3-VL-2B-Instruct --served-model-name base Qwen/Qwen3-VL-2B-Instruct`,
   and remove `--default-chat-template-kwargs`.
 - Tools: `--tool-call-parser hermes`.
 - Its default sampling is temperature 0.7, so send `temperature: 0` for evals.
@@ -136,14 +174,15 @@ until curl -sf localhost:8001/health >/dev/null; do docker ps -q -f name=vllm-vl
 **Smoke test:**
 
 ```bash
-curl -s localhost:8001/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"grounder","temperature":0,"max_tokens":64,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://qianwen-res.oss-accelerate.aliyuncs.com/Qwen3.5/demo/CI_Demo/mathv-1327.jpg"}},{"type":"text","text":"Describe this image in one sentence."}]}]}' | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r["choices"][0]["message"]["content"]);print(r["usage"])'
+curl -s localhost:8001/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"base","temperature":0,"max_tokens":64,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://qianwen-res.oss-accelerate.aliyuncs.com/Qwen3.5/demo/CI_Demo/mathv-1327.jpg"}},{"type":"text","text":"Describe this image in one sentence."}]}]}' | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r["choices"][0]["message"]["content"]);print(r["usage"])'
 ```
 
 ## 4. GPU memory plans (fractions of ~140 GiB; start one container at a time)
 
 | Situation | Plan |
 | --- | --- |
-| Eval / agent dev | Lightning 0.45 + grounder 0.30. Raise the grounder to 0.45 for `--num-repeats 8` evals. |
+| Eval | Grounder server 0.30 (raise to 0.45 for `--num-repeats 8` evals). Add Lightning 0.45 only when self-hosting it. |
+| Agent dev (stream C) | Use hosted Lightning plus the grounder server whenever it's up: before the SFT pilot (~5pm) and in the gaps between training runs. **Base-vs-tuned agent runs happen Sunday 7am+ (M5),** not during training. |
 | SFT | Stop both servers (`docker stop vllm-vlm vllm-lightning`). |
 | GRPO (TRL colocate) | Stop the grounder server. Use hosted Lightning or stop it too. Set `vllm_gpu_memory_utilization` explicitly (the TRL default is 0.3). |
 | Demo | Lightning 0.45 + grounder 0.30. All training stopped. |
@@ -151,6 +190,7 @@ curl -s localhost:8001/v1/chat/completions -H 'Content-Type: application/json' -
 ## 5. Training venv (`/home/ubuntu/venvs/train`)
 
 ```bash
+source /home/ubuntu/serving.env          # HF_HOME etc., so model loads use the shared cache
 command -v gcc >/dev/null && command -v g++ >/dev/null || (sudo apt-get update && sudo apt-get install -y build-essential)   # Triton JIT needs a compiler
 curl -LsSf https://astral.sh/uv/0.13.1/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
 grep -q UV_LINK_MODE ~/.bashrc || echo 'export UV_LINK_MODE=copy' >> ~/.bashrc; export UV_LINK_MODE=copy   # ~/.cache is on /ephemeral
@@ -206,8 +246,9 @@ grep -q "falling back to its reference PyTorch implementation" /tmp/qwen35_fastp
 ## 6. NeMo Gym on the box (`/home/ubuntu/<you>/nvidia-hack-26`)
 
 Same as SETUP.md §6, with two differences:
-- **Paths:** set `export HF_HOME=/home/ubuntu/hf` first, and point `env.yaml` at
-  `http://127.0.0.1:8001/v1` (served name `grounder`, `policy_api_key: EMPTY`).
+- **Paths:** run `source /home/ubuntu/serving.env` first. Point `env.yaml` at
+  `http://127.0.0.1:8001/v1` with `policy_api_key: EMPTY`. Use served name `base`
+  for baselines and `grounder` after SFT.
 - **Run Gym on the box** for anything bigger than a smoke test with real screenshots.
   That keeps multi-MB images off the tunnel.
 
