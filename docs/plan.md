@@ -89,7 +89,7 @@ publishing.
 | M0 Setup | Sat 1pm | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
 | M1 Baseline | Sat 3pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
 | M2 Data + SFT | Sat 3pm → 8pm | Training slice built with `data_prep/sample_os_atlas.py` (Linux/macOS **included**; their 28 overlapping SSv2 rows are excluded from eval instead), sized from the pilot, per the Training data mix table below. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
-| M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Overnight loop limits (`training/night_loop.py`): no round starts after 01:30, no GRPO step after 02:40, hard end 02:50. **Gate D2: keep GRPO only if dev improves.** |
+| M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Overnight loop limits: code defaults 01:30 last round start / 02:40 last GRPO step / 02:50 hard end; tonight extended to 04:15 / 05:25 / 05:40 so a slow round isn't cut short. **Gate D2: keep GRPO only if dev improves.** |
 | M4 Agent | Sat afternoon → night (parallel, mostly without the GPU) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with hosted Lightning. Run it against the `base` grounder before ~5pm and in the gaps between training runs; click-overlay traces. **Base-vs-tuned agent runs move to M5.** |
 | M5 Ship | Sun 7am → 10:30am | Base-vs-tuned agent runs, final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |
 
@@ -255,7 +255,7 @@ it.
   - **Decided 2026-10-17: Qwen3.5-2B at 2 MP.** Details are under "Decisions so far"
     above.
 - **D2 GRPO:** go only if SFT finished by ~9pm Saturday and the smoke test runs at
-  ≤ ~35 s/step, so rounds fit before the loop's 01:30 last round start. Keep GRPO only if dev accuracy beats
+  ≤ ~35 s/step, so rounds fit before the loop's last round start (04:15 tonight). Keep GRPO only if dev accuracy beats
   SFT. Otherwise ship SFT and say so.
 - **Demo hardware:** see "Hosting" above. Hybrid if Gate L passes; fully local only
   if Gate G also passes; otherwise all on the H200 (official Lightning BF16 plus the
