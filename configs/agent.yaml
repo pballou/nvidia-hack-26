@@ -1,8 +1,12 @@
 # Agent config (docs/tasks/contracts.md §4). Loaded by agent/config.py; env vars override
 # (AGENT_<KEY>, e.g. AGENT_GROUNDER_MODEL=grounder, AGENT_LIGHTNING=local; see agent/config.py).
 sandbox_url: http://127.0.0.1:8090
-lightning: {base_url: https://integrate.api.nvidia.com/v1, model: nvidia/nemotron-3.5-lightning-30b-a3b, api_key_env: NVIDIA_API_KEY}
-vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}
+# Local Lightning on the Mac (vllm-metal, docs/local-mac.md) is the default; AGENT_LIGHTNING=hosted switches
+# to build.nvidia.com (NVIDIA_API_KEY, 25-80 s per call).
+lightning: {base_url: http://127.0.0.1:8000/v1, model: lightning, api_key_env: null}
+# Until gate D1: :8002 = Qwen3-VL-2B (model_family qwen3_vl), :8001 = Qwen3.5-2B (qwen3_5), both served as
+# `base` through Patrick's tunnel. After D1 the chosen model moves to :8001 (the contract URL).
+vlm: {base_url: http://127.0.0.1:8002/v1, api_key: EMPTY}
 grounder_model: base        # base | grounder
 summary_model: base         # base | grounder (grounder when Mac-local fully local)
 model_family: qwen3_vl      # qwen3_vl | qwen3_5
