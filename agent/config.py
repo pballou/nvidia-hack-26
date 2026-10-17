@@ -212,11 +212,12 @@ def _read_dotenv(path: Path = REPO_ROOT / ".env") -> dict[str, str]:
         if line.startswith("export "):
             line = line[len("export "):]
         key, _, value = line.partition("=")
-        value = value.strip()
-        if value[:1] in ("'", '"') and value[0] in value[1:]:
+        if not value or value[0].isspace():  # shell: `KEY=   # comment` assigns the empty string
+            value = ""
+        elif value[0] in ("'", '"') and value[0] in value[1:]:
             value = value[1:value.index(value[0], 1)]
         else:  # unquoted: like the shell, stop at whitespace (drops inline comments)
-            value = value.split(None, 1)[0] if value else ""
+            value = value.split(None, 1)[0]
         if value:
             out[key.strip()] = value
     return out

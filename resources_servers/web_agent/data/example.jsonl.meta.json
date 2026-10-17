@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-10-17T21:29:27+00:00",
+  "generated_at": "2026-10-17T21:40:02+00:00",
   "command": "python resources_servers/web_agent/make_tasks.py --tasks sandbox/tasks.json --ids text-size-large,download-september-statement,mark-all-read,turn-on-autopay,high-contrast --sandbox-url http://127.0.0.1:8091 --summary-model base --out resources_servers/web_agent/data/example.jsonl",
   "env_overrides": {},
   "output": "resources_servers/web_agent/data/example.jsonl",
   "rows": 5,
-  "rows_sha256": "a1028ecf74233cc06b42e8651a88be342a49ff5700feee3909ccbb1dbed8b13f",
+  "rows_sha256": "2edcfd8d33cac9361bf7b46e4fb2cec7c8721bab8c1e3bdea6d7057764c058ad",
   "task_ids": [
     "text-size-large",
     "download-september-statement",
@@ -13,7 +13,7 @@
     "high-contrast"
   ],
   "tasks_source": "sandbox/tasks.json",
-  "tasks_sha256": "78817737525879b2321717b218a321c3d972a55a10a35d375fdaef3186511926",
+  "tasks_sha256": "cffa457a2fa500c9dc5d967cf1ee8640ab6396730f44fb8d7309470fe824a0ff",
   "initial_observation_source": "vlm:base",
   "summary_model": "base",
   "vlm_served_models": {
