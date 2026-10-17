@@ -137,8 +137,10 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
 
 **Gotchas:**
 
-- **One exception in a tool or `verify()` aborts the whole `gym eval run`.** Catch
-  everything; return `reward=0, mask_sample=True`.
+- **An exception in `seed_session`/`verify()` or a failed model call aborts the whole
+  `gym eval run`** (confirmed by T2 for Gym 0.7.0). Catch everything there; return
+  `reward=0, mask_sample=True`. Tool exceptions don't abort; they come back to the
+  model as a 500 body.
 - Base64 screenshots get copied into the materialized-input and rollout files. Prefer
   `file://` (start vLLM with `--allowed-local-media-path`) or http URLs when Gym and
   vLLM share a box.

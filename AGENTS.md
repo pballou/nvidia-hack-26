@@ -118,9 +118,13 @@ a user describes what they want, and the agent does it from pixels alone.
 
 ## NeMo Gym rules of thumb
 
-- **Exceptions abort the whole run.** An exception in a tool or `verify()` aborts the
-  entire `gym eval run`. Catch it, and return `reward=0, mask_sample=True` with a
-  `failure_reason`.
+- **What aborts a run (Gym 0.7.0):**
+  - An exception in `seed_session` or `verify()`, or a failed model call, aborts the
+    entire `gym eval run`. Catch it, and return `reward=0, mask_sample=True` with a
+    `failure_reason`.
+  - A **tool** exception doesn't abort the run. It comes back to the model as a 500
+    body. Still return tool errors as 200 + an `error` field, so the model gets a
+    readable message.
 - **Declare row fields.** Every row field `verify()` needs (bbox, img_w/h, platform,
   data_type) must be declared on the VerifyRequest subclass, or it's silently
   dropped. Put slice fields on the VerifyResponse so they reach the metrics.
