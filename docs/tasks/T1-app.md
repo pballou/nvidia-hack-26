@@ -139,9 +139,10 @@ functions, unit-tested.
 - Its keyboard flow works without a mouse (accessibility credibility).
 - `--headed` option to show the Playwright browser window side by side for the video.
 
-**Optional, only if everything else is done:** voice input through the browser's
-built-in Web Speech API. Don't add any speech model, because it would count toward the
-33B cap. Label it "browser dictation".
+**Voice input (approved 2026-10-17):** local NVIDIA Parakeet TDT 0.6B behind
+`POST /api/transcribe`, with a mic button and push-to-talk (Right Option, or Space
+outside text inputs). 16 kHz WAV is captured in the browser. Never use the cloud
+Web Speech API. Cap: 30 + 2 + 0.6 = 32.6B.
 
 ## Run scripts and README
 
