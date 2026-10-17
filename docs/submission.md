@@ -14,11 +14,57 @@ Target: everything finished by 10:30.
 | Submission Description | 1 paragraph: problem → approach → results | Patrick | README pitch |
 | Demo Video URL | Unlisted **YouTube** (accepted by both the form and the checklist), 3–5 min | Charlie (records and uploads) | §Video |
 | GitHub Repo | `https://github.com/pballou/nvidia-hack-26` (public) | — | — |
-| AI Models Used | Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16 checkpoint); our fine-tuned grounder (Qwen3.5-2B or Qwen3-VL-2B + LoRA) | Kyle | — |
-| Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM, NVIDIA Brev (H200), TRL, Playwright | all | — |
-| ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (write Sunday) |
-| ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (write Sunday) |
+| AI Models Used | Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16 checkpoint); our fine-tuned grounder (Qwen3.5-2B + LoRA); NVIDIA Parakeet TDT 0.6B v3 (local voice input) | Kyle | — |
+| Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM (+ vllm-metal on the Mac), NVIDIA Brev (H200), TRL, Playwright | all | — |
+| ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (draft; final Sunday). Form text: §Form text |
+| ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (draft; final Sunday). Form text: §Form text |
 | ☑ Red Hat vLLM bounty | (checkbox only) vLLM serves both models; GRPO rollouts via vLLM colocate | Kyle | — |
+
+## Form text (paste-ready drafts)
+
+Short versions of the bounty write-ups for the form's explanation boxes. Fill in the **TBD**s from
+`docs/results.md` on Sunday, and keep them consistent with the full docs. Each one links to its
+full doc for judges who want more.
+
+**Lightning bounty:**
+
+> Nemotron 3.5 Lightning is the brain of GUI Assist, a vision-only accessibility agent. Lightning
+> never sees the screen. After each action it reads a text observation (the URL, whether the
+> screen changed, what its last action did, and a screen description from a 2B VLM), then calls
+> one of five schema-checked tools. A call like `click("the L option in the Text size row")` goes
+> to our fine-tuned 2B grounder, which turns the description into a pixel. Offline, Lightning
+> also rewrites raw accessibility labels into user-style click instructions for the grounder's
+> training data. In a human audit, 42 of 43 checkable rewrites were faithful (85.7% if "unsure"
+> counts as a failure), and the data is published with its prompt. We self-host NVIDIA's official BF16 checkpoint: about 1.2 s per planner step on an
+> idle server, against about 26 s on the hosted free tier. We tune it with corrective schema
+> validation, compact observations and per-step thinking control. Turning thinking on only after
+> a problem step raised claimed-equals-verified from 6/12 to 9/12 tasks and cut actions that
+> changed nothing on screen from 45 to 27 (n=1 per task). In the NeMo Gym `web_agent` env: TBD verified success, base vs
+> fine-tuned grounder. Full write-up:
+> `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-lightning.md`
+
+**NeMo Gym bounty:**
+
+> We used NeMo Gym to measure and improve a 2B grounding VLM (Qwen3.5-2B + LoRA), the model that
+> turns "the gear icon in the top-right" into a click. Two Gym environments live in our repo:
+> `gui_grounding` (reward = the click lands in the target box; adapted from Gym's
+> `gui_coordinate`) and `web_agent` (Nemotron Lightning plus our grounder on a sandbox app,
+> rewarded from the app's own state). Every number comes from `gym eval run`. SFT took dev
+> accuracy from 76.4% to 85.7% and held-out ScreenSpot-v2-clean from 86.3% to 89.1% (icons
+> +6.7). The improvement loop runs through Gym: `gym eval profile` finds rows the model sometimes
+> gets right, TRL GRPO trains on them with the Gym server's `/verify` as the reward, and a dev
+> eval plus `gym eval compare` decides keep or revert. BLADE failure analysis steers the next
+> round. After GRPO: TBD dev, TBD ScreenSpot-v2-clean, and TBD agent task success, base vs
+> tuned. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
+> were captured on the same machines as OS-Atlas training data. Full write-up:
+> `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-nemo-gym.md`
+
+**vLLM bounty** (checkbox only; use this if the form asks for a sentence):
+
+> vLLM serves every model in the system. One Qwen3.5-2B process on the H200 serves both `base`
+> (screen descriptions) and `grounder` (our LoRA adapter, switched per request), so the base and
+> tuned models count once toward the parameter cap. GRPO rollouts run on vLLM colocated with TRL,
+> and Lightning runs on a MacBook through vllm-metal, the vLLM project's plugin for Apple GPUs.
 
 ## README must include (organizer checklist)
 
