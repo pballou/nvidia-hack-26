@@ -40,6 +40,8 @@ Patrick publishes under the Hugging Face account **`patrickballou`**.
   saved with `hf auth login`, never committed, and revoked after the event.
 - Patrick's full write token stays in `.env` on his laptop.
 
+The repos already exist and are **private**. Make them public at release (Sun morning).
+
 Upload commands (on the box):
 
 ```bash

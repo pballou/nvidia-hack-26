@@ -87,7 +87,8 @@ a user describes what they want, and the agent does it from pixels alone.
   `base`.
 - **Lightning** is text-only: give it text observations, never images.
   - Development: use the hosted build.nvidia.com endpoint.
-  - Final agent eval and demo: self-hosted. Where it runs is in docs/plan.md
+  - Final agent eval and demo: self-hosted. Hybrid first: Lightning on Patrick's
+    Mac via vllm-metal, grounder on the H200. See docs/local-mac.md and docs/plan.md
     "Hosting".
 
 ## Data and model-interface conventions

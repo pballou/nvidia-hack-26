@@ -331,13 +331,18 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   3. Reasoning control as a measured feature: thinking off for routine steps, a
      budget on retries; plot success vs. latency.
 
-**Demo hosting (being evaluated):**
-- Patrick wants to run everything on an M4 Max (128 GB) for the demo. Local
-  runtimes (vLLM on Apple Silicon, MLX, llama.cpp) are being checked for Lightning
-  tool-calling support, Qwen3.5/Qwen3-VL vision support, and matching image
-  preprocessing.
-- The fallback is vLLM on the Brev H200, with the app and browser on the laptop
-  through an SSH tunnel.
+**Demo hosting (checked 2026-10-17; full details in [local-mac.md](local-mac.md)):**
+- **vllm-metal** v0.31.0 (official vllm-project plugin for Apple GPUs, released
+  2026-10-13) supports Nemotron-H/Lightning and Qwen3.5/Qwen3-VL images, all
+  marked experimental.
+  - Prefix caching is off for Lightning.
+  - Lightning tool calling on Metal is unverified, which is why Gate L exists.
+  - VLM LoRA isn't usable in the stable release, so the Mac serves a merged
+    grounder.
+- **Plan:** hybrid (Lightning on the Mac, grounder on the H200). Fully local only if
+  the grounder passes a parity gate.
+- **Fallbacks:** llama-server is the planner fallback. Don't use llama.cpp or mlx-vlm
+  for the grounder; their preprocessing differs.
 
 ## 7. Compute estimates (*estimates*: confirm with a 20-step pilot)
 
