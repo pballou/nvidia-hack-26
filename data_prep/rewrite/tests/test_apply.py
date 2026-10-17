@@ -226,11 +226,13 @@ def write_jsonl(path: Path, rows) -> Path:
     return path
 
 
-def run_main(tmp_path: Path, manifest, rewrites, out: str, *extra) -> tuple[int, Path]:
-    m = write_jsonl(tmp_path / "manifest.jsonl", manifest)
+def run_main(tmp_path: Path, manifest, rewrites, data_dir: str, *extra) -> tuple[int, Path]:
+    """Write tmp_path/<data_dir>/manifest.jsonl and tmp_path/rewrites.jsonl; apply.py writes next to the manifest."""
+    out_dir = tmp_path / data_dir
+    out_dir.mkdir(exist_ok=True)
+    m = write_jsonl(out_dir / "manifest.jsonl", manifest)
     rw = write_jsonl(tmp_path / "rewrites.jsonl", rewrites)
-    out_dir = tmp_path / out
-    return apply.main(["--manifest", str(m), "--rewrites", str(rw), "--out", str(out_dir), *extra]), out_dir
+    return apply.main(["--manifest", str(m), "--rewrites", str(rw), *extra]), out_dir
 
 
 FILES = ("train_lightning.jsonl", "train_template.jsonl", "apply_stats.json")
@@ -242,8 +244,8 @@ def test_main_writes_outputs_deterministically(tmp_path, manifest, rewrites, ids
     first = {f: (out1 / f).read_bytes() for f in FILES}
     assert run_main(tmp_path, manifest, rewrites, "out1")[0] == 0
     assert {f: (out1 / f).read_bytes() for f in FILES} == first
-    _, out2 = run_main(tmp_path, manifest, rewrites, "out2")
-    assert {f: (out2 / f).read_bytes() for f in FILES} == first
+    _, out2 = run_main(tmp_path, manifest, rewrites, "out2")  # another copy of the manifest: same train rows
+    assert {f: (out2 / f).read_bytes() for f in FILES[:2]} == {f: first[f] for f in FILES[:2]}
     assert not list(out1.glob("*.tmp"))
 
     lightning = [json.loads(line) for line in first["train_lightning.jsonl"].decode().splitlines()]
@@ -253,7 +255,7 @@ def test_main_writes_outputs_deterministically(tmp_path, manifest, rewrites, ids
     assert [r["image_path"] for r in lightning] == [r["image_path"] for r in manifest if r["id"] != ids["aw_sel"][0]]
 
     stats = json.loads(first["apply_stats.json"])
-    assert stats["image_root"] == str(tmp_path.resolve())
+    assert stats["image_root"] == str(out1.resolve())
     assert stats["rows"] == {"manifest": 10, "train": 9, "dropped": 1, "missing": 0}
     assert stats["by_style"] == {"descriptive": 1, "functional": 2, "natural": 2, "positional": 1, "raw": 3}
     assert stats["dropped"] == {"by_source": {"os_atlas/androidworld": 1}, "by_reason": {"numeric": 1}}
@@ -261,10 +263,29 @@ def test_main_writes_outputs_deterministically(tmp_path, manifest, rewrites, ids
     assert stats["by_source"]["os_atlas/androidworld"]["train"] == 4
     assert stats["rewrites"]["records"] == 5
     assert stats["rewrites"]["prompt_versions"] == {"v1": 5}
-    assert stats["manifest"]["sha256"] == hashlib.sha256((tmp_path / "manifest.jsonl").read_bytes()).hexdigest()
+    assert stats["manifest"]["sha256"] == hashlib.sha256((out1 / "manifest.jsonl").read_bytes()).hexdigest()
     for f in FILES[:2]:
         assert stats["outputs"][f] == {"rows": 9, "sha256": hashlib.sha256(first[f]).hexdigest()}
     assert "9 train rows" in capsys.readouterr().out
+
+
+def test_out_defaults_to_the_manifest_dir_and_elsewhere_is_refused(tmp_path, manifest, rewrites, capsys, monkeypatch):
+    data = tmp_path / "data"
+    elsewhere = tmp_path / "elsewhere"
+    code, _ = run_main(tmp_path, manifest, rewrites, "data", "--out", str(elsewhere))
+    err = capsys.readouterr().err
+    assert code == 1 and "manifest's directory" in err and "training/sft.py" in err and str(data.resolve()) in err
+    assert not elsewhere.exists() and not (data / "train_lightning.jsonl").exists()
+    assert run_main(tmp_path, manifest, rewrites, "data", "--out", str(data / "train"))[0] == 1  # a subdir neither
+
+    monkeypatch.chdir(data)  # the same directory spelled differently (relative, trailing "/.", via a symlink) is fine
+    assert run_main(tmp_path, manifest, rewrites, "data", "--out", ".")[0] == 0
+    assert run_main(tmp_path, manifest, rewrites, "data", "--out", f"{data}/sub/..")[0] == 0
+    (tmp_path / "link").symlink_to(data, target_is_directory=True)
+    assert run_main(tmp_path, manifest, rewrites, "data", "--out", str(tmp_path / "link"))[0] == 0
+    assert sorted(p.name for p in data.iterdir()) == ["apply_stats.json", "manifest.jsonl", "train_lightning.jsonl",
+                                                      "train_template.jsonl"]
+    assert apply.resolve_out(data / "manifest.jsonl", None) == data.resolve()
 
 
 def test_main_missing_rewrites_fails_unless_allowed(tmp_path, manifest, rewrites, capsys):
@@ -313,3 +334,19 @@ def test_sampler_instruction_style_kept_on_natural_rows_and_not_mistaken_for_app
     assert {r["instruction_style"] for r in train[2:]} == {"raw"}
     template = template_variant(train)
     assert [r["instruction_style"] for r in template[:2]] == ["icon", "natural"]
+
+
+def test_splits_filter_keeps_only_listed_splits(tmp_path):
+    base = {"image_path": "images/x.png", "img_w": 100, "img_h": 100, "bbox": [1, 1, 9, 9], "data_type": None,
+            "platform": "mobile", "source": "os_atlas/uibert", "instruction_style": None}
+    rows = [{**base, "id": f"uibert:s{i}:0", "instruction": f"open item {i}", "split": "train" if i % 3 else "dev"}
+            for i in range(9)]
+    (tmp_path / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (tmp_path / "rewrites.jsonl").write_text("")
+    assert apply.main(["--manifest", str(tmp_path / "manifest.jsonl"), "--rewrites", str(tmp_path / "rewrites.jsonl"),
+                       "--splits", "train"]) == 0
+    for name in ("train_lightning.jsonl", "train_template.jsonl"):
+        out = [json.loads(line) for line in (tmp_path / name).read_text().splitlines()]
+        assert {r["split"] for r in out} == {"train"} and len(out) == 6
+    stats = json.loads((tmp_path / "apply_stats.json").read_text())
+    assert stats["manifest"]["rows"] == 9 and stats["manifest"]["rows_in_splits"] == 6

@@ -3,9 +3,13 @@
 train_lightning.jsonl: selected raw-label rows get the Lightning instruction (keep=false dropped); others pass through.
 train_template.jsonl: the identical row set and order with the original labels, so the ablation isolates the text.
 
+Both files (and apply_stats.json) are written into the manifest's own directory. image_path stays relative to it and
+training/sft.py resolves image_path against the train file's directory (args.train.parent), so a train file anywhere
+else would point at missing images. --out is optional and must resolve to that same directory.
+
 Example:
   python data_prep/rewrite/apply.py --manifest /home/ubuntu/data/os_atlas_20k/manifest.jsonl \
-      --rewrites out/rewrites.jsonl --out /home/ubuntu/data/os_atlas_20k/train
+      --rewrites out/rewrites.jsonl      # writes /home/ubuntu/data/os_atlas_20k/train_{lightning,template}.jsonl
 """
 
 import argparse
@@ -168,32 +172,52 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--manifest", type=Path, required=True)
     ap.add_argument("--rewrites", type=Path, required=True, help="rewrites.jsonl from rewrite.py")
-    ap.add_argument("--out", type=Path, required=True, help="directory for train_lightning/train_template jsonl")
+    ap.add_argument("--out", type=Path, help="output directory; default and only allowed value: the manifest's "
+                    "directory (training/sft.py resolves image_path relative to the train file)")
+    ap.add_argument("--splits", type=_csv, default=(),
+                    help="only write rows whose split is listed, e.g. train (must match rewrite.py --splits)")
     ap.add_argument("--allow-missing", action="store_true", help="keep raw labels for selected rows with no rewrite")
     ap.add_argument("--raw-sources", type=_csv, default=(), help="extra raw-label sources, comma-separated")
     ap.add_argument("--natural-sources", type=_csv, default=(), help="extra natural-label sources, comma-separated")
     return ap
 
 
+def resolve_out(manifest_path: Path, out: Path | None) -> Path:
+    """The manifest's directory; an --out that resolves anywhere else is refused (image_path is relative to it)."""
+    image_root = Path(manifest_path).resolve().parent
+    if out is not None and Path(out).expanduser().resolve() != image_root:
+        raise ValueError(f"--out {out} resolves to {Path(out).expanduser().resolve()}, not the manifest's directory "
+                         f"{image_root}. image_path is relative to the manifest directory and training/sft.py resolves "
+                         "it against the train file's directory, so the train files must sit next to the manifest. "
+                         "Drop --out (it defaults to the manifest's directory).")
+    return image_root
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        args.out = resolve_out(args.manifest, args.out)
         manifest = meta.load_manifest(args.manifest, extra_raw=args.raw_sources, extra_natural=args.natural_sources)
+        manifest_rows = len(manifest)
+        if args.splits:
+            manifest = [r for r in manifest if r.get("split") in args.splits]
         rewrites = load_jsonl(args.rewrites)
         rows, dropped, missing = _apply(manifest, rewrites, args.raw_sources, args.natural_sources, args.allow_missing)
     except (OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     template = template_variant(rows, extra_raw=args.raw_sources, extra_natural=args.natural_sources)
-    args.out.mkdir(parents=True, exist_ok=True)
     outputs = {"train_lightning.jsonl": rows, "train_template.jsonl": template}
     for name, data in outputs.items():
         _write_jsonl(args.out / name, data)
     counts = build_stats(manifest, rewrites, rows, dropped, missing)
-    stats = {"manifest": {"path": str(args.manifest), "sha256": _sha256(args.manifest), "rows": len(manifest)},
+    stats = {"manifest": {"path": str(args.manifest), "sha256": _sha256(args.manifest), "rows": manifest_rows,
+                          "splits": list(args.splits), "rows_in_splits": len(manifest)},
              "rewrites": {"path": str(args.rewrites), "sha256": _sha256(args.rewrites), **counts.pop("rewrites")},
-             "image_root": str(args.manifest.resolve().parent),
-             "image_path_note": "image_path is unchanged from the manifest, relative to image_root (the manifest dir)",
+             "image_root": str(args.out),
+             "image_path_note": "image_path is unchanged from the manifest, relative to image_root: the manifest's "
+                                "directory, which also holds these train files (training/sft.py resolves image_path "
+                                "against the train file's directory)",
              "allow_missing": args.allow_missing,
              "raw_sources": list(args.raw_sources), "natural_sources": list(args.natural_sources),
              "outputs": {n: {"rows": len(d), "sha256": _sha256(args.out / n)} for n, d in outputs.items()},
