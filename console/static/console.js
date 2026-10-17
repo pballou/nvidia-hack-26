@@ -4,6 +4,11 @@
  * POST /api/run, GET /api/runs/{id}, SSE /api/runs/{id}/events, POST /api/runs/{id}/stop.
  * StepEvent payloads are documented in agent/trace.py. Everything the agent says is
  * rendered with textContent (never innerHTML), and unknown shapes fall back to JSON.
+ *
+ * Voice input lives in voice.js and drives the page through window.AcmeConsole (below):
+ * ready (resolves after /api/config and /api/tasks were tried), config(), isRunning(),
+ * isStarting(), setRequest(text) -> {taskId, request}, run(), stop(). The page fires
+ * `acme:run-start` / `acme:run-end` on document (detail: {runId, request, taskId}).
  */
 'use strict';
 
@@ -70,6 +75,24 @@
     runSeq: 0,          // bumps per attached run (unique element ids)
   };
   const ui = {};
+
+  // --- API for voice.js ----------------------------------------------------------------
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  window.AcmeConsole = Object.freeze({
+    ready,
+    config: () => S.config,
+    isRunning: () => isRunning(),
+    isStarting: () => S.starting,
+    setRequest: (text) => setRequestText(text),
+    run: () => startRun(),
+    stop: () => stopRun(),
+    matchTask: (text) => matchTask(text),
+  });
+
+  function emit(name, detail) {
+    try { document.dispatchEvent(new CustomEvent(name, { detail })); } catch { /* a listener failed; not ours */ }
+  }
 
   // --- small helpers ------------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
@@ -328,6 +351,7 @@
     renderViewer();
     renderOptionsSummary();
     await Promise.all([loadConfig(), loadTasks()]);
+    resolveReady({ config: S.config });
     const last = tabStore.get(RUN_KEY);
     if (last) watchRun(last, { quietIfDone: true });
   }
@@ -429,6 +453,38 @@
       ui.taskMeta.textContent = '';
       ui.requestNote.textContent = 'You edited the task text, so this runs as free text (no sandbox check).';
     }
+  }
+
+  /** Request text as a comparison key: case, accents, punctuation and whitespace don't matter. */
+  function requestKey(text) {
+    return str(text).normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');  // NFKD splits off accents (\p{M}), dropped here
+  }
+
+  function matchTask(text) {
+    const key = requestKey(text);
+    if (!key) return null;
+    for (const t of S.tasksById.values()) if (requestKey(t.request) === key) return t;
+    return null;
+  }
+
+  /** Put text in the request box (voice input). A sandbox task's text selects that task, so its verdict shows. */
+  function setRequestText(text) {
+    const clean = oneLine(text).slice(0, 500);
+    const t = matchTask(clean);
+    clearFormError();
+    ui.requestNote.textContent = '';
+    if (t) {
+      S.taskId = String(t.id);
+      ui.taskSelect.value = S.taskId;
+      ui.request.value = t.request;
+      ui.taskMeta.textContent = taskMetaText(t);
+    } else {
+      S.taskId = null;
+      ui.taskSelect.value = '';
+      ui.request.value = clean;
+      ui.taskMeta.textContent = '';
+    }
+    return { taskId: S.taskId, request: ui.request.value };
   }
 
   function showFormError(message, activeRunId) {
@@ -593,6 +649,7 @@
     if (!info.quiet) announce(`Run started: ${S.run.request}`);
     S.timer = window.setInterval(tick, 1000);
     openStream(runId);
+    emit('acme:run-start', { runId, request: S.run.request, taskId: S.run.taskId });
   }
 
   function openStream(runId) {
@@ -691,6 +748,7 @@
     renderViewer();
     scrollLog();
     if (run.focusOnEnd) ui.banner.focus();
+    emit('acme:run-end', { runId: run.id, request: run.request, taskId: run.taskId });
   }
 
   function finalStatus(run) {

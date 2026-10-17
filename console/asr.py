@@ -112,7 +112,7 @@ def read_wav(data: bytes) -> tuple[bytes, float]:
             channels, width, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
             frames = w.readframes(n)
     except (wave.Error, EOFError) as exc:
-        raise AudioError(f"Unreadable WAV: {exc}") from exc
+        raise AudioError(f"Unreadable WAV: {exc or 'the file is truncated'}") from exc
     if channels != 1 or width != 2 or rate != SAMPLE_RATE:
         raise AudioError(f"Audio must be 16 kHz mono 16-bit PCM (got {rate} Hz, {channels} channel(s), {8 * width}-bit)")
     duration = len(frames) / 2 / SAMPLE_RATE
