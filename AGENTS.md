@@ -130,6 +130,13 @@ a user describes what they want, and the agent does it from pixels alone.
   without a tool call, or at `max_steps`.
 - **Run `gym` from the repo root** (config, server venvs, `./cache` and `./results`
   are all relative to the current directory).
+- **Importing our code inside Gym servers:** there's no root `pyproject.toml` on
+  purpose. Gym's venv builder would treat every server in the repo as an editable
+  Gym checkout, which breaks the venv builds. A server that needs `common/`,
+  `agent/` or `sandbox/` adds the repo root to `sys.path` at the top of its
+  `app.py`, with a comment saying why (`resources_servers/web_agent/app.py` does
+  this). Charlie's `gui_grounding` should do the same to import
+  `common/grounding.py`.
 - **Failure analysis:** after every comparable pair of eval runs (e.g. base vs.
   tuned), run the **BLADE** skill (`.agents/skills/nemo-gym-blade-analysis`, also
   under `.claude/skills/`) on the artifacts.
