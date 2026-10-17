@@ -2,12 +2,13 @@
 
 HTTP API (binding for console/static; details in console/README.md):
   GET  /                          console/static/index.html (and /static/*)
-  GET  /api/config                {agent, sandbox_url, headed, defaults}
+  GET  /api/config                {agent, sandbox_url, headed, defaults, asr}
   GET  /api/tasks                 the 12 sandbox tasks, without their checks
   POST /api/run                   {request, task_id?, options?} -> {run_id, sid, start_url}; 409 busy, 400 bad input, 503 unavailable
   GET  /api/runs/{run_id}         run summary
   GET  /api/runs/{run_id}/events  SSE: status, step, result, verdict, end (replay + live; honors Last-Event-ID)
   POST /api/runs/{run_id}/stop    {ok: true}
+  POST /api/transcribe            16 kHz mono PCM16 WAV (raw audio/wav or multipart "audio") -> {text, duration_s, latency_ms, model}
   GET  /runs/{agent_run_id}/{step_XX[_overlay].png}  trace images
 """
 
@@ -26,6 +27,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from console import asr
 from console.agent_bridge import AgentUnavailable, get_agent
 from console.runner import Busy, Runner, StartFailed
 
@@ -154,7 +156,7 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
     @app.get("/api/config")
     def config():
         return {"agent": settings.agent, "sandbox_url": settings.sandbox_url, "headed": settings.headed,
-                "defaults": settings.default_options()}
+                "defaults": settings.default_options(), "asr": asr.info()}
 
     @app.get("/api/tasks")
     def list_tasks():
@@ -178,6 +180,29 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
         except StartFailed as e:
             return _error(503, str(e))
         return {"run_id": run.run_id, "sid": run.sid, "start_url": run.start_url}
+
+    @app.post("/api/transcribe")
+    async def transcribe(request: Request):
+        """Voice input: the browser's WAV -> local ASR engine (console/asr.py). Never leaves the machine."""
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > asr.MAX_BYTES + 4096:
+            return _error(413, f"recording is too large (max {asr.MAX_SECONDS:.0f} s)")
+        if request.headers.get("content-type", "").startswith("multipart/form-data"):
+            form = await request.form(max_part_size=asr.MAX_BYTES + 4096)
+            upload = form.get("audio")
+            if upload is None or isinstance(upload, str):
+                return _error(400, "multipart upload needs an 'audio' file field")
+            data = await upload.read()
+        else:
+            data = await request.body()
+        if len(data) > asr.MAX_BYTES:
+            return _error(413, f"recording is too large (max {asr.MAX_SECONDS:.0f} s)")
+        try:
+            return await run_in_threadpool(asr.transcribe, data)  # engines are blocking; keep SSE responsive
+        except asr.AudioError as e:
+            return _error(400, str(e))
+        except asr.EngineUnavailable as e:
+            return _error(503, str(e))
 
     @app.get("/api/runs/{run_id}")
     def run_info(run_id: str):

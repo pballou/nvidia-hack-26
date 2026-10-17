@@ -88,7 +88,8 @@ def test_config_tasks_and_index(console, tmp_path):
     base, _ = console(fake_agent(trace_root=tmp_path), static_dir=static)
     cfg = httpx.get(f"{base}/api/config").json()
     assert cfg == {"agent": "mock", "sandbox_url": cfg["sandbox_url"], "headed": False,
-                   "defaults": {"grounder": "base", "thinking": "retry", "lightning": "local"}}
+                   "defaults": {"grounder": "base", "thinking": "retry", "lightning": "local"},
+                   "asr": {"available": True, "model": "stub", "label": "stub"}}
     tasks = httpx.get(f"{base}/api/tasks").json()
     assert len(tasks) == 12 and all(set(t) == {"id", "request", "start_path", "tags", "steps_min"} for t in tasks)
 
