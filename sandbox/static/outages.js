@@ -90,7 +90,6 @@
   let s = 1;           // CSS px per design unit
   let hover = null;    // district under the mouse
   let selected = null; // district whose report dialog is open
-  let kbd = -1;        // index into districts chosen with the arrow keys
 
   // ---- geometry --------------------------------------------------------------
 
@@ -243,7 +242,7 @@
     const hc = document.documentElement.classList.contains('hc');
     const c = hc ? HC : LIGHT;
     const font = getComputedStyle(document.body).fontFamily;
-    const lit = selected || (kbd >= 0 ? districts[kbd].id : null) || hover;
+    const lit = selected || hover;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
@@ -480,25 +479,6 @@
     if (!hover) return;
     hover = null;
     canvas.style.cursor = '';
-    draw();
-  });
-
-  canvas.addEventListener('keydown', (e) => {
-    const n = districts.length;
-    if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) {
-      e.preventDefault();
-      const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
-      kbd = kbd < 0 ? (step > 0 ? 0 : n - 1) : (kbd + step + n) % n;
-      draw();
-    } else if ((e.key === 'Enter' || e.key === ' ') && kbd >= 0) {
-      e.preventDefault();
-      openReport(districts[kbd].id);
-    }
-  });
-
-  canvas.addEventListener('blur', () => {
-    if (kbd < 0) return;
-    kbd = -1;
     draw();
   });
 

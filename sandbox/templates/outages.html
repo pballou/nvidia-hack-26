@@ -13,10 +13,12 @@
 {{ ui.page_header('Outage map', 'Click your district to report an outage') }}
 
 <div class="outage-layout">
-  {#- One canvas, no DOM element per district (T1-app.md). Drawn by /static/outages.js. #}
+  {#- One canvas, no DOM element per district (T1-app.md). Drawn by /static/outages.js.
+      Deliberately mouse-only, like many real map widgets: no keyboard path that would let a
+      DOM agent pick a district without seeing the map. #}
   <div class="card map-card">
-    <canvas id="outage-map" data-testid="outage-map" width="1000" height="650" tabindex="0" role="application"
-      aria-label="Outage map of the Acme Utilities service area. Use the arrow keys to choose a district, then press Enter to report an outage there."></canvas>
+    <canvas id="outage-map" data-testid="outage-map" width="1000" height="650" role="img"
+      aria-label="Outage map of the Acme Utilities service area"></canvas>
   </div>
 
   <div class="outage-side">

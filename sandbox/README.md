@@ -8,7 +8,25 @@ with no accessible name, and `<canvas>` widgets with no DOM element per target.
 ```bash
 uvicorn sandbox.app:app --host 127.0.0.1 --port 8090      # or scripts/run_sandbox.sh
 python -m pytest sandbox/tests -q                          # unit + oracle + determinism + no-egress
+python -m sandbox.tools.make_gallery                       # regenerate sandbox/screenshots/*.png
 ```
+
+Validation (`sandbox/tests`):
+
+- **`test_oracle.py`:** a scripted oracle (DOM selectors, allowed only here) solves all
+  12 tasks from fresh resets through the UI, and asserts the screen changes after
+  every step. It also shows that one plausible wrong action per task fails its check.
+- **`test_a11y_gap.py`:** the deliberately unlabeled controls have no accessible
+  name, the canvases have no per-target DOM and no keyboard path, the fold rules
+  hold, and there are no native popups.
+- **`test_determinism.py`:** 22 page states give pixel-identical screenshots in
+  fresh sessions. Determinism is only guaranteed on one machine, since fonts differ
+  across OSes.
+- **`test_network.py`:** no request leaves 127.0.0.1.
+
+[Gallery](screenshots/) (1280×800): dashboard, billing and the pay confirmation,
+usage with July selected, the outage report dialog, inbox, compose, notification and
+accessibility settings, high contrast, large text, and help.
 
 ## HTTP contract (docs/tasks/contracts.md §1)
 
@@ -73,6 +91,12 @@ Action types (`state.ACTIONS`): `nav.toggle`, `billing.download {statement_id}`,
    download, mark-all-read and message stars have no text, no `aria-label`, no
    `title` and no visually-hidden text. That's the accessibility gap the vision agent
    closes. Other controls are properly labeled.
+   - The gear, the hamburger and mark-all-read give no hint at all. The download
+     buttons and stars sit in rows with named neighbours, so a DOM agent that uses
+     row context could still find them. Word the demo claims accordingly.
+   - **The canvases are mouse-only on purpose** (no tabindex, no key handling), like
+     many real chart and map widgets, so keyboard input can't select a bar or a
+     district blind.
 7. **Every state change is visible:** a toast after each action, plus a persistent
    visual change (switch position, badge, highlighted row, details panel).
 8. **Test hooks:** `data-testid` attributes, plus `window.AcmeTestHooks` for canvas
