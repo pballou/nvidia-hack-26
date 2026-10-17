@@ -167,13 +167,35 @@ def test_retryable_status_then_200(status):
     assert c.stats["by_status"] == {str(status): 1, "200": 1}
 
 
-@pytest.mark.parametrize("exc", [httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError, httpx.RemoteProtocolError])
+@pytest.mark.parametrize("exc", [httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError, httpx.RemoteProtocolError,
+                                 httpx.DecodingError])
 def test_transport_exceptions_then_200(exc):
     h = Script(exc, exc)
     c, sleep = make(h)
     [comp] = run(c, (MSGS, None))
     assert comp.http_attempts == 3 and len(sleep.delays) == 2 and comp.text == '{"items": []}'
     assert c.stats["by_status"] == {exc.__name__: 2, "200": 1}
+
+
+def test_corrupt_gzip_body_is_retried_then_gives_up_as_transport_error():
+    def corrupt(request):  # built per request: httpx decodes (and fails) when the Response is constructed
+        return httpx.Response(200, headers={"content-encoding": "gzip", "content-type": "application/json"},
+                              content=b"not gzip at all")
+
+    c, sleep = make(Script(corrupt))
+    [comp] = run(c, (MSGS, None))
+    assert comp.http_attempts == 2 and c.stats["by_status"] == {"DecodingError": 1, "200": 1}
+    c, sleep = make(Script(*[corrupt] * 6))
+    err = run(c, (MSGS, None))
+    assert isinstance(err, TransportError) and err.attempts == 6 and "DecodingError" in str(err)
+    assert len(sleep.delays) == 5 and c.stats["transport_errors"] == 1
+    assert cl.RETRYABLE_EXCEPTIONS == (httpx.TransportError, httpx.DecodingError)
+
+
+def test_too_many_redirects_is_not_retried():
+    c, sleep = make(Script(httpx.TooManyRedirects))
+    err = run(c, (MSGS, None))
+    assert isinstance(err, httpx.TooManyRedirects) and sleep.delays == [] and c.stats["http_attempts"] == 1
 
 
 def test_unparseable_200_is_retried():

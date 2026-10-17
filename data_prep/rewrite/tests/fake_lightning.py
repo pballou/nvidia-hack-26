@@ -1,4 +1,5 @@
-"""Fake Lightning chat-completions server for httpx.MockTransport: plausible rewrite answers plus fault knobs."""
+"""Fake Lightning chat-completions server for httpx.MockTransport: plausible (v3-valid) rewrite answers plus fault
+knobs."""
 
 import json
 import re
@@ -11,13 +12,33 @@ COMMUNITY_ROOT = "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit"
 SERVED_IDS = ("lightning", MODEL)
 NUMERIC = re.compile(r"[\d\s.,:%$+\-/]+")
 MALFORMED = 'Sure! Here are the rewrites: {"items": [{"k": 1, "keep": tru'
+# A pre-v3 neighbor's "direction" (where the NEIGHBOR is) as the v3 "target_is" (where the TARGET is).
+TARGET_IS = {"left": "right of", "right": "left of", "above": "below", "below": "above", "overlapping": "overlapping"}
+PLAIN_POSITION = {"top-left": "at the top left", "top-center": "at the top", "top-right": "at the top right",
+                  "middle-left": "on the left", "center": "in the middle", "middle-right": "on the right",
+                  "bottom-left": "at the bottom left", "bottom-center": "at the bottom",
+                  "bottom-right": "at the bottom right"}
+
+
+def _neighbors(value) -> list[dict]:
+    """Item neighbors as [{"label", "target_is"}]; tolerates junk entries and the pre-v3 "direction" key."""
+    out = []
+    for n in value if isinstance(value, list) else ():
+        if isinstance(n, dict) and isinstance(n.get("label"), str):
+            rel = n.get("target_is") or TARGET_IS.get(str(n.get("direction")), "overlapping")
+            out.append({"label": n["label"], "target_is": rel})
+    return out
 
 
 def batch_items(body: dict) -> list[dict]:
-    """The {"k", "label", ...} item lines of the last user message (the batch, not the few-shot example)."""
-    users = [m for m in body.get("messages", []) if m.get("role") == "user"]
-    items = []
-    for line in str(users[-1].get("content", "") if users else "").splitlines():
+    """The {"k", "label", ...} item lines of the last user message (the batch, not the few-shot example). Lines that
+    are not item objects (prose, an inline JSON example, a non-integer k) are skipped; neighbors are normalized."""
+    users = [m for m in body.get("messages", []) if isinstance(m, dict) and m.get("role") == "user"]
+    content = users[-1].get("content", "") if users else ""
+    if isinstance(content, list):  # OpenAI content parts
+        content = "".join(p.get("text") or "" for p in content if isinstance(p, dict))
+    items, seen = [], set()
+    for line in str(content).splitlines():
         line = line.strip()
         if not line.startswith("{"):
             continue
@@ -25,25 +46,40 @@ def batch_items(body: dict) -> list[dict]:
             item = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(item, dict) and "k" in item and "label" in item:
-            items.append(item)
+        k = item.get("k") if isinstance(item, dict) else None
+        if isinstance(k, int) and not isinstance(k, bool) and k not in seen and isinstance(item.get("label"), str):
+            seen.add(k)
+            items.append({**item, "neighbors": _neighbors(item.get("neighbors"))})
     return items
 
 
 def plausible(item: dict) -> dict:
-    """What a well-behaved Lightning would answer for one item."""
+    """What a well-behaved Lightning would answer for one item under the v3 rules: keeps a word of its own label,
+    element nouns only from control (text/area: "text"; none when control is missing), neutral "click" verb, plain-word
+    positions (never grid tokens), and identical-label neighbors told apart by position or dropped."""
     label = " ".join(str(item["label"]).split())
     if NUMERIC.fullmatch(label):
         return {"k": item["k"], "keep": False, "drop_reason": "numeric"}
     if label.lower().startswith("automationid"):
         return {"k": item["k"], "keep": False, "drop_reason": "unintelligible"}
-    dup = any(str(n.get("label", "")).lower() == label.lower() for n in item.get("neighbors") or ())
-    if dup and item.get("style") != "positional":
-        return {"k": item["k"], "keep": False, "drop_reason": "duplicate_neighbor"}
-    text = " ".join(label.split()[:6])
+    words = lambda s: re.findall(r"[^\W_]+", s.lower())  # noqa: E731
+    others = [words(n["label"]) for n in _neighbors(item.get("neighbors"))]
+    dup = words(label) in others
+    lookalike = dup or any(o[:1] == words(label)[:1] for o in others if o)  # "Search" vs "Search 14"
     style = item.get("style")
-    instruction = (f"the {text} button" if style == "descriptive" else
-                   f"the {text} at the {item.get('position', 'center')}" if style == "positional" else f"open {text}")
+    if dup and style != "positional":
+        return {"k": item["k"], "keep": False, "drop_reason": "duplicate_neighbor"}
+    text = " ".join(label.rstrip("…").split()[:5])
+    control = item.get("control") if isinstance(item.get("control"), str) else None
+    where = PLAIN_POSITION.get(item.get("position"), "in the middle")
+    if style == "descriptive":
+        instruction = f"the {text} {control}" if control and control != "element" else f"the {text} option"
+    elif style == "positional":
+        instruction = f"the {text}"
+    else:
+        instruction = f"click {text}"
+    if style == "positional" or lookalike:  # a position tells look-alikes apart
+        instruction += f" {where}"
     return {"k": item["k"], "keep": True, "instruction": instruction}
 
 

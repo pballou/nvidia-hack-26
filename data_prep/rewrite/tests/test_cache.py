@@ -1,10 +1,10 @@
-"""RewriteCache: roundtrip, prompt_version isolation, upsert, persistence, get_many, request log."""
+"""RewriteCache: roundtrip, prompt_version isolation, upsert, persistence, get_many, request log, history, runs."""
 
 import sqlite3
 
 import pytest
 
-from data_prep.rewrite.cache import RewriteCache
+from data_prep.rewrite.cache import RUN_FIELDS, RewriteCache
 
 
 def rec(row_id, **kw):
@@ -99,3 +99,48 @@ def test_close_via_context_manager(tmp_path):
         c.put("v1", rec("a"))
     with pytest.raises(sqlite3.ProgrammingError):
         c.get("v1", "a")
+
+
+def test_history_roundtrip_upsert_and_version_isolation(cache):
+    h = {"id": "a", "original": "More options", "source": "os_atlas/androidworld", "unofficial_model": False,
+         "attempts": 1, "errors": ["missing"]}
+    cache.put_history("v3", [h, {**h, "id": "b"}])
+    cache.put_history("v3", [{**h, "attempts": 2, "errors": ["missing", "no_label_word"]}])
+    got = cache.history("v3", ["b", "a", "nope"])
+    assert list(got) == ["b", "a"] and got["a"]["attempts"] == 2 and got["a"]["errors"][-1] == "no_label_word"
+    assert cache.history("v2", ["a"]) == {} and cache.get("v3", "a") is None  # separate from the rewrites table
+    with pytest.raises(ValueError):
+        cache.put_history("v3", [{"attempts": 1}])
+
+
+def test_runs_table_upsert_order_and_persistence(tmp_path):
+    path = tmp_path / "c.sqlite"
+    run2 = {"run_id": "r2", "started": "2026-10-17T19:00:00Z", "requests": 3, "rows_done": 40, "wall_s": 12.5,
+            "unofficial_model": None, "ignored_key": "x"}
+    with RewriteCache(path) as c:
+        c.log_run("v3", run2)
+        c.log_run("v3", {"run_id": "r1", "started": "2026-10-17T18:00:00Z", "requests": 1, "unofficial_model": True})
+        c.log_run("v3", {**run2, "finished": "2026-10-17T19:01:00Z"})  # upsert by run_id
+        c.log_run("v2", {"run_id": "r1", "started": "2026-10-17T18:00:00Z"})
+        with pytest.raises(ValueError):
+            c.log_run("v3", {"started": "x"})
+    with RewriteCache(path) as c:
+        runs = c.runs("v3")
+        assert [r["run_id"] for r in runs] == ["r1", "r2"] and all(list(r) == list(RUN_FIELDS) for r in runs)
+        assert runs[0]["unofficial_model"] is True and runs[1]["unofficial_model"] is False
+        assert runs[1]["finished"] == "2026-10-17T19:01:00Z" and runs[1]["wall_s"] == 12.5
+        assert runs[1]["rows_done"] == 40 and runs[0]["completion_tokens"] is None
+        assert [r["run_id"] for r in c.runs("v2")] == ["r1"] and c.runs("v9") == []
+
+
+def test_old_cache_without_new_tables_is_upgraded_in_place(tmp_path):
+    path = tmp_path / "old.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript("CREATE TABLE rewrites (prompt_version TEXT NOT NULL, id TEXT NOT NULL, record_json TEXT NOT NULL, "
+                     "PRIMARY KEY (prompt_version, id));")
+    db.execute("INSERT INTO rewrites VALUES ('v2', 'a', ?)", ('{"id": "a", "keep": true}',))
+    db.commit()
+    db.close()
+    with RewriteCache(path) as c:
+        assert c.get("v2", "a") == {"id": "a", "keep": True}
+        assert c.runs("v2") == [] and c.history("v2", ["a"]) == {} and c.requests("v2") == []

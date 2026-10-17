@@ -41,11 +41,14 @@ RESPONSE_FORMATS = ("json_schema", "json_object", "none")  # downgrade order
 DOWNGRADE_STATUS = frozenset({400, 422})
 DOWNGRADE_HINTS = ("response_format", "json_schema", "guided", "json_object")
 RETRY_AFTER_MAX = 300.0
+# Retried like 5xx: httpx.TransportError (timeouts, connection/protocol errors) and bodies that fail to decode
+# (corrupt gzip/brotli). Deliberately not all of httpx.RequestError (TooManyRedirects is not transient).
+RETRYABLE_EXCEPTIONS = (httpx.TransportError, httpx.DecodingError)
 _DOTENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*(.*)$")
 
 
 class TransportError(RuntimeError):
-    """Retries exhausted on 408/429/5xx, timeouts, connection errors or unparseable 200 bodies."""
+    """Retries exhausted on 408/429/5xx, timeouts, connection errors, undecodable bodies or unparseable 200 bodies."""
 
     def __init__(self, message: str, attempts: int = 0, last_error: str = ""):
         super().__init__(message)
@@ -194,7 +197,7 @@ class LightningClient:
             retry_after = None
             try:
                 resp = await self._http.post(self.url, json=self._body(messages, json_schema, mode))
-            except httpx.TransportError as e:  # timeouts and connection errors
+            except RETRYABLE_EXCEPTIONS as e:  # timeouts, connection errors, undecodable bodies
                 self._count(type(e).__name__)
                 error = f"{type(e).__name__}: {self._scrub(str(e))[:300]}"
             else:
