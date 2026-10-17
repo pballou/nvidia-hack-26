@@ -52,7 +52,7 @@ from PIL import Image
 from agent.config import AgentConfig
 from agent.observation import Observation
 from agent.planner import NOT_EXECUTED, LightningPlanner, PlanResult, ToolCall
-from agent.prompts import TOOL_NAMES
+from agent.prompts import PROMPT_SHA, PROMPT_VERSION, TOOL_NAMES
 from agent.session import AgentSession, ToolOutcome, invalid_json_error, normalize_key, validate_args
 from agent.trace import RunResult, StepEvent, TraceWriter
 
@@ -104,6 +104,11 @@ def _pick(timings: dict[str, float], *keys: str) -> dict[str, float] | None:
     return out or None
 
 
+def _drop_empty(d: dict) -> dict:
+    """Optional event fields: leave out None/'' values instead of sending nulls."""
+    return {k: v for k, v in d.items() if v not in (None, "")}
+
+
 async def aclose(obj: Any) -> None:
     """Best-effort close (aclose() or close(), sync or async); never raises."""
     for name in ("aclose", "close"):
@@ -140,6 +145,7 @@ class _Run:
         self.error: str | None = None
         self.finished: dict | None = None
         self.session: AgentSession | None = None
+        self._summary_emitted: Any = None  # last Summary reported in an observation event
         self.to_close: list[Any] = []   # browser session, planner, VLM client (whatever we created)
         self.stats: dict[str, Any] = {k: 0 for k in (
             "n_tool_calls", "n_invalid_calls", "n_actions", "n_clicks", "n_failed_actions", "n_no_tool_call",
@@ -166,8 +172,13 @@ class _Run:
     async def _observation(self, step: int, obs: Observation, img: Image.Image | None,
                            timings: dict | None) -> None:
         shot = self.trace.save_screenshot(step, img) if img is not None else None
-        await self.emit(step, "observation", {"observation": obs.to_dict(), "text": obs.render()},
-                        screenshot_path=shot, timings_ms=timings)
+        payload: dict[str, Any] = {"observation": obs.to_dict(), "text": obs.render()}
+        s = self.session.last_summary if self.session is not None else None
+        if s is not None:  # which model/prompt wrote this description; reused = no new summary call
+            payload["summary"] = _drop_empty({"model": s.model, "prompt_sha": s.prompt_sha, "error": s.error,
+                                              "usage": s.usage, "reused": s is self._summary_emitted or None})
+            self._summary_emitted = s
+        await self.emit(step, "observation", payload, screenshot_path=shot, timings_ms=timings)
 
     async def run(self, request: str, start_url: str, planner_client: Any, grounder: Any, summarizer: Any,
                   pool: Any) -> None:
@@ -283,7 +294,8 @@ class _Run:
             if outcome.before is not None:
                 overlay = self.trace.save_overlay(step, outcome.before, c.get("x"), c.get("y"), c.get("target") or "")
             g = {"target": c.get("target"), "x": c.get("x"), "y": c.get("y"), "point_1000": c.get("point_1000"),
-                 "raw": (c.get("raw") or "")[:300], "model": c.get("model")}
+                 "raw": (c.get("raw") or "")[:300], "model": c.get("model"),
+                 **_drop_empty({"prompt_sha": c.get("prompt_sha"), "usage": c.get("usage")})}
             if c.get("error"):
                 g["error"] = c["error"]
             await self.emit(step, "grounding", g, overlay_path=overlay, timings_ms=_pick(t, "ground"))
@@ -319,7 +331,8 @@ class _Run:
         out = {"content": plan.content, "reasoning": reasoning, "thinking": plan.thinking,
                "tool_calls": [{"name": c.name, "arguments": c.arguments if c.arguments is not None else c.raw_arguments}
                               for c in plan.tool_calls],
-               "usage": plan.usage}
+               "usage": plan.usage,
+               "model": self.cfg.lightning.model, "prompt_version": PROMPT_VERSION, "prompt_sha": PROMPT_SHA}
         if plan.finish_reason:
             out["finish_reason"] = plan.finish_reason
         if plan.wait_ms:

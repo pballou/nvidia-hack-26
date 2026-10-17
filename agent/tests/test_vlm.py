@@ -77,6 +77,23 @@ async def test_locate_converts_grid_point_to_viewport_px():
 
 
 @pytest.mark.asyncio
+async def test_results_carry_prompt_sha_and_usage():
+    """For trace events / the console Logs page: which prompt, and tokens when the server reports them."""
+    from agent.vlm import GROUNDING_PROMPT_SHA, SUMMARY_PROMPT_SHA
+
+    vlm = make_vlm(FakeVLM('{"point_2d": [500, 250]}', "PAGE: x"))
+    loc = await vlm.locate(screen(), "the gear icon")
+    s = await vlm.summarize(screen())
+    assert loc.prompt_sha == GROUNDING_PROMPT_SHA["qwen3_vl"] and len(loc.prompt_sha) == 10
+    assert s.prompt_sha == SUMMARY_PROMPT_SHA and s.prompt_sha != loc.prompt_sha
+    assert loc.usage == s.usage == {"prompt_tokens": 1, "completion_tokens": 1}
+    fam = make_vlm(FakeVLM('{"point_2d": [1, 2]}'), AgentConfig().with_options(model_family="qwen3_5"))
+    assert (await fam.locate(screen(), "x")).prompt_sha == GROUNDING_PROMPT_SHA["qwen3_5"]
+    failed = await make_vlm(FakeVLM(500)).summarize(screen())
+    assert failed.error and failed.prompt_sha == SUMMARY_PROMPT_SHA and failed.usage is None
+
+
+@pytest.mark.asyncio
 async def test_image_is_preprocessed_png_and_point_uses_original_size():
     fake = FakeVLM('{"point_2d": [500, 250]}')
     big = screen(2560, 1600)  # over MAX_PIXELS -> downscaled before sending

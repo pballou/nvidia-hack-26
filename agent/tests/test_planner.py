@@ -152,6 +152,37 @@ async def test_request_kwargs(tmp_path, mode, first):
     assert len(msgs) == 2
 
 
+class _StampedGrounder(FakeGrounder):
+    async def locate(self, img, target):
+        loc = await super().locate(img, target)
+        loc.prompt_sha, loc.usage = "abc1234567", {"prompt_tokens": 900, "completion_tokens": 12}
+        return loc
+
+
+@pytest.mark.asyncio
+async def test_events_record_models_and_prompt_ids(tmp_path):
+    """Additive fields for the console Logs page: which model and prompt produced each event."""
+    r = await _run(tmp_path, [click("the gear icon"), done("Opened it.")], grounder=_StampedGrounder())
+    for p in (e.payload for e in _of(r.events, "plan")):
+        assert p["model"] == r.cfg.lightning.model and p["prompt_version"] == prompts.PROMPT_VERSION
+        assert p["prompt_sha"] == prompts.PROMPT_SHA and len(p["prompt_sha"]) == 10
+    (g,) = _of(r.events, "grounding")
+    assert g.payload["prompt_sha"] == "abc1234567" and g.payload["usage"]["completion_tokens"] == 12
+    obs = [e.payload for e in _of(r.events, "observation")]
+    assert obs[0]["summary"] == {"model": "base"} and obs[1]["summary"] == {"model": "base"}  # two fresh calls
+
+
+@pytest.mark.asyncio
+async def test_reused_description_is_marked(tmp_path):
+    r = await _run(tmp_path, [click("the gear icon"), done("Could not.", success=False)],
+                   grounder=FakeGrounder(fail=True))
+    obs = [e.payload for e in _of(r.events, "observation")]
+    assert "reused" not in obs[0]["summary"]
+    assert obs[1]["summary"] == {"model": "base", "reused": True}  # failed grounding: no new summary call
+    (g,) = _of(r.events, "grounding")
+    assert "prompt_sha" not in g.payload and "usage" not in g.payload  # empty optional fields are left out
+
+
 @pytest.mark.asyncio
 async def test_tool_choice_required_falls_back_to_auto(tmp_path):
     rejected = Reply(status=400, content="tool_choice 'required' is not supported by this server")

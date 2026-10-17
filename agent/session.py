@@ -35,6 +35,8 @@ class Located:
     error: str | None = None
     model: str = ""
     latency_ms: float = 0.0
+    prompt_sha: str = ""             # agent.prompts.prompt_sha of the grounding prompt template
+    usage: dict | None = None        # {prompt_tokens, completion_tokens} when the server reports it
 
 
 @dataclass
@@ -43,6 +45,8 @@ class Summary:
     error: str | None = None
     model: str = ""
     latency_ms: float = 0.0
+    prompt_sha: str = ""             # agent.prompts.prompt_sha of the summary prompt
+    usage: dict | None = None
 
 
 class Grounder(Protocol):
@@ -216,6 +220,7 @@ class AgentSession:
         self.finished: dict | None = None    # done() arguments once called
         self.last_screenshot: Image.Image | None = None
         self.last_observation: Observation | None = None
+        self.last_summary: Summary | None = None  # the summarizer's last result (model, prompt_sha, usage)
         self.n_actions = 0
         self.n_clicks = 0
         self.n_failed = 0
@@ -229,7 +234,7 @@ class AgentSession:
             img = await self.browser.screenshot()
             timings["screenshot"] = _ms(t0)
         t0 = time.perf_counter()
-        summary = await self.summarizer.summarize(img)
+        summary = self.last_summary = await self.summarizer.summarize(img)
         timings["summary"] = _ms(t0)
         text = summary.text if not summary.error else f"(screen description unavailable: {summary.error})"
         try:
@@ -295,7 +300,7 @@ class AgentSession:
             loc = await self.grounder.locate(before, target)
             timings["ground"] = _ms(t0)
             click = {"x": loc.x, "y": loc.y, "target": target, "point_1000": loc.point_1000, "raw": loc.raw,
-                     "model": loc.model}
+                     "model": loc.model, "prompt_sha": loc.prompt_sha, "usage": loc.usage}
             if loc.error or loc.x is None:
                 click["error"] = loc.error or "no point"
                 return await self._failed(name, args, f"could not locate {target!r}: {click['error']}",

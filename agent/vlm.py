@@ -26,14 +26,20 @@ from PIL import Image
 
 from agent.config import AgentConfig
 from agent.observation import clip_summary
+from agent.prompts import prompt_sha
 from agent.session import Located, Summary
-from common.grounding import (SUMMARY_SAMPLING, build_grounding_messages, build_summary_messages, parse_point,
-                              preprocess_screenshot, to_data_url, to_pixels)
+from common.grounding import (FAMILIES, SUMMARY_PROMPT, SUMMARY_SAMPLING, build_grounding_messages,
+                              build_summary_messages, grounding_prompt, parse_point, preprocess_screenshot,
+                              to_data_url, to_pixels)
 
 log = logging.getLogger(__name__)
 
 # Summary sampling is owned by common/grounding.py (SUMMARY_SAMPLING); a point needs few tokens.
 GROUNDING_SAMPLING = {"temperature": 0.0, "max_tokens": 64}
+
+# Which prompt produced a trace event (the console's Logs page shows these).
+SUMMARY_PROMPT_SHA = prompt_sha(SUMMARY_PROMPT)
+GROUNDING_PROMPT_SHA = {f: prompt_sha(grounding_prompt("{instruction}", f)) for f in FAMILIES}
 
 # APITimeoutError is a subclass of APIConnectionError; InternalServerError is any 5xx.
 _RETRYABLE = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError, openai.RateLimitError)
@@ -76,43 +82,44 @@ class VLMClient:
     async def locate(self, img: Image.Image, target: str) -> Located:
         """Ask cfg.grounder_model where `target` is; return the click point in `img`'s pixels (viewport CSS px)."""
         t0 = time.perf_counter()
-        model = self.cfg.grounder_model
+        meta = {"model": self.cfg.grounder_model, "prompt_sha": GROUNDING_PROMPT_SHA.get(self.cfg.model_family, "")}
         try:
             messages = build_grounding_messages(to_data_url(preprocess_screenshot(img)), target, self.cfg.model_family)
         except Exception as e:
-            return Located(None, None, error=f"could not prepare the request: {_short(e)}", model=model,
-                           latency_ms=_ms(t0))
-        raw, err = await self._complete(model, messages, GROUNDING_SAMPLING)
+            return Located(None, None, error=f"could not prepare the request: {_short(e)}", latency_ms=_ms(t0), **meta)
+        raw, err, usage = await self._complete(meta["model"], messages, GROUNDING_SAMPLING)
         if err:
-            return Located(None, None, raw=raw, error=err, model=model, latency_ms=_ms(t0))
+            return Located(None, None, raw=raw, error=err, latency_ms=_ms(t0), usage=usage, **meta)
         pt = parse_point(strip_thinking(raw))
         if pt is None:
             return Located(None, None, raw=raw, error=f"could not parse a point from: {raw[:120]!r}",
-                           model=model, latency_ms=_ms(t0))
+                           latency_ms=_ms(t0), usage=usage, **meta)
         # The grid is resize-invariant, so map onto the ORIGINAL screenshot (= viewport CSS px
         # at device_scale_factor=1), not the preprocessed image, and keep the point on screen.
         x, y = to_pixels(pt, img.width, img.height)
         x, y = min(max(x, 0.0), img.width - 1.0), min(max(y, 0.0), img.height - 1.0)
-        return Located(x, y, raw=raw, point_1000=pt, model=model, latency_ms=_ms(t0))
+        return Located(x, y, raw=raw, point_1000=pt, latency_ms=_ms(t0), usage=usage, **meta)
 
     async def summarize(self, img: Image.Image) -> Summary:
         """Structured text description of the screen from cfg.summary_model (at most 40 lines)."""
         t0 = time.perf_counter()
-        model = self.cfg.summary_model
+        meta = {"model": self.cfg.summary_model, "prompt_sha": SUMMARY_PROMPT_SHA}
         try:
             url = to_data_url(preprocess_screenshot(img))
         except Exception as e:
-            return Summary("", error=f"could not prepare the screenshot: {_short(e)}", model=model, latency_ms=_ms(t0))
-        raw, err = await self._complete(model, build_summary_messages(url), SUMMARY_SAMPLING)
+            return Summary("", error=f"could not prepare the screenshot: {_short(e)}", latency_ms=_ms(t0), **meta)
+        raw, err, usage = await self._complete(meta["model"], build_summary_messages(url), SUMMARY_SAMPLING)
         if err:
-            return Summary("", error=err, model=model, latency_ms=_ms(t0))
+            return Summary("", error=err, latency_ms=_ms(t0), usage=usage, **meta)
         text = clip_summary(strip_thinking(raw))
         if not text:
-            return Summary("", error=f"{model} returned an empty screen description", model=model, latency_ms=_ms(t0))
-        return Summary(text, model=model, latency_ms=_ms(t0))
+            return Summary("", error=f"{meta['model']} returned an empty screen description", latency_ms=_ms(t0),
+                           usage=usage, **meta)
+        return Summary(text, latency_ms=_ms(t0), usage=usage, **meta)
 
-    async def _complete(self, model: str, messages: list[dict], sampling: dict) -> tuple[str, str | None]:
-        """One chat completion with one retry on transport/5xx/429 errors. Returns (content, error)."""
+    async def _complete(self, model: str, messages: list[dict],
+                        sampling: dict) -> tuple[str, str | None, dict | None]:
+        """One chat completion with one retry on transport/5xx/429 errors. Returns (content, error, usage)."""
         kwargs: dict = {"model": model, "messages": messages, **sampling}
         if self.cfg.model_family == "qwen3_5":  # its chat template thinks by default
             kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -120,19 +127,20 @@ class VLMClient:
         for attempt in (1, 2):
             try:
                 resp = await self.client.chat.completions.create(**kwargs)
+                usage = _usage(resp)
                 if not resp.choices:
-                    return "", f"{model} returned no choices"
-                return resp.choices[0].message.content or "", None
+                    return "", f"{model} returned no choices", usage
+                return resp.choices[0].message.content or "", None, usage
             except _RETRYABLE as e:
                 err = self._describe(e, model)
                 if attempt == 1:
                     log.warning("VLM call to %s failed (%s); retrying once", model, err)
                     await asyncio.sleep(self.retry_backoff_s)
             except openai.APIStatusError as e:  # 4xx: retrying won't help (e.g. adapter not loaded)
-                return "", self._describe(e, model)
+                return "", self._describe(e, model), None
             except Exception as e:
-                return "", f"VLM call failed: {type(e).__name__}: {_short(e)}"
-        return "", err
+                return "", f"VLM call failed: {type(e).__name__}: {_short(e)}", None
+        return "", err, None
 
     def _describe(self, e: Exception, model: str) -> str:
         if isinstance(e, openai.APITimeoutError):
@@ -152,3 +160,11 @@ class VLMClient:
 
 def _ms(t0: float) -> float:
     return (time.perf_counter() - t0) * 1000
+
+
+def _usage(resp: object) -> dict | None:
+    """{prompt_tokens, completion_tokens} from a chat completion, if the server reported usage."""
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return None
+    return {"prompt_tokens": getattr(u, "prompt_tokens", None), "completion_tokens": getattr(u, "completion_tokens", None)}

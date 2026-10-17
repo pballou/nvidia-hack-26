@@ -15,6 +15,8 @@ leaks the answer and inflates absolute agent numbers.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 
 PROMPT_VERSION = "agent-v4"
 
@@ -156,6 +158,15 @@ done, call no more tools."""
 def initial_user_message(request: str, observation_text: str) -> str:
     """First user turn: the user's request plus the starting observation."""
     return f"User request: {request.strip()}\n\nCurrent screen:\n{observation_text}"
+
+
+def prompt_sha(text: str) -> str:
+    """Short stable id of a prompt (first 10 hex chars of sha256), recorded in trace events."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+
+
+# The exact system prompt + tool schema Lightning sees; changes whenever either does.
+PROMPT_SHA = prompt_sha(SYSTEM_PROMPT + json.dumps(TOOLS, sort_keys=True))
 
 
 def chat_tools() -> list[dict]:

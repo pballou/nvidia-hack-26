@@ -9,13 +9,19 @@ Trace layout (gitignored):
 Event payloads by kind (all JSON-serializable; done-event stats are documented in agent/core.py):
   start        {request, start_url, config}  (config.lightning.root: the checkpoint the endpoint
                reports serving, or null + server_error)
-  observation  {observation: {step, url, title, screen_changed, last_action_result, screen_summary}, text}
-               (no screenshot_path when the screen could not be captured)
-  plan         {content, reasoning, thinking, tool_calls: [{name, arguments}], usage?, finish_reason?, wait_ms?}
+  observation  {observation: {step, url, title, screen_changed, last_action_result, screen_summary}, text,
+               summary?: {model, prompt_sha?, usage?, error?, reused?}}
+               (no screenshot_path when the screen could not be captured; summary.reused=true when
+               the description was carried over without a new summarizer call)
+  plan         {content, reasoning, thinking, tool_calls: [{name, arguments}], usage?, finish_reason?, wait_ms?,
+               model, prompt_version, prompt_sha}
   tool_call    {name, arguments, valid, error?, description, from_content?}
                (valid=false: rejected by schema validation; nothing is executed, so no
                grounding/action/observation event follows for that step)
-  grounding    {target, x, y, point_1000, raw, model, error?}
+  grounding    {target, x, y, point_1000, raw, model, error?, prompt_sha?, usage?}
+  prompt_sha = first 10 hex of sha256 of the exact prompt (agent.prompts.prompt_sha): the planner's
+  system prompt + tool schema, the summary prompt, or the grounding prompt template per model family.
+  usage = {prompt_tokens, completion_tokens} when the server reports it.
   action       {name, arguments, ok, error?, screen_changed, click?: {x, y}, done?}
   error        {message, where, recoverable, finish_reason?}
   done         {success_claimed, summary, steps, reason: done|max_steps|stopped|error, stats}
