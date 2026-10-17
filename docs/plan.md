@@ -201,8 +201,12 @@ it.
     recipe, which lowers the risk of the GRPO step the Gym bounty depends on.
   - Pixel cap frozen at **2 MP** (`MAX_PIXELS = 2_073_600`) everywhere:
     `common/grounding.py`, `serving.env`, TRL.
-  - Charlie's per-split breakdown is still pending. We'd reconsider only if Qwen3-VL
-    leads by more than ~5 points on icons or desktop.
+  - Per-split check (`docs/eval_results/qwen3vl_vs_qwen35_osatlas500.csv`, n=500,
+    McNemar p=0.69 overall): **Qwen3.5 leads on desktop by 7.0 points** (77.2 vs
+    70.2; Linux +6.9, macOS +7.2). Qwen3-VL leads on mobile (+5.9) and web (+4.0),
+    both within noise at about 150 rows each. Decision confirmed.
+  - Icon split: OS-Atlas has no labels, so it comes from Charlie's zero-shot
+    SSv2-clean run of both models. Qwen3.5's result is the official base baseline.
 - **Eval (option C):** OS-Atlas `dev` split (by screenshot) for choosing checkpoints.
   The final held-out test is **ScreenSpot-v2-clean**: 1,244 rows, all of SSv2 minus
   the 28 desktop rows captured on the same machines as our Linux/macOS training data
