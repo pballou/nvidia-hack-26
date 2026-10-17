@@ -8,7 +8,7 @@ Run on the box, from a shell that has sourced serving.env (docs/gpu-box.md §1):
 
 - Models go to the shared HF cache ($HF_HOME), so vLLM and TRL find them by repo id.
 - Raw datasets go to /home/ubuntu/data/raw/<name>; data_prep/ reads from there.
-- Every repo is pinned to a commit, so reruns fetch the same bytes. All seven repos
+- Every repo is pinned to a commit, so reruns fetch the same bytes. All six repos
   are ungated, so no HF token is needed (a read-only one only raises rate limits).
 """
 
@@ -70,7 +70,6 @@ DATASETS = [
     # Held-out test only; never train on it. Revision pinned per AGENTS.md.
     ("screenspot_v2", "OS-Copilot/ScreenSpot-v2", "5efbb1f1b5463a575f2eb7bc30fe29e49c15f93c", None),
     ("os_atlas", "OS-Copilot/OS-Atlas-data", "e3a4c90c5f6129c25efdaa0671b08a11f7cb8f3f", OS_ATLAS_FILES),
-    ("groundcua", "ServiceNow/GroundCUA", "5d6845b0116029d46ec762e734701c5b8ce207c3", None),  # ~22.5 GB
 ]
 
 
