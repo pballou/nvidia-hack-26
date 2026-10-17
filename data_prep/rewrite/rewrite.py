@@ -38,6 +38,7 @@ PUBLIC_FIELDS = ("id", "source", "original", "rewritten", "style", "keep", "drop
 RESPONSE_FORMATS = ("json_schema", "json_object", "none")
 COMPLETED = ("ok", "partial", "invalid_json")  # request statuses that returned a completion
 PROGRESS_EVERY_S = 15.0
+HOSTED_LABEL = "NVIDIA-hosted API"  # default model label on build.nvidia.com (it reports no checkpoint root)
 
 
 def utc_now() -> str:
@@ -462,8 +463,10 @@ async def run(args, *, transport=None, sleep=asyncio.sleep, now=None) -> dict:
                                             transport=transport, sleep=sleep)
         try:
             root = client_mod.served_root(await client.list_models(), model)
-            official = is_nvidia_hosted(ctx["base_url"]) or client_mod.is_official_root(root)
-            ctx.update(served_model_root=root, unofficial=not official, model_label=args.model_label or root or model)
+            hosted = is_nvidia_hosted(ctx["base_url"])
+            official = hosted or client_mod.is_official_root(root)
+            label = f"{HOSTED_LABEL}, {model}" if hosted else root or model
+            ctx.update(served_model_root=root, unofficial=not official, model_label=args.model_label or label)
             if pending and not official:
                 models_url = f"GET {ctx['base_url']}/models"
                 why = (f"{models_url} reports checkpoint {root!r} for {model!r}" if root else

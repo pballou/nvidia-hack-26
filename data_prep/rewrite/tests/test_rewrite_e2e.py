@@ -433,7 +433,7 @@ def test_hosted_is_official_without_a_root_and_uses_hosted_concurrency(manifest,
     stats = run_rewrite(manifest, tmp_path / "out", handler, endpoint="hosted")
     run = stats["run"]
     assert stats["exit_code"] == 0 and run["unofficial_model"] is False and run["served_model_root"] is None
-    assert run["model_label"] == fake.MODEL and run["concurrency"] == 16
+    assert run["model_label"] == f"NVIDIA-hosted API, {fake.MODEL}" and run["concurrency"] == 16
     assert handler.model_calls[0]["url"] == "https://integrate.api.nvidia.com/v1/models"
     assert handler.model_calls[0]["headers"]["authorization"] == f"Bearer {KEY}"
     stats = run_rewrite(manifest, tmp_path / "o2", fake.make_handler(served_root=None), "--concurrency", 3,
