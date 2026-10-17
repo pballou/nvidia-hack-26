@@ -12,15 +12,16 @@ from __future__ import annotations
 
 import copy
 
-PROMPT_VERSION = "agent-v2"
+PROMPT_VERSION = "agent-v3"
 
 TOOL_NAMES = ("click", "type_text", "press_key", "scroll", "done")
 
 _TARGET_HELP = (
     "A short visual description of ONE element on the current screen, as a sighted person "
     "would point it out: its visible text or icon, its type, and where it is. Examples: "
-    "\"the gear icon in the top-right toolbar\", \"the Download button in the September row\", "
-    "\"the High contrast toggle\", \"the Riverside district on the map\". Use the words from the "
+    "\"the gear icon in the top-right toolbar\", \"the Download button in the March row\", "
+    "\"the Dark mode toggle\", \"the Large option in the Font size control\", \"the north "
+    "district on the map\". Use the words from the "
     "screen description, written as a phrase like these examples (not in its \"type: text @ location\" "
     "line format); never use coordinates, CSS selectors or element ids."
 )
@@ -124,7 +125,8 @@ of the visible screen written by a vision model. You act only through the tools;
 model finds the element you describe and clicks it.
 
 How to work:
-- Every reply is exactly one tool call, never plain text. Then read the new observation.
+- Until the task is done, every reply is exactly one tool call, never plain text. Then read \
+the new observation.
 - Describe click targets the way you would point them out to a sighted helper: visible \
 text or icon, element type, and position, e.g. "the gear icon in the top-right toolbar". \
 Use the words from the screen description, but as a natural phrase: the line \
@@ -137,6 +139,11 @@ star next to the message from the landlord").
 target differently (more specific, add its position) or try another way.
 - If what you need is not visible, open the menu, tab or page where it likely is, or scroll.
 - Do only what the user asked. Don't change other settings or submit things they didn't ask for.
+- STATE in the description shows current values. To change a setting, pick the option the \
+user wants, not the one already selected: "bigger" or "more" means an option past the \
+current one in that direction.
+- Before done(success=true), check that the latest observation (STATE, a toast or the \
+page) shows exactly the result the user asked for; if it shows something else, keep working.
 - When the observation shows the request is done, call done(summary, success=true); don't \
 just say so in text. If it is impossible, call done with success=false and say why. After \
 done, call no more tools."""

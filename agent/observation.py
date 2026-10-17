@@ -7,9 +7,10 @@ compact. The URL is shown without its query string (the sandbox `sid` is noise).
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 MAX_SUMMARY_LINES = 40
+MAX_LINE_CHARS = 240  # long message rows otherwise bloat every Lightning prompt
 
 NO_CHANGE_NOTE = (
     "The screen did NOT change after your last action. The click probably missed or the "
@@ -18,17 +19,26 @@ NO_CHANGE_NOTE = (
 
 
 def display_url(url: str) -> str:
-    """Path (+ fragment) only: 'http://127.0.0.1:8090/settings?sid=x#a11y' -> '/settings#a11y'."""
+    """Path, query minus the sandbox sid, fragment: '.../settings?tab=a11y&sid=x' -> '/settings?tab=a11y'."""
     if not url:
         return ""
     parts = urlsplit(url)
     if not parts.scheme.startswith("http"):
         return url
-    return (parts.path or "/") + (f"#{parts.fragment}" if parts.fragment else "")
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "sid"])
+    return (parts.path or "/") + (f"?{query}" if query else "") + (f"#{parts.fragment}" if parts.fragment else "")
 
 
-def clip_summary(text: str, max_lines: int = MAX_SUMMARY_LINES) -> str:
-    lines = [ln.rstrip() for ln in (text or "").strip().splitlines() if ln.strip()]
+def clip_summary(text: str, max_lines: int = MAX_SUMMARY_LINES, max_line_chars: int = MAX_LINE_CHARS) -> str:
+    """Drop blank and repeated lines (small VLMs loop), cap line length and line count."""
+    lines, seen = [], set()
+    for ln in (text or "").strip().splitlines():
+        ln = ln.rstrip()
+        key = ln.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        lines.append(ln if len(ln) <= max_line_chars else ln[:max_line_chars - 1].rstrip() + "…")
     if len(lines) > max_lines:
         lines = lines[:max_lines] + [f"(+{len(lines) - max_lines} more lines omitted)"]
     return "\n".join(lines)
