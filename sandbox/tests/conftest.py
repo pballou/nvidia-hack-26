@@ -50,7 +50,7 @@ def sandbox_url():
     thread.join(timeout=5)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="package")  # not session: sync Playwright's loop must be gone before console/tests run asyncio
 def browser():
     from playwright.sync_api import sync_playwright
 

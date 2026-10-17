@@ -4,6 +4,14 @@
   'use strict';
 
   const byTestId = (id) => document.querySelector('[data-testid="' + id + '"]');
+  // ?pay=1 (the dashboard's Pay bill) opens the dialog once, server-side. Drop it from the
+  // URL right away so later reloads (autopay, downloads, any action) don't reopen it.
+  const here = new URL(location.href);
+  if (here.searchParams.has('pay')) {
+    here.searchParams.delete('pay');
+    history.replaceState(history.state, '', here.pathname + here.search + here.hash);
+  }
+
   const payDialog = byTestId('pay-dialog');
   if (!payDialog) return; // nothing due: no pay flow
 
@@ -107,17 +115,10 @@
   byTestId('pay-back').addEventListener('click', () => backToAmount());
 
   confirmBtn.addEventListener('click', () => {
-    // Drop the one-shot ?pay=1 so the dialog doesn't reopen; otherwise reload in place.
-    const url = new URL(location.href);
-    const opts = {
-      onError: (error) => { confirmBtn.disabled = false; backToAmount(error); },
-    };
-    if (url.searchParams.has('pay')) {
-      url.searchParams.delete('pay');
-      opts.redirect = url.pathname + url.search;
-    }
     confirmBtn.disabled = true;
-    Acme.act('billing.pay', { amount_cents: pendingCents }, opts);
+    Acme.act('billing.pay', { amount_cents: pendingCents }, {
+      onError: (error) => { confirmBtn.disabled = false; backToAmount(error); },
+    });
   });
 
   resetForm(); // ignore any form state the browser restored on reload

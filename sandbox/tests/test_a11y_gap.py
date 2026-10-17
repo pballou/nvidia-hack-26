@@ -3,8 +3,8 @@
 - The deliberately unlabeled icon controls have no accessible name: no aria-label,
   aria-labelledby or title, no text, no SVG <title>, and both Playwright's aria snapshot
   and Chromium's own accessible-name computation (CDP) give them an empty name. The
-  labeled top-bar controls do have names. So a DOM/a11y-tree agent can't tell the gear
-  from the hamburger, or one statement's download button from another's.
+  labeled top-bar controls do have names. In the accessibility tree the 12 download
+  buttons are identical nameless buttons, and the 14 stars too (row context aside).
 - Canvas widgets have no DOM element per bar or district.
 - Fold rules at 1280x800, text size M: what must be visible without scrolling, and what
   must need a scroll (the scroll tasks).

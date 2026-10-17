@@ -322,7 +322,7 @@ def _outage_report(state, p):
     if district not in DISTRICT_NAMES:
         raise ActionError("Choose a district")
     otype = p.get("type") or "no_power"
-    if otype not in OUTAGE_TYPES:
+    if not isinstance(otype, str) or otype not in OUTAGE_TYPES:
         raise ActionError("Choose what's happening")
     details = p.get("details") or ""
     if not isinstance(details, str):
@@ -450,7 +450,8 @@ def _session_sign_out(state, p):
 
 def _session_sign_in(state, p):
     state["session"]["signed_in"] = True
-    return f"Welcome back, {ACCOUNT['holder'].split()[0]}"
+    first = (state["settings"]["profile"]["name"].split() or ["there"])[0]  # same name the header shows
+    return f"Welcome back, {first}"
 
 
 ACTIONS = {

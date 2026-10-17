@@ -5,7 +5,13 @@
     "start_path": "/settings?tab=accessibility",
     "initial_state_overrides": {},
     "check": {"all": [
-      {"path": "settings.accessibility.text_size", "op": "eq", "value": "L"}
+      {"path": "settings.accessibility.text_size", "op": "eq", "value": "L"},
+      {"path": "settings.accessibility.high_contrast", "op": "eq", "value": false},
+      {"path": "settings.accessibility.reduce_motion", "op": "eq", "value": false},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 1,
     "tags": ["easy", "settings"]
@@ -16,7 +22,11 @@
     "start_path": "/billing",
     "initial_state_overrides": {},
     "check": {"all": [
-      {"path": "billing.downloaded", "op": "eq", "value": ["2026-09"]}
+      {"path": "billing.downloaded", "op": "eq", "value": ["2026-09"]},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 1,
     "tags": ["easy", "billing", "icon_only"]
@@ -30,7 +40,11 @@
       {"path": "messages.inbox.msg-outage-hillcrest.read", "op": "eq", "value": true},
       {"path": "messages.inbox.msg-statement-sep.read", "op": "eq", "value": true},
       {"path": "messages.inbox.msg-autopay-promo.read", "op": "eq", "value": true},
-      {"path": "messages.inbox.msg-tree-trimming.read", "op": "eq", "value": true}
+      {"path": "messages.inbox.msg-tree-trimming.read", "op": "eq", "value": true},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 1,
     "tags": ["easy", "messages", "icon_only"]
@@ -42,7 +56,9 @@
     "initial_state_overrides": {},
     "check": {"all": [
       {"path": "billing.autopay", "op": "eq", "value": true},
-      {"path": "billing.payments.0", "op": "exists", "value": false}
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 1,
     "tags": ["easy", "billing"]
@@ -55,10 +71,14 @@
     "check": {"all": [
       {"path": "settings.accessibility.high_contrast", "op": "eq", "value": true},
       {"path": "settings.accessibility.reduce_motion", "op": "eq", "value": false},
-      {"path": "settings.accessibility.text_size", "op": "eq", "value": "M"}
+      {"path": "settings.accessibility.text_size", "op": "eq", "value": "M"},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 3,
-    "tags": ["medium", "settings", "icon_only"]
+    "tags": ["medium", "settings"]
   },
   {
     "id": "sms-billing-off",
@@ -66,11 +86,18 @@
     "start_path": "/settings",
     "initial_state_overrides": {},
     "check": {"all": [
-      {"path": "settings.notifications.billing.sms", "op": "eq", "value": false},
-      {"path": "settings.notifications.billing.email", "op": "eq", "value": true},
-      {"path": "settings.notifications.billing.push", "op": "eq", "value": false},
-      {"path": "settings.notifications.payments.sms", "op": "eq", "value": false},
-      {"path": "settings.notifications.outages.sms", "op": "eq", "value": true}
+      {"path": "settings.notifications.billing", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "settings.notifications.payments", "op": "eq", "value": {"email": true, "sms": false, "push": true}},
+      {"path": "settings.notifications.outages", "op": "eq", "value": {"email": true, "sms": true, "push": true}},
+      {"path": "settings.notifications.usage", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "settings.notifications.messages", "op": "eq", "value": {"email": true, "sms": false, "push": true}},
+      {"path": "settings.notifications.service", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "settings.notifications.promotions", "op": "eq", "value": {"email": true, "sms": true, "push": true}},
+      {"path": "settings.notifications.surveys", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 2,
     "tags": ["medium", "settings"]
@@ -81,7 +108,11 @@
     "start_path": "/",
     "initial_state_overrides": {"ui.nav_collapsed": true},
     "check": {"all": [
-      {"path": "usage.selected_month", "op": "eq", "value": "2026-07"}
+      {"path": "usage.selected_month", "op": "eq", "value": "2026-07"},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 3,
     "tags": ["medium", "usage", "canvas", "icon_only"]
@@ -93,7 +124,10 @@
     "initial_state_overrides": {},
     "check": {"all": [
       {"path": "outages.reports.0.district", "op": "eq", "value": "riverside"},
-      {"path": "outages.reports.1", "op": "exists", "value": false}
+      {"path": "outages.reports.1", "op": "exists", "value": false},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false}
     ]},
     "steps_min": 2,
     "tags": ["medium", "outages", "canvas"]
@@ -104,10 +138,24 @@
     "start_path": "/messages",
     "initial_state_overrides": {},
     "check": {"all": [
-      {"path": "messages.inbox.msg-landlord.starred", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-outage-hillcrest.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-statement-sep.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-autopay-promo.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-usage-alert.starred", "op": "eq", "value": false},
       {"path": "messages.inbox.msg-support-reply.starred", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-tree-trimming.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-payment-received.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-rebate.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-survey.starred", "op": "eq", "value": false},
       {"path": "messages.inbox.msg-heat-advisory.starred", "op": "eq", "value": false},
-      {"path": "messages.inbox.msg-paperless.starred", "op": "eq", "value": false}
+      {"path": "messages.inbox.msg-landlord.starred", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-paperless.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-welcome-portal.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-meter-upgrade.starred", "op": "eq", "value": false},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 2,
     "tags": ["medium", "messages", "icon_only", "scroll"]
@@ -120,7 +168,10 @@
     "check": {"all": [
       {"path": "billing.payments.0.amount_cents", "op": "eq", "value": 5000},
       {"path": "billing.payments.1", "op": "exists", "value": false},
-      {"path": "billing.balance_cents", "op": "eq", "value": 9237}
+      {"path": "billing.balance_cents", "op": "eq", "value": 9237},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 4,
     "tags": ["hard", "billing"]
@@ -133,8 +184,11 @@
     "check": {"all": [
       {"path": "messages.sent.0.to", "op": "eq", "value": "support"},
       {"path": "messages.sent.0.body", "op": "contains", "value": "meter"},
-      {"path": "messages.sent.0.body", "op": "contains", "value": "broken"},
-      {"path": "messages.sent.1", "op": "exists", "value": false}
+      {"path": "messages.sent.0.body", "op": "contains", "value": "broke"},
+      {"path": "messages.sent.1", "op": "exists", "value": false},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 5,
     "tags": ["hard", "messages"]
@@ -145,14 +199,20 @@
     "start_path": "/",
     "initial_state_overrides": {},
     "check": {"all": [
-      {"path": "settings.notifications.promotions.email", "op": "eq", "value": false},
-      {"path": "settings.notifications.promotions.sms", "op": "eq", "value": false},
-      {"path": "settings.notifications.promotions.push", "op": "eq", "value": false},
-      {"path": "settings.notifications.surveys.email", "op": "eq", "value": true},
-      {"path": "settings.notifications.billing.sms", "op": "eq", "value": true},
-      {"path": "settings.notifications.outages.push", "op": "eq", "value": true}
+      {"path": "settings.notifications.billing", "op": "eq", "value": {"email": true, "sms": true, "push": false}},
+      {"path": "settings.notifications.payments", "op": "eq", "value": {"email": true, "sms": false, "push": true}},
+      {"path": "settings.notifications.outages", "op": "eq", "value": {"email": true, "sms": true, "push": true}},
+      {"path": "settings.notifications.usage", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "settings.notifications.messages", "op": "eq", "value": {"email": true, "sms": false, "push": true}},
+      {"path": "settings.notifications.service", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "settings.notifications.promotions", "op": "eq", "value": {"email": false, "sms": false, "push": false}},
+      {"path": "settings.notifications.surveys", "op": "eq", "value": {"email": true, "sms": false, "push": false}},
+      {"path": "billing.payments.0", "op": "exists", "value": false},
+      {"path": "billing.autopay", "op": "eq", "value": false},
+      {"path": "messages.sent.0", "op": "exists", "value": false},
+      {"path": "outages.reports.0", "op": "exists", "value": false}
     ]},
     "steps_min": 6,
-    "tags": ["hard", "settings", "icon_only", "scroll"]
+    "tags": ["hard", "settings", "scroll"]
   }
 ]

@@ -72,3 +72,70 @@ def test_start_paths_render():
         sep = "&" if "?" in t["start_path"] else "?"
         r = client.get(f"{t['start_path']}{sep}sid=render-{t['id']}")
         assert r.status_code == 200, t["id"]
+
+
+# --- reward correctness: the solution passes; solution + a collateral change fails --------------
+
+SOLUTIONS = {
+    "text-size-large": [("settings.accessibility", {"key": "text_size", "value": "L"})],
+    "download-september-statement": [("billing.download", {"statement_id": "2026-09"})],
+    "mark-all-read": [("messages.mark_all_read", {})],
+    "turn-on-autopay": [("billing.autopay", {"enabled": True})],
+    "high-contrast": [("settings.accessibility", {"key": "high_contrast", "value": True})],
+    "sms-billing-off": [("settings.notification", {"category": "billing", "channel": "sms", "enabled": False})],
+    "max-usage-month": [("usage.select_month", {"month": "2026-07"})],
+    "report-outage-riverside": [("outages.report", {"district": "riverside"})],
+    "star-landlord-message": [("messages.star", {"id": "msg-landlord", "starred": True})],
+    "pay-50": [("billing.pay", {"amount_cents": 5000})],
+    "message-support-meter": [("messages.send", {"to": "support", "subject": "Meter", "body": "My meter broke this morning."})],
+    "stop-promotions": [("settings.notification", {"category": "promotions", "channel": c, "enabled": False})
+                        for c in ("email", "sms", "push")],
+}
+
+# Costly side effects no task may cause unless it is that task.
+GENERIC = {
+    "pays": ("billing.pay", {"amount_cents": 100}),
+    "turns-on-autopay": ("billing.autopay", {"enabled": True}),
+    "sends-a-message": ("messages.send", {"to": "billing", "body": "hello"}),
+    "reports-an-outage": ("outages.report", {"district": "hillcrest"}),
+}
+SPECIFIC = {
+    "text-size-large": [("settings.accessibility", {"key": "high_contrast", "value": True})],
+    "high-contrast": [("settings.accessibility", {"key": "reduce_motion", "value": True})],
+    "sms-billing-off": [("settings.notification", {"category": "service", "channel": "push", "enabled": True})],
+    "stop-promotions": [("settings.notification", {"category": "surveys", "channel": "email", "enabled": False})],
+    "star-landlord-message": [("messages.star", {"id": "msg-outage-hillcrest", "starred": True})],
+    "download-september-statement": [("billing.download", {"statement_id": "2026-08"})],
+}
+
+
+def solved(task, extra=()):
+    s = initial_state(task)
+    for action, payload in [*SOLUTIONS[task["id"]], *extra]:
+        st.apply_action(s, action, payload)
+    return s
+
+
+@pytest.mark.parametrize("task", TASKS, ids=[t["id"] for t in TASKS])
+def test_solution_passes(task):
+    passed, why = evaluate(solved(task), task["check"])
+    assert passed, why
+
+
+COLLATERAL = [(t, name, act) for t in TASKS
+              for name, act in [*GENERIC.items(), *((f"specific-{i}", a) for i, a in enumerate(SPECIFIC.get(t["id"], [])))]
+              if (t["id"], name) != ("turn-on-autopay", "turns-on-autopay")]  # that one is the task itself
+
+
+@pytest.mark.parametrize("task,name,extra", COLLATERAL, ids=[f"{t['id']}+{n}" for t, n, _ in COLLATERAL])
+def test_solution_plus_collateral_change_fails(task, name, extra):
+    passed, why = evaluate(solved(task, [extra]), task["check"])
+    assert not passed, f"{task['id']} still passes after {name}: {why}"
+
+
+@pytest.mark.parametrize("body", ["My meter is broken.", "my METER broke", "The meter seems broken to me"])
+def test_meter_message_wording_variants_pass(body):
+    task = next(t for t in TASKS if t["id"] == "message-support-meter")
+    s = initial_state(task)
+    st.apply_action(s, "messages.send", {"to": "support", "body": body})
+    assert evaluate(s, task["check"])[0]

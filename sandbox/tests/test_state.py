@@ -68,6 +68,8 @@ def test_outage_report(s):
         st.apply_action(s, "outages.report", {"district": "atlantis"})
     with pytest.raises(st.ActionError):
         st.apply_action(s, "outages.report", {"district": "riverside", "type": "aliens"})
+    with pytest.raises(st.ActionError):  # a non-string type is a 400, not a TypeError/500
+        st.apply_action(s, "outages.report", {"district": "riverside", "type": ["no_power"]})
 
 
 def test_messages(s):
@@ -100,6 +102,12 @@ def test_settings(s):
             st.apply_action(s, "settings.accessibility", bad)
     with pytest.raises(st.ActionError):
         st.apply_action(s, "settings.notification", {"category": "billing", "channel": "fax", "enabled": False})
+
+
+def test_sign_in_greets_the_saved_profile_name(s):
+    st.apply_action(s, "settings.profile", {"name": "Alex Kim", "email": "a@example.com", "phone": "555"})
+    st.apply_action(s, "session.sign_out")
+    assert st.apply_action(s, "session.sign_in") == "Welcome back, Alex"
 
 
 def test_sign_out_blocks_actions(s):

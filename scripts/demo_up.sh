@@ -43,7 +43,8 @@ if [ ! -x "$PY" ]; then
   exit 1
 fi
 
-SANDBOX_URL=http://127.0.0.1:8090
+SANDBOX_PORT="${SANDBOX_PORT:-8090}"; export SANDBOX_PORT   # run_sandbox.sh reads the same variable
+SANDBOX_URL="http://127.0.0.1:$SANDBOX_PORT"
 CONSOLE_URL=http://127.0.0.1:8095
 LOGS=runs/demo_logs
 mkdir -p "$LOGS"
