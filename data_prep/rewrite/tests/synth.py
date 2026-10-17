@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 DEFAULT_SOURCES = ("os_atlas/androidworld", "os_atlas/fineweb", "os_atlas/uibert")
 PLATFORMS = {"androidworld": "mobile", "uibert": "mobile", "widget_captioning": "mobile", "fineweb": "web",
-             "windows": "desktop"}
+             "windows": "desktop", "linux": "desktop", "macos": "desktop"}
 SIZES = {"mobile": (360, 720), "web": (640, 400), "desktop": (640, 400)}
 RAW_LABELS = {
     "mobile": ["More options", "Navigate up", "Search", "Settings", "Send message", "Camera", "Bluetooth", "Gmail",

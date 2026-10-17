@@ -1,13 +1,17 @@
-"""Pure metadata helpers for the Lightning rewrite pipeline: source classes, selection, styles, contamination checks,
-and the bucketed geometry/neighbor metadata Lightning sees instead of the screenshot."""
+"""Pure metadata helpers for the Lightning rewrite pipeline: source classes, selection, styles, the ScreenSpot/GroundUI
+contamination check, and the bucketed geometry/neighbor metadata Lightning sees instead of the screenshot.
+
+OS-Atlas Linux/macOS are training data under eval option C (AGENTS.md): the 28 ScreenSpot-v2 desktop rows captured on
+the same machines are excluded from the test set instead (benchmarks/screenspot_v2/excluded_rows.json)."""
 
 import hashlib
 import json
 import math
 from collections import Counter, defaultdict
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-RAW_LABEL_SOURCES = frozenset({"os_atlas/windows", "os_atlas/androidworld", "os_atlas/fineweb"})
+RAW_LABEL_SOURCES = frozenset({"os_atlas/linux", "os_atlas/macos", "os_atlas/androidworld", "os_atlas/fineweb",
+                               "os_atlas/windows"})
 NATURAL_SOURCES = frozenset({"os_atlas/uibert", "os_atlas/widget_captioning", "groundcua"})
 SELECT_PCT = 60
 STYLE_SPLIT = (("functional", 50), ("descriptive", 30), ("positional", 20))
@@ -18,10 +22,11 @@ LABEL_MAX_CHARS = 60
 REQUIRED_KEYS = ("id", "source", "image_path", "img_w", "img_h", "instruction", "bbox", "platform")
 ROWS = ("top", "middle", "bottom")
 COLS = ("left", "center", "right")
+BENCHMARK_MARKERS = ("screenspot", "groundui")  # substrings of source/id/image_path that are never training data
 
 
 class ContaminationError(ValueError):
-    """Manifest contains benchmark (ScreenSpot/GroundUI) or contaminated OS-Atlas Linux/macOS rows."""
+    """Manifest contains ScreenSpot (held-out test) or GroundUI-18K rows."""
 
 
 class ManifestError(ValueError):
@@ -71,17 +76,11 @@ def assign_style(row_id: str) -> str:
 
 def _contamination_reasons(row: dict) -> list[str]:
     source, rid, image_path = (str(row.get(k) or "").lower() for k in ("source", "id", "image_path"))
-    reasons = [name for name in ("screenspot", "groundui") if any(name in v for v in (source, rid, image_path))]
-    parts = PurePosixPath(image_path.replace("\\", "/")).parts
-    under_images = any(p == "images" and {"linux", "macos"} & set(parts[i + 1:]) for i, p in enumerate(parts))
-    if (source.startswith(("os_atlas/linux", "os_atlas/macos")) or source in ("linux", "macos")
-            or rid.startswith(("linux:", "macos:")) or under_images):
-        reasons.append("os_atlas_linux_macos")
-    return reasons
+    return [name for name in BENCHMARK_MARKERS if any(name in v for v in (source, rid, image_path))]
 
 
 def assert_clean_manifest(rows) -> None:
-    """Raise ContaminationError if any row could come from ScreenSpot, GroundUI or OS-Atlas Linux/macOS desktop data."""
+    """Raise ContaminationError if any row could come from ScreenSpot (the held-out test) or GroundUI-18K."""
     counts, examples = Counter(), []
     for row in rows:
         reasons = _contamination_reasons(row)
@@ -92,9 +91,8 @@ def assert_clean_manifest(rows) -> None:
         detail = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
         raise ContaminationError(
             f"contaminated manifest ({detail}; e.g. {', '.join(examples)}). AGENTS.md: never train on ScreenSpot-v2/v1 "
-            f"(the held-out benchmark), Wave-UI source=='screenspot' rows or GroundUI-18K, and never use OS-Atlas "
-            f"Linux/macOS desktop data (same machines as SSv2's new desktop screenshots). Fix the sampler, "
-            f"not this check.")
+            f"(ScreenSpot-v2-clean is the held-out test), Wave-UI source=='screenspot' rows or GroundUI-18K (both "
+            f"contain ScreenSpot). Fix the sampler, not this check.")
 
 
 def _is_number(v) -> bool:

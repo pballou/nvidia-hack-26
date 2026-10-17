@@ -1,4 +1,5 @@
-"""meta.py: selection, styles, contamination/manifest checks, buckets, directions, neighbors, row_meta; synth."""
+"""meta.py: selection, styles, ScreenSpot/GroundUI contamination and manifest checks, buckets, directions, neighbors,
+row_meta; synth."""
 
 import hashlib
 import json
@@ -58,8 +59,10 @@ def test_extra_sources_override():
 
 
 def test_classify_known_sources():
-    for s in ("os_atlas/windows", "os_atlas/androidworld", "os_atlas/fineweb"):
+    for s in ("os_atlas/linux", "os_atlas/macos", "os_atlas/windows", "os_atlas/androidworld", "os_atlas/fineweb"):
         assert meta.classify_source(s) == "raw"
+    assert meta.RAW_LABEL_SOURCES == {"os_atlas/linux", "os_atlas/macos", "os_atlas/androidworld", "os_atlas/fineweb",
+                                      "os_atlas/windows"}
     for s in ("os_atlas/uibert", "os_atlas/widget_captioning", "groundcua", "groundcua/gimp"):
         assert meta.classify_source(s) == "natural"
 
@@ -92,17 +95,11 @@ def test_style_matches_pct_thresholds():
 @pytest.mark.parametrize("bad", [
     {"source": "screenspot"},
     {"source": "wave_ui/screenspot"},
-    {"source": "os_atlas/linux"},
-    {"source": "os_atlas/macos_splited"},
-    {"source": "linux"},
-    {"source": "macos"},
-    {"id": "linux:shot:0"},
-    {"id": "macos:shot:1"},
-    {"image_path": "images/macos/shot.png"},
-    {"image_path": "/home/ubuntu/data/slice/images/linux/a.png"},
     {"image_path": "images/ScreenSpot_v2/x.png"},
+    {"id": "screenspot_v2:web_3:0"},
     {"source": "groundui"},
     {"id": "GroundUI-18K:7"},
+    {"image_path": "/home/ubuntu/data/groundui_18k/images/a.png"},
 ])
 def test_contamination_raises(bad, tmp_path):
     rows = [row(rid="androidworld:ok:0"), row(rid="androidworld:ok:1", **{"id": "tmp:1", **bad})]
@@ -113,15 +110,29 @@ def test_contamination_raises(bad, tmp_path):
 
 
 def test_contamination_message_counts_reasons():
-    rows = [row(rid=f"linux:a:{i}") for i in range(3)] + [row(rid="b:0", source="screenspot")]
+    rows = [row(rid=f"screenspot:a:{i}") for i in range(3)] + [row(rid="b:0", source="groundui")]
     with pytest.raises(meta.ContaminationError) as e:
         meta.assert_clean_manifest(rows)
-    assert "os_atlas_linux_macos=3" in str(e.value) and "screenspot=1" in str(e.value)
+    assert "screenspot=3" in str(e.value) and "groundui=1" in str(e.value)
 
 
 def test_clean_rows_pass():
     meta.assert_clean_manifest([row(), row(rid="fineweb:p:0", source="os_atlas/fineweb",
                                            image_path="images/fineweb/linux_kernel_docs.png")])
+
+
+@pytest.mark.parametrize("subset", ["linux", "macos"])
+def test_os_atlas_linux_macos_are_training_data(subset, tmp_path):
+    """Eval option C: Linux/macOS load, are raw-label sources, and ~60% are selected (the 28 overlapping SSv2 rows
+    are excluded from the test set instead)."""
+    rows = [row(rid=f"{subset}:shot{i // 8}:{i % 8}", source=f"os_atlas/{subset}", platform="desktop",
+                image=f"images/{subset}/shot{i // 8}.png") for i in range(400)]
+    meta.assert_clean_manifest(rows)
+    assert meta.load_manifest(write_jsonl(tmp_path / "m.jsonl", rows)) == rows
+    assert meta.classify_source(f"os_atlas/{subset}") == "raw"
+    picked = [r for r in rows if meta.is_selected(r)]
+    assert 0.5 <= len(picked) / len(rows) <= 0.7
+    assert all(meta.is_selected(r) == (meta.stable_pct(r["id"]) < meta.SELECT_PCT) for r in rows)
 
 
 def test_load_manifest_reads_without_filtering(manifest_path):
