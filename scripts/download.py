@@ -8,7 +8,7 @@ Run on the box, from a shell that has sourced serving.env (docs/gpu-box.md §1):
 
 - Models go to the shared HF cache ($HF_HOME), so vLLM and TRL find them by repo id.
 - Raw datasets go to /home/ubuntu/data/raw/<name>; data_prep/ reads from there.
-- Every repo is pinned to a commit, so reruns fetch the same bytes. All six repos
+- Every repo is pinned to a commit, so reruns fetch the same bytes. All seven repos
   are ungated, so no HF token is needed (a read-only one only raises rate limits).
 """
 
@@ -22,20 +22,26 @@ from huggingface_hub import snapshot_download
 
 DATA_ROOT = Path("/home/ubuntu/data/raw")
 
-# Grounder candidates first (the M1 baselines need them). Lightning NVFP4 is only for
-# self-hosting on Sunday, so it comes last.
+# Grounder candidates first (the M1 baselines need them). Lightning is only for
+# self-hosting on Sunday, so it comes last: NVFP4 (~21.6 GB) and BF16 (~65.8 GB), to
+# compare the two. Same 30B model either way, so serve only one in the system.
 MODELS = [
     ("Qwen/Qwen3.5-2B", "15852e8c16360a2fea060d615a32b45270f8a8fc"),
     ("Qwen/Qwen3-VL-2B-Instruct", "89644892e4d85e24eaac8bacfd4f463576704203"),
     ("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "bee7596271d1495f6992ae224aefde4410e816b8"),
+    ("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16", "a9904d24bcc1d289a1950fa9d2b978c47cf903b9"),
 ]
 
-# OS-Atlas: only the subsets in the docs/plan.md data mix (~12.6 GB). Never linux_* or
-# macos_* (contaminated, research-notes §5). Windows and FineWeb images are
-# range-extracted by data_prep/, so only their annotations are fetched here.
+# OS-Atlas: the subsets in the docs/plan.md data mix (~21 GB). Linux/macOS are training
+# data under eval option C; the 28 SSv2 rows from the same machines are excluded from
+# the test instead (benchmarks/screenspot_v2/excluded_rows.json).
 OS_ATLAS_FILES = [
     "README.md",
     "prompts.json",
+    "desktop_domain/linux_splited.json",
+    "desktop_domain/linux_images.zip",
+    "desktop_domain/macos_splited.json",
+    "desktop_domain/macos_images.zip",
     "mobile_domain/aw_mobile.json",  # AndroidWorld
     "mobile_domain/mobile_images.zip",
     "mobile_domain/uibert_raw.json",
@@ -46,8 +52,6 @@ OS_ATLAS_FILES = [
     "web_domain/fineweb_3m.json",
     "web_domain/seeclick_web.json",  # fallback if FineWeb fails its SSv2 overlap check
 ]
-assert not any("linux" in f or "macos" in f for f in OS_ATLAS_FILES)
-OS_ATLAS_EXCLUDE = ["desktop_domain/linux_*", "desktop_domain/macos_*"]
 
 # `data-rest`: the rest of OS-Atlas (~795 GB), for downselecting on the box. Fetched in
 # this order so the plan's sources land first: Windows, the first FineWeb shard,
@@ -76,6 +80,11 @@ def download_models():
     for repo, commit in MODELS:
         print(f"== {repo}@{commit[:10]}", flush=True)
         print(snapshot_download(repo, revision=commit, max_workers=16), flush=True)
+        # vLLM serves by repo id with HF_HUB_OFFLINE=1 (scripts/serve_vlm.sh), which
+        # resolves `main` from refs/. Downloading by commit doesn't write that ref.
+        ref = Path(os.environ["HF_HOME"]) / "hub" / f"models--{repo.replace('/', '--')}" / "refs" / "main"
+        ref.parent.mkdir(exist_ok=True)
+        ref.write_text(commit)
 
 
 def download_data():
@@ -84,7 +93,7 @@ def download_data():
         print(f"== {repo}@{commit[:10]} -> {local_dir}", flush=True)
         snapshot_download(
             repo, repo_type="dataset", revision=commit, allow_patterns=patterns,
-            ignore_patterns=OS_ATLAS_EXCLUDE, local_dir=local_dir, max_workers=16,
+            local_dir=local_dir, max_workers=16,
         )
         # M1 baselines need the SSv2 screenshots on disk for file:// URLs right away,
         # so unzip before moving on to the bigger datasets.
@@ -102,7 +111,7 @@ def download_data_rest():
         print(f"== {repo}@{commit[:10]} {patterns}", flush=True)
         snapshot_download(
             repo, repo_type="dataset", revision=commit, allow_patterns=patterns,
-            ignore_patterns=OS_ATLAS_EXCLUDE, local_dir=DATA_ROOT / "os_atlas", max_workers=16,
+            local_dir=DATA_ROOT / "os_atlas", max_workers=16,
         )
     print("done", flush=True)
 
