@@ -7,13 +7,12 @@
 #
 # Everything else (knobs, STOP, round_<r>/, FINAL.json) lives in /home/ubuntu/night; see
 # training/night_loop.py. Extra args are passed through (e.g. --night-dir for a rehearsal).
+# The loop appends its own log to <night dir>/night_loop.log (no tee: a closed pane must not
+# break the cleanup path); follow it with `tail -f`.
 set -uo pipefail
 source /home/ubuntu/serving.env
 source /home/ubuntu/venvs/train/bin/activate
 export HF_HUB_OFFLINE=1
 cd "$(dirname "$0")/.."
-night=/home/ubuntu/night
-for ((i = 1; i <= $#; i++)); do [[ ${!i} == --night-dir ]] && { j=$((i + 1)); night=${!j}; }; done
-mkdir -p "$night"
-python -m training.night_loop "$@" 2>&1 | tee -a "$night/night_loop.log"
-echo "NIGHT_LOOP_EXIT ${PIPESTATUS[0]}" | tee -a "$night/night_loop.log"
+python -m training.night_loop "$@"
+echo "NIGHT_LOOP_EXIT $?"

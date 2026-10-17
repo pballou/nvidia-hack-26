@@ -46,10 +46,28 @@ _PLATFORMS = ("desktop", "mobile", "web")
 SLICES = {*SOURCES, *_PLATFORMS, "text", "icon", *(f"{p}/{t}" for p in _PLATFORMS for t in ("text", "icon"))}
 
 _LIVE: list["Proc"] = []  # every child we started, so a crash can stop them all
+LOG_FILE: Path | None = None  # the night loop appends here itself, so a dead tmux pane can't break logging
+
+
+def configure(eval_port: int, head_port: int, verify_port: int) -> None:
+    """Use other ports (the one-off eval CLI), so it can never collide with a running night loop."""
+    global EVAL_PORT, HEAD_PORT, VERIFY_PORT, VERIFY_URL
+    EVAL_PORT, HEAD_PORT, VERIFY_PORT = eval_port, head_port, verify_port
+    VERIFY_URL = f"http://127.0.0.1:{VERIFY_PORT}/verify"
 
 
 def log(msg: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S %Z')}] {msg}", flush=True)
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S %Z')}] {msg}"
+    try:
+        print(line, flush=True)
+    except (OSError, ValueError):  # stdout gone (tmux pane closed): keep going, the file still gets it
+        pass
+    if LOG_FILE is not None:
+        try:
+            with LOG_FILE.open("a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
 
 class StepError(RuntimeError):
@@ -209,9 +227,9 @@ def gym_env_vars() -> dict:
 class GymEnv:
     """`gym env start` for gui_grounding on HEAD_PORT, policy = `grounder` on the eval server."""
 
-    def __init__(self, log_path: Path, policy_port: int = EVAL_PORT):
+    def __init__(self, log_path: Path, policy_port: int | None = None):
         self.log_path = log_path
-        self.policy_port = policy_port
+        self.policy_port = policy_port or EVAL_PORT
         self.proc: Proc | None = None
 
     def ready(self) -> bool:
@@ -229,6 +247,8 @@ class GymEnv:
         log(f"starting gym env (head :{HEAD_PORT}, verify :{VERIFY_PORT}, policy :{self.policy_port} grounder)")
         self.proc = Proc([GYM, "env", "start", "--resources-server", "gui_grounding", "--model-type", "vllm_model",
                           "++server_spinup_timeout_seconds=1800", "++skip_venv_if_present=true",
+                          # don't wait for the policy: the env may be (re)started while :8004 is down for GRPO
+                          "++model_endpoint_readiness_timeout_seconds=0",
                           f"++policy_base_url=http://127.0.0.1:{self.policy_port}/v1", "++policy_model_name=grounder",
                           f"++head_server.port={HEAD_PORT}",
                           f"++gui_grounding.resources_servers.gui_grounding.port={VERIFY_PORT}"],
@@ -313,6 +333,7 @@ def headline(m: dict) -> str:
 
 def _eval_cli(args) -> None:
     """Dev (+ SSv2-clean for the results table) for one adapter through the gui_grounding env."""
+    configure(args.port, args.head_port, args.verify_port)
     out = args.out_root / args.name
     out.mkdir(parents=True, exist_ok=True)
     env = GymEnv(out / "gym_env.log")
@@ -345,6 +366,10 @@ def main():
     e.add_argument("--out-root", type=Path, default=Path("/home/ubuntu/night/evals"))
     e.add_argument("--gpu-util", type=float, default=0.25)
     e.add_argument("--keep-server", action="store_true")
+    # Not the loop's 8004 / 11010 / 12010, so this can run while the night loop does.
+    e.add_argument("--port", type=int, default=8005)
+    e.add_argument("--head-port", type=int, default=11011)
+    e.add_argument("--verify-port", type=int, default=12011)
     args = ap.parse_args()
     if args.cmd == "eval":
         _eval_cli(args)

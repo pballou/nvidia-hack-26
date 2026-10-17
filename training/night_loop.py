@@ -31,6 +31,7 @@ import datetime as dt
 import hashlib
 import json
 import random
+import shutil
 import signal
 import sys
 import time
@@ -56,7 +57,7 @@ DEFAULT_KNOBS = {
 }
 # type, min, max for the scalar knobs; values outside are clamped, the change is recorded.
 KNOB_LIMITS = {"pool_max": (int, 16, 4000), "num_generations": (int, 2, 16), "grpo_max_steps": (int, 1, 2000),
-               "round_time_budget_min": (float, 10, 240), "format_reward": (float, 0.0, 1.0)}
+               "round_time_budget_min": (float, 30, 240), "format_reward": (float, 0.0, 1.0)}
 
 PROFILE_REPEATS = 8
 PROFILE_MAX_OUTPUT_TOKENS = 32  # = GRPO max_completion_length
@@ -66,6 +67,7 @@ KEEP_MIN_GAIN = 0.5  # dev points
 GATE_S_PER_STEP = 35.0
 SMOKE_STEPS = 20
 DEV_RESERVE_MIN = 8  # round budget kept back for adapter save + server restart + dev eval
+MIN_GRPO_WINDOW_MIN = 15  # GRPO always gets load + the 20-step smoke, even if the round budget is spent
 EVAL_GPU_UTIL = 0.40  # :8004 during profile / dev (8 repeats x 4k rows)
 FINAL_GPU_UTIL = 0.30  # :8001, as today
 GRPO_VLLM_UTIL = 0.25  # colocated vLLM inside the trainer (TRL default 0.3, set explicitly)
@@ -241,10 +243,12 @@ class Loop:
     def __init__(self, a):
         self.a = a
         self.night: Path = a.night_dir
-        self.ckpt: Path = a.ckpt_dir
         self.start = now()
+        self.run_id = self.start.strftime("%Y%m%d-%H%M%S")
+        self.ckpt: Path = a.ckpt_dir / self.run_id  # per launch: a relaunch never overwrites or reuses adapters
         self.no_new_step = clock(a.no_new_step, self.start)
         self.last_round_start = clock(a.last_round_start, self.start)
+        self.hard_end = clock(a.hard_end, self.start)  # every timeout is capped here so finish() runs by then
         self.env = gymctl.GymEnv(self.night / "gym_env.log")
         self.knobs = dict(DEFAULT_KNOBS)
         self.used_ids: set[str] = set()
@@ -284,20 +288,28 @@ class Loop:
     def secs_to(self, t: dt.datetime) -> float:
         return (t - now()).total_seconds()
 
+    def cap(self, seconds: float) -> float:
+        """A step timeout that never runs past the hard end."""
+        return max(30.0, min(seconds, self.secs_to(self.hard_end)))
+
     # ---- steps
 
     def serve_eval(self, adapter: str, log_path: Path) -> None:
-        gymctl.serve(gymctl.EVAL_PORT, adapter, log_path, gpu_util=EVAL_GPU_UTIL)
-        self.env.ensure()
+        gymctl.serve(gymctl.EVAL_PORT, adapter, log_path, gpu_util=EVAL_GPU_UTIL, timeout_s=self.cap(900))
+        self.env.ensure(self.cap(1800))
 
     def dev_eval(self, adapter: str, out_dir: Path) -> tuple[dict, Path]:
+        if self.secs_to(self.hard_end) < 150:
+            raise StepError(f"past the {edt(self.hard_end)} hard end: no time for a dev eval")
         self.serve_eval(adapter, out_dir.parent / "serve.log")
         try:
-            rollouts = gymctl.eval_run(gymctl.DEV_ROWS, out_dir, timeout_s=1200, concurrency=64)
+            rollouts = gymctl.eval_run(gymctl.DEV_ROWS, out_dir, timeout_s=self.cap(1200), concurrency=64)
         except StepError as e:  # one retry: a transient model/env failure aborts the whole gym run
+            if self.secs_to(self.hard_end) < 300:
+                raise
             log(f"dev eval failed once, retrying: {e}")
-            self.env.ensure()
-            rollouts = gymctl.eval_run(gymctl.DEV_ROWS, out_dir, timeout_s=1200, concurrency=64)
+            self.env.ensure(self.cap(1800))
+            rollouts = gymctl.eval_run(gymctl.DEV_ROWS, out_dir, timeout_s=self.cap(1200), concurrency=64)
         m = gymctl.metrics(rollouts)
         log(f"dev {adapter}: {gymctl.headline(m)}")
         return m, rollouts
@@ -338,12 +350,16 @@ class Loop:
         return rollouts, prof, input_by_id
 
     def grpo(self, r: int, rd: Path, knobs: dict, t_round: dt.datetime) -> tuple[str, dict]:
-        """('ok' | 'gate_failed' | 'crashed', info); info['adapter'] is set for 'ok' / usable crashes."""
+        """('ok' | 'gate_failed' | 'crashed_before_smoke' | 'crashed', info).
+
+        info['adapter'] is set for 'ok' and for a crash after the smoke that left a checkpoint."""
         budget_end = t_round + dt.timedelta(minutes=knobs["round_time_budget_min"] - DEV_RESERVE_MIN)
-        deadline = min(self.no_new_step, budget_end)
+        deadline = min(self.no_new_step, max(budget_end, now() + dt.timedelta(minutes=MIN_GRPO_WINDOW_MIN)))
         if self.secs_to(deadline) < 8 * 60:
-            raise StepError(f"no time left for GRPO (deadline {edt(deadline)})")
+            raise StepError(f"no time left for GRPO before the {edt(self.no_new_step)} cutoff")
         out = self.ckpt / f"round_{r}" / "grpo"
+        shutil.rmtree(out, ignore_errors=True)
+        self.env.ensure(self.cap(1800))  # /verify must be up before the trainer starts
         cmd = [PY, "-m", "training.grpo", "--init-adapter", self.current, "--pool", rd / "pool.jsonl", "--out", out,
                "--verify-url", gymctl.VERIFY_URL, "--num-generations", knobs["num_generations"],
                "--max-steps", knobs["grpo_max_steps"], "--deadline", deadline.timestamp(),
@@ -352,9 +368,10 @@ class Loop:
                "--vllm-gpu-util", GRPO_VLLM_UTIL, "--lr", GRPO_LR]
         (rd / "grpo_command.txt").write_text(" ".join(map(str, cmd)) + "\n")
         self.status(f"round {r}: GRPO", deadline=edt(deadline), pool=rd / "pool.jsonl")
+        (rd / "grpo.log").unlink(missing_ok=True)
         proc = gymctl.Proc(cmd, rd / "grpo.log")
         try:
-            rc = proc.wait(self.secs_to(deadline) + 25 * 60)  # + model/vLLM load, last step, save
+            rc = proc.wait(self.cap(self.secs_to(deadline) + 10 * 60))  # + last step, save
         except StepError as e:
             log(f"GRPO timed out: {e}")
             rc = None
@@ -371,8 +388,8 @@ class Loop:
                 gate = json.loads(line[len("GATE_D2 "):])
         info["gate_d2"] = gate
         info["error_tail"] = gymctl._tail(rd / "grpo.log", 30)
-        if gate is None:  # died before the smoke finished: GRPO isn't viable here
-            return "gate_failed", info
+        if gate is None:  # died before the smoke finished
+            return "crashed_before_smoke", info
         ckpts = sorted(out.glob("checkpoint-*/adapter_config.json"), key=lambda p: int(p.parent.name.split("-")[1]))
         if gate["passed"] and ckpts:
             info["adapter"] = str(ckpts[-1].parent)
@@ -391,13 +408,14 @@ class Loop:
         data = rd / "rs_sft" / "train.jsonl"
         write_jsonl(data, rows)
         out = self.ckpt / f"round_{r}" / "rs_sft"
+        shutil.rmtree(out, ignore_errors=True)
         cmd = [PY, "-m", "training.sft", "--model", "qwen3.5", "--train", data, "--image-root",
                self.a.train_file.parent, "--init-adapter", self.current, "--out", out, "--lr", RS_LR,
                "--seed", r, "--save-steps", 100000]
         (rd / "rs_sft" / "command.txt").write_text(" ".join(map(str, cmd)) + "\n")
         write_json(rd / "rs_sft" / "stats.json", stats | {"source_rollouts": str(rollouts)})
         self.status(f"round {r}: rejection-sampled SFT (GRPO fallback)", rows=len(rows))
-        gymctl.run(cmd, rd / "rs_sft.log", timeout_s=max(600, self.secs_to(self.no_new_step) + 15 * 60))
+        gymctl.run(cmd, rd / "rs_sft.log", timeout_s=self.cap(max(600, self.secs_to(self.no_new_step) + 15 * 60)))
         sft_summary = json.loads((out / "summary.json").read_text())
         return {"adapter": str(out / "adapter"), "data": str(data), **stats, "sft": sft_summary}
 
@@ -405,6 +423,7 @@ class Loop:
         rd = self.night / f"round_{r}"
         rd.mkdir(parents=True, exist_ok=True)
         (rd / "DONE").unlink(missing_ok=True)
+        (rd / "BLADE_DONE").unlink(missing_ok=True)
         t0 = now()
         self.knobs, notes = load_knobs(self.night / "knobs.json", self.knobs)
         knobs = self.knobs
@@ -431,18 +450,22 @@ class Loop:
 
             gymctl.stop_server(gymctl.EVAL_PORT)  # GPU for the trainer; :8001 stays up
             time.sleep(20)  # vLLM's startup profiler asserts if another process frees GPU memory meanwhile
-            outcome, info = ("gate_failed", {"note": f"pool too small ({len(pool)} < {MIN_POOL})"}) \
+            outcome, info = ("pool_too_small", {"note": f"pool too small ({len(pool)} < {MIN_POOL})"}) \
                 if len(pool) < MIN_POOL else self.grpo(r, rd, knobs, t0)
             s["grpo"] = info
             s.update(grpo_steps=info.get("grpo_steps", 0), s_per_step=info.get("s_per_step"),
                      reward_mean_first=info.get("reward_mean_first"), reward_mean_last=info.get("reward_mean_last"))
             stop_after = None
-            if outcome == "gate_failed":
-                log(f"GRPO failed gate D2 / smoke: {info.get('gate_d2') or info.get('note') or info.get('error_tail')}")
+            s["grpo_outcome"] = outcome
+            if outcome in ("gate_failed", "crashed_before_smoke", "pool_too_small"):
+                why = {"gate_failed": f"GRPO failed gate D2 ({info.get('gate_d2')})",
+                       "crashed_before_smoke": "GRPO crashed before finishing its 20-step smoke",
+                       "pool_too_small": f"GRPO skipped: {info.get('note')}"}[outcome]
+                log(f"{why}; falling back to one rejection-sampled SFT round\n{info.get('error_tail') or ''}")
                 rs = self.rs_sft(r, rd, knobs, rollouts)
                 s["rs_sft"] = rs
                 s["method"], candidate = "rejection_sampled_sft", rs["adapter"]
-                stop_after = "GRPO failed gate D2: ran the one rejection-sampled SFT round"
+                stop_after = f"{why}: ran the one rejection-sampled SFT round"
             elif outcome == "crashed" and not info.get("adapter"):
                 raise StepError(f"GRPO crashed after the smoke with no checkpoint:\n{info.get('error_tail')}")
             else:
@@ -458,7 +481,8 @@ class Loop:
             m, dev_rollouts = self.dev_eval(candidate, rd / f"dev_r{r}")
             s.update(checkpoint=candidate, dev_acc_new=m["acc"], dev=m, dev_rollouts=str(dev_rollouts))
             try:
-                s["compare_report"] = str(gymctl.compare(self.dev_rollouts, dev_rollouts, rd / "compare"))
+                s["compare_report"] = str(gymctl.compare(self.dev_rollouts, dev_rollouts, rd / "compare",
+                                                         timeout_s=self.cap(600)))
             except Exception as e:  # the report is an artifact, not the gate
                 log(f"gym eval compare failed: {e}")
             gain = m["acc"] - self.dev["acc"]
@@ -524,11 +548,24 @@ class Loop:
             time.sleep(10)
         return None
 
+    def archive_previous(self) -> None:
+        """Move an earlier launch's artifacts aside so the orchestrator never sees a stale FINAL.json / DONE."""
+        old = [p for p in self.night.iterdir()
+               if p.name.startswith("round_") or p.name in ("FINAL.json", "STATUS.json", "state.json", "loop.json")]
+        if old:
+            dest = self.night / f"prev_{self.run_id}"
+            dest.mkdir()
+            for p in old:
+                p.rename(dest / p.name)
+            log(f"moved {len(old)} artifacts of an earlier launch to {dest}")
+
     def run(self) -> str:
+        self.archive_previous()
         write_json(self.night / "loop.json", {
             "args": {k: str(v) for k, v in vars(self.a).items()}, "start": self.start.isoformat(),
             "no_new_grpo_step_after": self.no_new_step.isoformat(),
-            "no_round_starts_after": self.last_round_start.isoformat(),
+            "no_round_starts_after": self.last_round_start.isoformat(), "hard_end": self.hard_end.isoformat(),
+            "run_id": self.run_id, "ckpt_dir": str(self.ckpt),
             "code_revision": (gymctl.REPO / "REVISION").read_text().strip() if (gymctl.REPO / "REVISION").exists() else None,
             "train_rows": len(self.train_rows)})
         if not (self.night / "knobs.json").exists():
@@ -562,7 +599,8 @@ class Loop:
         if self.a.final_port:
             for adapter in dict.fromkeys([self.current, str(self.a.init_adapter)]):
                 try:
-                    gymctl.serve(self.a.final_port, adapter, self.night / "serve_final.log", gpu_util=FINAL_GPU_UTIL)
+                    gymctl.serve(self.a.final_port, adapter, self.night / "serve_final.log", gpu_util=FINAL_GPU_UTIL,
+                                 timeout_s=420)
                     served = adapter
                     break
                 except Exception as e:
@@ -590,11 +628,12 @@ def main():
     ap.add_argument("--train-file", type=Path, required=True, help="the round-0 run's train manifest")
     ap.add_argument("--night-dir", type=Path, default=Path("/home/ubuntu/night"))
     ap.add_argument("--ckpt-dir", type=Path, default=Path("/home/ubuntu/ckpt/night"),
-                    help="adapters; must be under /home/ubuntu/ckpt so the vLLM containers can mount them")
+                    help="adapters go to <dir>/<launch time>/round_<r>; must be under /home/ubuntu/ckpt (vLLM mounts)")
     ap.add_argument("--max-rounds", type=int, default=3)
     ap.add_argument("--profile-rows", type=int, default=4000)
     ap.add_argument("--no-new-step", default="02:40", help="EDT; no GRPO step starts after this")
     ap.add_argument("--last-round-start", default="01:30", help="EDT; no round starts after this")
+    ap.add_argument("--hard-end", default="02:50", help="EDT; every step's timeout is capped here, then finish()")
     ap.add_argument("--blade-wait-min", type=float, default=10)
     ap.add_argument("--gate-s-per-step", type=float, default=GATE_S_PER_STEP, help="gate D2 (rehearsals on a busy GPU)")
     ap.add_argument("--stop-ports", type=int, nargs="*", default=[8002, 8003])
@@ -604,6 +643,9 @@ def main():
     a = ap.parse_args()
     a.night_dir.mkdir(parents=True, exist_ok=True)
     a.ckpt_dir.mkdir(parents=True, exist_ok=True)
+    gymctl.LOG_FILE = a.night_dir / "night_loop.log"
+    if (a.night_dir / "STOP").exists():
+        sys.exit(f"{a.night_dir / 'STOP'} exists; remove it to start the loop")
     assert str(a.ckpt_dir).startswith("/home/ubuntu/ckpt"), "adapters must live under /home/ubuntu/ckpt"
     assert Path(a.init_adapter, "adapter_config.json").exists(), a.init_adapter
 
@@ -622,8 +664,8 @@ def main():
         reason = f"crash: {type(e).__name__}: {str(e)[:1500]}"
         log(traceback.format_exc())
     finally:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):  # finish() must not be interrupted
+            signal.signal(sig, signal.SIG_IGN)
         log(f"stopping: {reason}")
         loop.finish(reason)
 

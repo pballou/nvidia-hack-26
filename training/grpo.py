@@ -35,6 +35,7 @@ import os
 import statistics
 import sys
 import time
+import traceback
 import urllib.request
 from pathlib import Path
 
@@ -362,7 +363,13 @@ def main():
 
 
 if __name__ == "__main__":
-    code = main()
+    try:
+        code = main()
+    except SystemExit as e:  # argparse errors
+        code = e.code if isinstance(e.code, int) else 1
+    except BaseException:  # incl. KeyboardInterrupt from the loop's SIGINT
+        traceback.print_exc()
+        code = 1
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(code)  # the colocated vLLM engine can hang interpreter shutdown; everything is written by now
+    os._exit(code)  # skip interpreter teardown on every path: the colocated vLLM engine can hang it
