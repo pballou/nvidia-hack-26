@@ -77,6 +77,7 @@ class ToolOutcome:
     click: dict | None = None            # {x, y, target, point_1000, raw, model, error?}
     screen_changed: bool | None = None
     done: bool = False
+    invalid: bool = False                # rejected by validate_args (schema mismatch); nothing ran
     before: Image.Image | None = None    # what the grounder saw (for the overlay)
     after: Image.Image | None = None     # the new observation's screenshot
     timings_ms: dict[str, float] = field(default_factory=dict)
@@ -251,12 +252,20 @@ class AgentSession:
         timings["settle"] = settle
         return obs, img, timings
 
+    def prime(self, img: Image.Image, observation: Observation) -> None:
+        """Step 0 from a precomputed observation (Gym rows bake it in), without a VLM call."""
+        self.step = 0
+        self.finished = None
+        self.last_screenshot, self.last_observation = img, observation
+
     async def execute(self, name: str, args: Any) -> ToolOutcome:
         """Run one tool call. Never raises; failures are ok=False outcomes with an observation."""
         self.step += 1
         clean, err = validate_args(name, args)
         if err:
-            return await self._failed(name, args if isinstance(args, dict) else {}, err)
+            outcome = await self._failed(name, args if isinstance(args, dict) else {}, err)
+            outcome.invalid = True
+            return outcome
         if self.finished is not None:
             return await self._failed(name, clean, ALREADY_DONE, observe=False)
         if name == "done":

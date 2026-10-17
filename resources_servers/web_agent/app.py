@@ -73,7 +73,7 @@ from agent.browser import close_pool, get_pool  # noqa: E402
 from agent.config import AgentConfig, load_config  # noqa: E402
 from agent.observation import Observation, build_observation  # noqa: E402
 from agent.prompts import PROMPT_VERSION, TOOL_NAMES  # noqa: E402
-from agent.session import ALREADY_DONE, AgentSession, Located, Summary, validate_args  # noqa: E402
+from agent.session import ALREADY_DONE, AgentSession, Located, Summary  # noqa: E402
 from agent.vlm import VLMClient  # noqa: E402
 from sandbox.checks import evaluate  # noqa: E402
 
@@ -467,11 +467,10 @@ class WebAgentResourcesServer(SimpleResourcesServer):
             # and the interactive agent), so this hashes the same frame as the row's initial_screen_sha.
             await ep.browser.settle()
             img = await ep.browser.screenshot()
-            agent.last_screenshot = img
-            agent.last_observation = (_row_observation(row.initial_observation)
-                                      or build_observation(step=0, url=await ep.browser.url(),
-                                                           title=await ep.browser.title(), screen_changed=None,
-                                                           last_action_result="", screen_summary=NO_INITIAL_SUMMARY))
+            agent.prime(img, _row_observation(row.initial_observation)
+                        or build_observation(step=0, url=await ep.browser.url(), title=await ep.browser.title(),
+                                             screen_changed=None, last_action_result="",
+                                             screen_summary=NO_INITIAL_SUMMARY))
             if isinstance(row.initial_screen_sha, str) and row.initial_screen_sha:
                 ep.initial_obs_stale = screen_sha(img) != row.initial_screen_sha
                 if ep.initial_obs_stale:
@@ -567,7 +566,6 @@ class WebAgentResourcesServer(SimpleResourcesServer):
                 return _tool_error(f"the environment failed to start: {ep.seed_error}")
             args = await _json_body(request)
             async with ep.lock:
-                invalid = validate_args(name, args)[1] is not None
                 prev = ep.agent.last_observation
                 try:
                     outcome = await asyncio.wait_for(ep.agent.execute(name, args), self.config.tool_timeout_s)
@@ -579,6 +577,7 @@ class WebAgentResourcesServer(SimpleResourcesServer):
                                        "have changed", last.render() if last else "")
                 for stage, ms in outcome.timings_ms.items():
                     ep.timings.setdefault(stage, []).append(round(ms, 1))
+                invalid = outcome.invalid
                 if invalid:
                     ep.n_invalid += 1
                 elif outcome.error == ALREADY_DONE:

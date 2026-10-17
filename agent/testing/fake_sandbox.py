@@ -124,7 +124,9 @@ def create_app() -> FastAPI:
     sessions: dict[str, dict] = {}
 
     def state_for(sid: str) -> dict:
-        return sessions.setdefault(sid, copy.deepcopy(DEFAULT_STATE))
+        if sid not in sessions:  # an unknown sid gets a fresh default state, as in the real sandbox
+            sessions[sid] = {**copy.deepcopy(DEFAULT_STATE), "meta": {"sid": sid, "task_id": None}}
+        return sessions[sid]
 
     def sid_of(request: Request) -> str:
         return request.query_params.get("sid") or request.cookies.get("sid") or "default"
@@ -183,8 +185,13 @@ def create_app() -> FastAPI:
             for p in parents:
                 cur = cur.setdefault(p, {})
             cur[leaf] = value
+        st["meta"] = {"sid": sid, "task_id": task["id"] if task else None}  # like sandbox/state.py
         sessions[sid] = st
         return {"ok": True}
+
+    @app.get("/api/health")
+    def health():
+        return {"ok": True, "app": "fake-sandbox", "tasks": len(FAKE_TASKS)}
 
     @app.get("/api/state")
     def state(sid: str):

@@ -690,4 +690,5 @@ def test_full_episode_through_the_http_routes(monkeypatch, fake_sandbox_url):
         v = verify(client, row)
     assert (v["reward"], v["mask_sample"], v["claimed_success"], v["steps"], v["n_clicks"]) == (1.0, False, True, 2, 1)
     assert v["state_source"] == "done_snapshot"
-    assert "session check skipped" in v["check_explanation"]  # the fake sandbox has no meta.task_id
+    # the fake sandbox records meta.sid/task_id like the real one, so the session check ran
+    assert "session check skipped" not in v["check_explanation"]
