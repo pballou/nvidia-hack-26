@@ -34,8 +34,21 @@ The README skeleton has a section for each:
 
 ## Publishing (required for this track: "publish it openly so others can reuse it")
 
-Patrick publishes under the Hugging Face account **`patrickballou`**, using a **write** token. It stays in `.env`
-on **Patrick's laptop only**: never on the shared Brev box, and never committed.
+Patrick publishes under the Hugging Face account **`patrickballou`**.
+- Uploads run **from the Brev box**, where the checkpoints are, using a fine-grained token scoped to write only `patrickballou/gui-assist-grounder` and `patrickballou/gui-assist-data`.
+- That token is exported only in the upload shell (`export HF_TOKEN=...`), never
+  saved with `hf auth login`, never committed, and revoked after the event.
+- Patrick's full write token stays in `.env` on his laptop.
+
+The repos already exist and are **private**. Make them public at release (Sun morning).
+
+Upload commands (on the box):
+
+```bash
+hf upload patrickballou/gui-assist-grounder /home/ubuntu/ckpt/<run>/adapter adapter --repo-type model
+hf upload patrickballou/gui-assist-grounder /home/ubuntu/ckpt/<run>/merged . --repo-type model
+hf upload patrickballou/gui-assist-data /home/ubuntu/data/release . --repo-type dataset
+```
 
 | Artifact | Where | Contents |
 | --- | --- | --- |

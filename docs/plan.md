@@ -118,10 +118,14 @@ it.
     the **base VLM**, plus the URL and whether the screen changed.
   - The base VLM is the same weights as the grounder with the LoRA adapter turned
     off.
-  - **Never serve the base and the tuned model as two full copies.** They would count
-    twice toward the 33B cap (card counts: 30 + 2 + 2 = 34 > 33).
-  - Serve one base model plus the LoRA adapter from a single vLLM process
-    (`--enable-lora`; stream B verifies this for the chosen model).
+  - **Separate instances count as two models** (card counts: 30 + 2 + 2 = 34 > 33),
+    so never serve the base and the tuned model separately.
+  - **Agreed design: one loaded 2B model, with the LoRA adapter switched per
+    request.** It counts as one model (32B total).
+    - vLLM does this natively: `--enable-lora --lora-modules grounder=<adapter>`.
+      Requests to `base` skip the adapter; requests to `grounder` apply it.
+    - There's no reload between requests, and mixed requests batch together.
+    - Stream B verifies vLLM LoRA support for the chosen model at gate D1.
   - The env reads the screen-summary model name from config (`summary_model: base`).
     If the organizers count base + adapter as two models, switch it to `grounder`
     (the tuned model for both roles) and spot-check summary quality.
@@ -192,13 +196,15 @@ it.
   **ScreenSpot-v2 stays the final held-out test**, reported three ways.
 - **Hosting:**
   - Training and eval run on Brev (vLLM).
-  - **Committed demo path:** models served with vLLM on the Brev H200; the app,
-    Playwright and Gym run on Patrick's laptop through an SSH tunnel.
-  - **Mac-local (M4 Max, 128 GB) is a stretch goal.** It replaces the committed path
-    only if it passes a check by **Sat 8pm**: Lightning tool calls work, and the
-    grounder's accuracy on dev matches vLLM. See research-notes §6.
-  - The video's "runs locally" line depends on that check. Otherwise say "fits on
-    one GPU (~32B total)".
+  - **Demo: hybrid first** (details in [local-mac.md](local-mac.md)).
+    - Lightning runs on Patrick's Mac via **vllm-metal**, the official vLLM plugin
+      for Apple GPUs. Gate L by ~5pm.
+    - The grounder runs on the H200 (base + LoRA) through a tunnel.
+    - **Fully local** (adding a merged grounder on the Mac, used for both roles)
+      only if Gate G passes at ~8pm.
+    - **Fallback:** everything on the H200.
+  - The video says "runs locally" only for what actually ran on the Mac. Otherwise
+    say "fits on one GPU (~32B total)".
 - **Lightning data generation (instruction rewriting):** hosted Lightning by default.
   Batch several labels per request and check the rate limit early. Self-host only if
   the rate limit blocks it.
@@ -222,9 +228,9 @@ it.
 - **D2 GRPO:** go only if SFT finished by ~9pm Saturday and the smoke test runs at
   ≤ ~35 s/step, so the run can finish by ~1am. Keep GRPO only if dev accuracy beats
   SFT. Otherwise ship SFT and say so.
-- **Demo hardware:** see "Hosting" above. The committed path is the H200 (Lightning
-  NVFP4 plus the grounder co-resident, all training stopped). Mac-local only if its
-  Sat 8pm check passes.
+- **Demo hardware:** see "Hosting" above. Hybrid if Gate L passes; fully local only
+  if Gate G also passes; otherwise all on the H200 (Lightning NVFP4 plus the grounder
+  co-resident, all training stopped).
 
 ## GPU etiquette (one shared H200, ~23 GPU-hours total)
 

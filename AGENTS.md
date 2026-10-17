@@ -33,11 +33,13 @@ a user describes what they want, and the agent does it from pixels alone.
   - **No speculative decoding of any kind:** not DSpark, not DFlash, not Lightning's
     built-in MTP (no `--speculative-config`). Don't copy serve commands from
     Lightning's model card, because its recipes enable DSpark.
-  - **Never serve the base and the fine-tuned VLM as two full copies;** they'd count
-    twice (30 + 2 + 2 > 33). Use one base model plus a LoRA adapter. Our reading is
-    that this counts once; that's unconfirmed with the organizers. Keep the
-    screen-summary model name configurable (`base` or `grounder`), so we can switch
-    to the tuned model for both roles.
+  - **Never run the base and the fine-tuned VLM as separate instances.** Separate
+    instances count as two models (30 + 2 + 2 > 33).
+  - **One loaded model with a LoRA adapter switched per request counts as one
+    model (32B total).** That's our design: served name `base` = adapter off,
+    `grounder` = adapter on, from one vLLM process.
+  - Keep the screen-summary model name configurable (`base` or `grounder`). The
+    fallback is the tuned model for both roles.
 - **Code provenance:** all code must be written during the hackathon.
   - Rule text: "Open source code is allowed only if it's been open-sourced for 2+
     weeks." **Confirmed: it applies per project, not per release.** So current
@@ -85,7 +87,8 @@ a user describes what they want, and the agent does it from pixels alone.
   `base`.
 - **Lightning** is text-only: give it text observations, never images.
   - Development: use the hosted build.nvidia.com endpoint.
-  - Final agent eval and demo: self-hosted. Where it runs is in docs/plan.md
+  - Final agent eval and demo: self-hosted. Hybrid first: Lightning on Patrick's
+    Mac via vllm-metal, grounder on the H200. See docs/local-mac.md and docs/plan.md
     "Hosting".
 
 ## Data and model-interface conventions
@@ -148,8 +151,11 @@ a user describes what they want, and the agent does it from pixels alone.
   - Stream B (Kyle) owns serving and the GPU schedule.
   - Announce GPU jobs in team chat, and run them in tmux.
   - Stop the instance when nobody is using it.
-- **Shared box hygiene:** use `brev login` (browser flow), not `--token`. On the box,
-  never store GitHub credentials or an HF *write* token.
+- **Shared box hygiene:** use `brev login` (browser flow), not `--token`. On the box:
+  - never store GitHub credentials;
+  - for HF uploads, use only a fine-grained token scoped to write only `patrickballou/gui-assist-grounder` and `patrickballou/gui-assist-data`, exported in the upload shell;
+  - never run `hf auth login` there. It writes the token into the shared `HF_HOME`,
+    which is mounted into the vLLM containers.
 - **Log every GPU run** in `docs/runs.md`: command, config, adapter/served name,
   start/end, result.
 
