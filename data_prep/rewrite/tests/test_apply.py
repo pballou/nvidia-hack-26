@@ -294,3 +294,22 @@ def test_runs_as_a_script_from_any_cwd(tmp_path):
     proc = subprocess.run([sys.executable, str(APPLY_PY), "--help"], cwd=tmp_path, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert "--allow-missing" in proc.stdout
+
+
+def test_sampler_instruction_style_kept_on_natural_rows_and_not_mistaken_for_applied():
+    """The sampler emits instruction_style on every row (GroundCUA icon/functional/text, else None)."""
+    base = {"image_path": "images/x.png", "img_w": 100, "img_h": 100, "bbox": [1, 1, 9, 9], "data_type": None,
+            "split": None}
+    rows = [{**base, "id": "groundcua:app_1:0", "source": "groundcua/groundcua", "platform": "desktop",
+             "instruction": "click the gear icon at the top right", "instruction_style": "icon"},
+            {**base, "id": "uibert:x:0", "source": "os_atlas/uibert", "platform": "mobile",
+             "instruction": "open the menu", "instruction_style": None}]
+    raw = [{**base, "id": f"fineweb:p{i}:0", "source": "os_atlas/fineweb", "platform": "web",
+            "instruction": f"Link {i}", "instruction_style": None} for i in range(40)]
+    unselected = [r for r in raw if not meta.is_selected(r)]
+    assert unselected
+    train = apply_rewrites(rows + unselected, [])
+    assert [r["instruction_style"] for r in train[:2]] == ["icon", "natural"]
+    assert {r["instruction_style"] for r in train[2:]} == {"raw"}
+    template = template_variant(train)
+    assert [r["instruction_style"] for r in template[:2]] == ["icon", "natural"]

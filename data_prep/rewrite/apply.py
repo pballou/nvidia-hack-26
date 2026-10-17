@@ -49,7 +49,7 @@ def _sample(ids, n=5) -> str:
 def _apply(manifest, rewrites, extra_raw, extra_natural, allow_missing):
     """Return (train rows, dropped [(row, reason)], missing [row])."""
     meta.assert_clean_manifest(manifest)
-    applied = [r["id"] for r in manifest if "instruction_original" in r or "instruction_style" in r]
+    applied = [r["id"] for r in manifest if "instruction_original" in r]  # the sampler may set instruction_style
     if applied:
         raise ValueError(f"rows already have rewrites applied: {_sample(applied)}; pass the original manifest")
     by_id = _index_rewrites(rewrites)
@@ -71,7 +71,7 @@ def _apply(manifest, rewrites, extra_raw, extra_natural, allow_missing):
         out = dict(row)
         rec = by_id.get(row["id"])
         if meta.classify_source(row["source"], extra_raw=extra_raw, extra_natural=extra_natural) == "natural":
-            style = "natural"
+            style = row.get("instruction_style") or "natural"  # keep the source's own style (GroundCUA icon/text)
         elif row["id"] not in selected:
             style = "raw"
         elif rec is None:
@@ -107,15 +107,15 @@ def apply_rewrites(manifest: list[dict], rewrites, *, extra_raw=(), extra_natura
     return _apply(manifest, rewrites, extra_raw, extra_natural, allow_missing)[0]
 
 
-def template_variant(train_rows: list[dict]) -> list[dict]:
-    """Same rows and order as train_rows with the original labels restored (natural rows stay natural)."""
+def template_variant(train_rows: list[dict], *, extra_raw=(), extra_natural=()) -> list[dict]:
+    """Same rows and order as train_rows with the original labels restored; raw-label rows get style "raw"."""
     out = []
     for row in train_rows:
         if "instruction_original" not in row:
             raise ValueError(f"row {row.get('id')!r} has no instruction_original; pass apply_rewrites output")
         r = dict(row)
         r["instruction"] = row["instruction_original"]
-        if r.get("instruction_style") != "natural":
+        if meta.classify_source(r["source"], extra_raw=extra_raw, extra_natural=extra_natural) == "raw":
             r["instruction_style"] = "raw"
         out.append(r)
     return out
@@ -184,7 +184,7 @@ def main(argv=None) -> int:
     except (OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    template = template_variant(rows)
+    template = template_variant(rows, extra_raw=args.raw_sources, extra_natural=args.natural_sources)
     args.out.mkdir(parents=True, exist_ok=True)
     outputs = {"train_lightning.jsonl": rows, "train_template.jsonl": template}
     for name, data in outputs.items():
