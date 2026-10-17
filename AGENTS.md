@@ -130,7 +130,15 @@ a user describes what they want, and the agent does it from pixels alone.
     readable message.
 - **Declare row fields.** Every row field `verify()` needs (bbox, img_w/h, platform,
   data_type) must be declared on the VerifyRequest subclass, or it's silently
-  dropped. Put slice fields on the VerifyResponse so they reach the metrics.
+  dropped.
+  - Make those fields **optional**: a 422 on verify aborts the run.
+  - Annotate `verify` as **`-> YourVerifyResponse`** (not `BaseVerifyResponse`), or
+    every field except `reward` is dropped from rollouts and metrics.
+- **Gym 0.7.0 gotchas:** a cold venv build takes ~8–9 min
+  (`++server_spinup_timeout_seconds=1800`). The head server is fixed at `:11000`
+  (use `++head_server.port=11001` for a second env). No keys in env.yaml or on the
+  CLI, because the merged config is served at `:11000`. Full list:
+  docs/research-notes.md §3.
 - **Avoid base64 screenshots.** Prefer `file://` image URLs under `/home/ubuntu/data`
   when Gym and vLLM share the box.
 - **`simple_agent` doesn't stop on a `done` tool.** It stops when the model replies

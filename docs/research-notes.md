@@ -153,6 +153,82 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
 - Pin one stack: the PyPI 0.7.0 wheel and its bundled configs. Gym `main` has moved
   past it; for example, `drop_unrepresentable_request_fields` exists only on `main`.
 
+**Gym 0.7.0 gotchas, code-confirmed by T2 while building `web_agent`** (file:line
+references are in T2's research notes):
+
+1. **Venv build:**
+   - If `<server>/../../pyproject.toml` exists, every server in the repo is treated
+     as an editable Gym checkout. That's why we have no root pyproject.
+   - Without one, `requirements.txt` lines containing `../..` are stripped, and
+     `nemo-gym==0.7.0` is prepended.
+   - A cold build takes **~8–9 min** (182 packages), so pass
+     `++server_spinup_timeout_seconds=1800`.
+   - `++skip_venv_if_present=true` reuses half-built venvs and **ignores
+     requirements changes**.
+2. **Imports:**
+   - `gym env test` puts the repo root on PYTHONPATH; `gym env start` doesn't, so
+     add a `sys.path` insert in `app.py`.
+   - `import nemo_gym` moves the server dir after the stdlib, so don't give modules
+     stdlib names.
+   - Don't add a repo-level `resources_servers/__init__.py`; it shadows Gym's
+     namespace package.
+3. **Row fields:**
+   - The whole row is POSTed to `/seed_session` and `/verify` (as `row | {response}`).
+     Undeclared fields are silently dropped.
+   - **VerifyResponse extras only reach rollouts and metrics if `verify` is annotated
+     `-> MyVerifyResponse`.** With `-> BaseVerifyResponse`, FastAPI keeps only
+     `reward`.
+   - Top-level int/float/bool fields are aggregated automatically.
+   - `responses_create_params` is `extra=forbid`, and every tool needs `parameters`
+     and `strict`.
+4. **Initial observation:** legacy `/run` ignores the `seed_session` response body
+   and uses only its cookies. Bake the observation into the row, or get it from a
+   first tool call.
+5. **`max_steps`:**
+   - It counts model calls, is checked after that turn's tools run, and is unlimited
+     by default.
+   - The loop stops only on a reply with no tool call (or `incomplete_details`, or
+     `max_steps`). A `done` tool doesn't stop it.
+   - `tool_choice="required"` in rows would run every task to `max_steps`.
+6. **Aborts:**
+   - A non-2xx from `seed_session`, the model call, or `verify` aborts the whole
+     `gym eval run`, unless you pass `+route_failures_to_sidecar=true`.
+   - **A 422 on verify counts, so make every VerifyRequest field optional.**
+   - Exceptions in tool routes don't abort; the 500 body is fed to the model.
+   - `mask_sample=True` drops a rollout from the quality metrics; it shows up only
+     in `coverage/*`.
+7. **Tool dispatch:**
+   - Any tool name the model emits is POSTed to `/{name}`. An unknown name gets a
+     404, and that body is fed back.
+   - A hallucinated `seed_session` or `close_session` hits the lifecycle routes. Add
+     a catch-all `POST /{tool_name}` last, and make a repeat seed a no-op.
+   - Invalid-JSON arguments never reach the server; `simple_agent` writes its own
+     error string.
+8. **env.yaml:**
+   - It merges after every config file, so its `policy_*` values override any
+     `${policy_*}` interpolation.
+   - An env whose policy isn't env.yaml's model (e.g. `web_agent`, whose policy is
+     Lightning) needs literal URLs plus `${oc.env:NVIDIA_API_KEY}`.
+   - Gym never loads `.env`, and any gym command that loads that yaml fails if the
+     variable is unset.
+   - **Never put keys in env.yaml or on the CLI:** the merged config is served at
+     `:11000/global_config_dict_yaml`.
+9. **Ports and processes:**
+   - The head server is fixed at `:11000`, so a second concurrent env needs
+     `++head_server.port=11001` on both `env start` and `eval run`.
+   - `gym eval run --input` requires `--no-serve`.
+   - Gym's aiohttp client has no timeout and retries disconnects forever, so bound
+     your tool routes yourself.
+   - SIGINT to a backgrounded `gym env start` from a script is ignored: kill the
+     process group, or use tmux.
+10. **Stateful servers:**
+    - Use `num_workers: 1` (more than 1 splits state across processes).
+    - Release resources in `verify`, because legacy `/run` never calls
+      `close_session`.
+    - The session cookie is `<ClassName>___<config name>`.
+    - A Starlette `TestClient` without `with` creates a new event loop per request
+      and skips the lifespan.
+
 **Failure analysis with BLADE** ([tutorial](https://docs.nvidia.com/nemo/gym/tutorials/evaluation-tutorials/blade-analysis-skill)):
 
 - BLADE is an agent skill, vendored in `.agents/skills/nemo-gym-blade-analysis`.
