@@ -348,7 +348,7 @@ class Loop:
                "--verify-url", gymctl.VERIFY_URL, "--num-generations", knobs["num_generations"],
                "--max-steps", knobs["grpo_max_steps"], "--deadline", deadline.timestamp(),
                "--stop-file", self.night / "STOP", "--format-reward", knobs["format_reward"], "--seed", r,
-               "--smoke-steps", SMOKE_STEPS, "--gate-s-per-step", GATE_S_PER_STEP,
+               "--smoke-steps", SMOKE_STEPS, "--gate-s-per-step", self.a.gate_s_per_step,
                "--vllm-gpu-util", GRPO_VLLM_UTIL, "--lr", GRPO_LR]
         (rd / "grpo_command.txt").write_text(" ".join(map(str, cmd)) + "\n")
         self.status(f"round {r}: GRPO", deadline=edt(deadline), pool=rd / "pool.jsonl")
@@ -596,9 +596,11 @@ def main():
     ap.add_argument("--no-new-step", default="02:40", help="EDT; no GRPO step starts after this")
     ap.add_argument("--last-round-start", default="01:30", help="EDT; no round starts after this")
     ap.add_argument("--blade-wait-min", type=float, default=10)
+    ap.add_argument("--gate-s-per-step", type=float, default=GATE_S_PER_STEP, help="gate D2 (rehearsals on a busy GPU)")
     ap.add_argument("--stop-ports", type=int, nargs="*", default=[8002, 8003])
     ap.add_argument("--final-port", type=int, default=gymctl.FINAL_PORT, help="0 = don't touch any team server")
-    ap.add_argument("--runs-md", type=Path, default=gymctl.REPO / "docs/runs.md", help="append one row per round")
+    ap.add_argument("--runs-md", type=lambda v: None if v.lower() in ("", "none") else Path(v),
+                    default=gymctl.REPO / "docs/runs.md", help="append one row per round ('none' for rehearsals)")
     a = ap.parse_args()
     a.night_dir.mkdir(parents=True, exist_ok=True)
     a.ckpt_dir.mkdir(parents=True, exist_ok=True)
