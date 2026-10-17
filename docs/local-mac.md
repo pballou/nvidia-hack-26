@@ -37,7 +37,7 @@ Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
 | --- | --- |
 | vllm-metal v0.31.0 (released 2026-10-13, tracks vLLM core 0.31.0, same as the H200) | Confirmed |
 | Nemotron-H / Lightning on vllm-metal | **Experimental.** Prefix caching is off for it, so every planner step re-prefills; keep prompts short and thinking off. |
-| Lightning tool calling (`qwen3_coder` + `nemotron_v3`) on vllm-metal | **Unverified.** Gate L tests it. |
+| Lightning tool calling (`qwen3_coder` + `nemotron_v3`) on vllm-metal | **Works with official BF16** (quick check, 2026-10-17): median **1.2 s/step** with thinking off; reasoning comes back separately with thinking on. With `tool_choice: "required"`, argument names were 5/5 correct; with `auto`, 4/5. |
 | Qwen3.5 / Qwen3-VL image input on vllm-metal | Experimental. It uses upstream vLLM's HF processor, so preprocessing matches the H200. |
 | LoRA on vllm-metal for Qwen VLMs | Not usable in the stable release (adapter key mismatch, fixed only in dev builds), so serve the **merged** checkpoint locally |
 | Fallback planner: llama-server (already installed, b11429) with `ggml-org` Lightning GGUF Q8_0 | Tool parser confirmed; local, but not vLLM |
@@ -74,10 +74,13 @@ rsync -avP permanent-tan-marmot:/home/ubuntu/ckpt/<run>/merged/ ~/models/grounde
 source ~/.venv-vllm-metal/bin/activate
 HF_HUB_OFFLINE=1 vllm serve nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 \
   --served-model-name lightning --host 127.0.0.1 --port 8000 \
-  --max-model-len 65536 --max-num-seqs 2 --gpu-memory-utilization 0.60 \
+  --max-model-len 65536 --max-num-seqs 2 --gpu-memory-utilization 0.68 \
   --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3
-# BF16 weights are ~63 GB. The default macOS GPU wired limit is ~75% of RAM (~96 GB). If Lightning + grounder
-# don't fit, raise it: sudo sysctl iogpu.wired_limit_mb=115000 (resets on reboot). Never add --speculative-config.
+# Verified 2026-10-17 on the M4 Max:
+#   - 0.60 fails ("not enough Metal memory for KV cache"): the Metal limit is 115.45 GB, and weights + overhead are ~69.9 GB.
+#   - 0.68 works (~78.5 GB). A local grounder at 0.12 still fits.
+#   - Healthy in ~15 s from cache. /v1/models root = nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16.
+# Never add --speculative-config.
 ```
 
 ## 3a. Hybrid: grounder from the H200

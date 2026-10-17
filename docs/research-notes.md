@@ -313,8 +313,12 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
     (mlx-community, ggml-org GGUF, Ollama) don't count.
   - **The team uses BF16** for precision.
   - On the community 4-bit build (local plumbing test), 1–2 of 5 tool calls had
-    malformed argument names. Median step latency was 0.8 s, versus 25–80 s on the
-    hosted free tier.
+    malformed argument names, at a median 0.8 s per step (versus 25–80 s on the
+    hosted free tier).
+  - **Official BF16 on the Mac** (vllm-metal, `--gpu-memory-utilization 0.68`): median
+    **1.2 s/step**. Argument names were 5/5 correct with `tool_choice: "required"`
+    and 4/5 with `auto`. Use `required` in the interactive planner; Gym's
+    `simple_agent` needs `auto` (see the T2 note).
 - **Model:** text-only, hybrid Mamba-2 + MoE, OpenMDW-1.1 license.
   [HF card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16).
 - **Hosted:** model `nvidia/nemotron-3.5-lightning-30b-a3b` at
