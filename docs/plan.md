@@ -92,12 +92,38 @@ including overnight once GRPO and the evals finish.
 
 | Stream | Owns | First deliverable |
 | --- | --- | --- |
-| **A: Data & eval** | `data_prep/`, `resources_servers/gui_grounding/`, `benchmarks/screenspot_v2/`, BLADE reports | ScreenSpot-v2 Gym JSONL plus the `gui_grounding` env producing baseline numbers (M1) |
-| **B: Training & serving** | `training/`, `scripts/` serving, the GPU schedule and budget, checkpoints → HF | vLLM grounder serving, then the SFT pilot (M2); GRPO with the Gym `/verify` reward (M3) |
-| **C: Agent & Lightning** | `sandbox/`, `resources_servers/web_agent/`, Lightning planner and instruction rewriting, demo | `web_agent` env with hosted Lightning against the base grounder (M4); Lightning data engine for M2 |
+| **A: Data & eval** (Charlie) | `data_prep/`, `resources_servers/gui_grounding/`, `benchmarks/screenspot_v2/`, BLADE reports | ScreenSpot-v2 Gym JSONL plus the `gui_grounding` env producing baseline numbers (M1) |
+| **B: Training & serving** (Kyle) | `training/`, `scripts/` serving, the GPU schedule and budget, checkpoints → HF | vLLM grounder serving, then the SFT pilot (M2); GRPO with the Gym `/verify` reward (M3) |
+| **C: Agent & Lightning** (Patrick) | `sandbox/`, `resources_servers/web_agent/`, Lightning planner and instruction rewriting, demo | `web_agent` env with hosted Lightning against the base grounder (M4); Lightning data engine for M2 |
 
 `common/grounding.py` is shared: stream A writes the first version, and B and C review
 it.
+
+## Decisions so far
+
+- **Owners:** A = Charlie, B = Kyle, C = Patrick.
+- **Problem:** an accessibility feature. A user describes what they want in plain
+  language, and the agent navigates the app to the right page and does it.
+  - It's **vision-only**, so it works on apps whose code or DOM isn't available,
+    which is most real apps.
+  - In our sandbox, the DOM and app state are used **only by `verify()` for
+    scoring**, never by the agent.
+- **Agent loop:** multi-step, built on Gym's `simple_agent` tool loop with
+  `max_steps`. Tasks are short (2–4 steps, e.g. open a menu and then pick an item).
+  Single-screen click tasks are the fallback demo.
+- **How Lightning "sees" (proposed; C to confirm):**
+  - Lightning is text-only. After every action, the env returns a text observation:
+    a screen summary written by the **base VLM**, plus the URL and whether the
+    screen changed.
+  - The base VLM is the same weights as the grounder with LoRA turned off, so it
+    adds no parameters. Serve base + LoRA from one vLLM process.
+- **Data and training flow:** set everything up, then a small POC run end to end,
+  then size the full run from the POC's measured throughput.
+- **Base models:** baseline both Qwen3.5-2B and Qwen3-VL-2B (cheap). Train only one
+  (gate D1).
+- **Eval:** OS-Atlas `dev` split (by screenshot) for choosing checkpoints;
+  **ScreenSpot-v2 stays the final held-out test.**
+- **Brev:** the instance stays stopped while we code; start it for GPU work only.
 
 ## Decision gates
 
