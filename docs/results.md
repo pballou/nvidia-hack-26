@@ -38,5 +38,32 @@ First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
   planner sometimes can't see that its action worked. The pilot-adapter run did
   claim it (6 steps). Tracked in the claimed-vs-verified column. This is useful
   material for BLADE and the Lightning write-up.
+### All 12 sandbox tasks, base grounder (2026-10-17 ~17:05, n=1 per task per mode, sequential)
+
+| Metric | Thinking off | Thinking on retry |
+| --- | --- | --- |
+| Verified success | 5/12 | 6/12 |
+| Claim matches verified | 6/12 | **9/12** |
+| No-change actions | 45 | **27** |
+| Hard tasks verified | 0/3 | 2/3 |
+| Mean steps | 9.1 | 8.0 |
+| Plan p50/p90 | 4.1/5.5 s | 4.3/14.5 s |
+| Wall-clock p50 per task | 67 s | 80 s |
+| Tool-call validity | 109/109 | 95/96 |
+
+- **Reading:** thinking on retry mostly improves self-assessment (claims match the
+  sandbox state) and cuts wasted clicks, at the cost of a slower p90. The 5 vs 6
+  success gap is noise at n=1.
+- **Failure clusters (input for BLADE):**
+  - scroll-dependent targets (`star-landlord-message`, `stop-promotions`);
+  - the canvas chart (`max-usage-month`);
+  - dense toggle grids (`sms-billing-off`, with a false done claim);
+  - a planner error: `pay-50` with thinking off paid the full balance instead of $50.
+- **Gym `web_agent` acceptance run** (5 committed rows, base, thinking off): reward
+  3/5, 0 masked, claimed 2/5 (one false claim), tool-call validity 42/43.
+- **Sources:** `runs/summary_20261017-165130.json` (off),
+  `runs/summary_20261017-170457.json` (retry), `results/acceptance_base/`
+  (T2's Mac).
+
 - **Next:** the Gym `web_agent` eval with `--num-repeats 3`, base vs final
   grounder (tonight, once :8001 serves `grounder`).
