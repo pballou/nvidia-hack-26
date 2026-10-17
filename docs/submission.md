@@ -17,7 +17,7 @@ Target: everything finished by 10:30.
 | AI Models Used | Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16 checkpoint); our fine-tuned grounder (Qwen3.5-2B + LoRA); NVIDIA Parakeet TDT 0.6B v3 (local voice input) | Kyle | — |
 | Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM (+ vllm-metal on the Mac), NVIDIA Brev (H200), TRL, Playwright | all | — |
 | ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (draft; final Sunday). Form text: §Form text |
-| ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-gym.md` (draft; final Sunday). Form text: §Form text |
+| ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (draft; final Sunday). Form text: §Form text |
 | ☑ Red Hat vLLM bounty | (checkbox only) vLLM serves both models; GRPO rollouts via vLLM colocate | Kyle | — |
 
 ## Form text (paste-ready drafts)
@@ -57,7 +57,7 @@ full doc for judges who want more.
 > round. After GRPO: TBD dev, TBD ScreenSpot-v2-clean, and TBD agent task success, base vs
 > tuned. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
 > were captured on the same machines as OS-Atlas training data. Full write-up:
-> `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-gym.md`
+> `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-nemo-gym.md`
 
 **vLLM bounty** (checkbox only; use this if the form asks for a sentence):
 
