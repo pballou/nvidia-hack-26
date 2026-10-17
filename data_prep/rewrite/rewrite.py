@@ -88,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--rpm", type=float, default=None, help="client-side cap on request starts per minute (hosted "
                     "build.nvidia.com rate-limits with 429 and no Retry-After)")
     ap.add_argument("--max-attempts", type=_positive, default=6, help="HTTP attempts per request (429/5xx/timeouts)")
+    ap.add_argument("--reverse", action="store_true", help="process pending rows from the end (run alongside "
+                    "another rewrite.py on the same cache, e.g. a second endpoint; batches skip rows already done)")
     ap.add_argument("--group-retries", action="store_true", help="re-ask a reply's failed rows together in one "
                     "request (k renumbered from 1) instead of one request per row; ~10x fewer retry requests")
     ap.add_argument("--max-consecutive-empty-replies", type=_positive, default=MAX_EMPTY_REPLIES,
@@ -180,6 +182,10 @@ async def process(pending, metas, client, store, ctx, *, batch_size, concurrency
                   "dropped": 0, "requests": 0, "models": set(), "total": len(pending), "last_print": time.monotonic(),
                   "empty_streak": 0, "held": []})
 
+    def done_elsewhere(row, rec) -> bool:
+        return bool(rec) and not is_rule(rec) and is_current(row, rec, bool(ctx.get("allow_unofficial"))) and (
+            rec.get("drop_reason") != validate.LLM_ERROR or str(rec.get("ts", "")) > ctx["started"])
+
     def push(priority, job):
         seq[0] += 1
         queue.put_nowait((priority, seq[0], job))
@@ -210,6 +216,11 @@ async def process(pending, metas, client, store, ctx, *, batch_size, concurrency
 
     async def handle(job):
         kind, rows, attempt, past_by_id = job
+        if kind == "batch":  # another rewrite.py on the same cache (e.g. a second endpoint) may have done some rows
+            now_cached = store.get_many(ctx["pv"], [r["id"] for r in rows])
+            rows = [r for r in rows if not done_elsewhere(r, now_cached.get(r["id"]))]
+            if not rows:
+                return
         ms = [metas[r["id"]] for r in rows]
         entry = {"ts": ctx["now"](), "kind": kind, "n_rows": len(rows), "attempt": attempt,
                  "unofficial_model": bool(ctx.get("unofficial"))}
@@ -554,7 +565,8 @@ async def run(args, *, transport=None, sleep=asyncio.sleep, now=None) -> dict:
            "model": model, "model_label": args.model_label or model, "endpoint": endpoint.name,
            "base_url": (args.base_url or endpoint.base_url).rstrip("/"), "now": now,
            "concurrency": args.concurrency or client_mod.DEFAULT_CONCURRENCY.get(endpoint.name, 6),
-           "group_retries": bool(args.group_retries),
+           "group_retries": bool(args.group_retries), "started": started,
+           "allow_unofficial": bool(args.allow_unofficial_model),
            "command": shlex.join(["python", SCRIPT, *(sys.argv[1:] if argv is None else argv)])}
     allow_unofficial = bool(args.allow_unofficial_model)
     out = Path(args.out)
@@ -569,6 +581,8 @@ async def run(args, *, transport=None, sleep=asyncio.sleep, now=None) -> dict:
         pending = [r for r in targets if r["id"] not in rule_ids
                    and (not is_current(r, cached.get(r["id"]), allow_unofficial) or is_rule(cached.get(r["id"]))
                         or (args.retry_errors and cached[r["id"]].get("drop_reason") == validate.LLM_ERROR))]
+        if args.reverse:  # a second process on the same cache works from the end; batches skip rows done elsewhere
+            pending = pending[::-1]
         history = store.history(ctx["pv"], [r["id"] for r in pending])
         prior = {r["id"]: prior_attempts(r, history.get(r["id"]), cached.get(r["id"]), allow_unofficial)
                  for r in pending}

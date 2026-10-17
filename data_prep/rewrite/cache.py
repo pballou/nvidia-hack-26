@@ -38,7 +38,7 @@ class RewriteCache:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(self.path)
+        self._db = sqlite3.connect(self.path, timeout=60)  # another rewrite.py may share the cache
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
 
