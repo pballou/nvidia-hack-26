@@ -91,10 +91,9 @@ ERROR_DOCS = [
     ("wrong_direction:<neighbor>", "\"left of/right of/above/below/under/beneath <neighbor>\" contradicts that "
                                    "neighbor's `target_is` (\"next to\", \"near\", \"between\" are not checked)"),
     ("invented_control:<noun>", f"an element-type noun ({', '.join(_ELEMENT_NOUNS)}; {'/'.join(_VERB_NOUNS)} as the "
-                                "first word are verbs) not backed by the control, the label or a neighbor label: none "
-                                "at all "
-                                "without a control, and for a text/area control only words such as text, label, area, "
-                                "item, entry, option"),
+                                "first word are verbs) not backed by the control, the label or a neighbor label: without "
+                                "a control none at all, except button or link on web pages (generic clickable nouns), "
+                                "and for a text/area control only words such as text, label, area, item, entry, option"),
     ("text_action_verb:<verb>", "a functional instruction for a text/area control that starts with a verb other than "
                                 f"{', '.join(_TEXT_VERBS)} (no \"open X\" on a text)"),
     ("style_word:<word>", "the word functional, descriptive or positional, unless a label has it"),

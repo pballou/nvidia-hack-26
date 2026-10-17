@@ -264,11 +264,17 @@ def _plural_re(words) -> re.Pattern:
 _SUPPORT_RE = {noun: _plural_re(words) for noun, words in ELEMENT_NOUNS.items()}
 
 
+WEB_GENERIC_NOUNS = "button link"  # a web element with no control type is clickable: "button"/"link" is not invented
+
+
 def _invented_control(s: str, meta: dict) -> str | None:
-    """An element-type noun not supported by the control noun, kind, label or a neighbor label. So no button/link/icon
-    for a missing control (FineWeb), and only text/label/area/item/entry/option words for control text or area."""
+    """An element-type noun not supported by the control noun, kind, label or a neighbor label. A web row with no
+    control may say button or link (the generic clickable nouns; v4 hosted run: rejecting them sent "Submit"/"Search"
+    rows to llm_error) but nothing else (no "text field", "icon"); control text or area only gets text/label/area/item/
+    entry/option words."""
+    generic = WEB_GENERIC_NOUNS if meta.get("platform") == "web" and not meta.get("control") else ""
     allowed = " ".join([str(meta.get("control") or ""), str(meta.get("kind") or ""), str(meta.get("label") or ""),
-                        *(lab for lab, _ in _neighbors(meta))]).lower()
+                        generic, *(lab for lab, _ in _neighbors(meta))]).lower()
     low = s.lower()
     for m in _NOUN_RE.finditer(low):
         noun = m.group(1)

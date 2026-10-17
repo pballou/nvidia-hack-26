@@ -635,3 +635,12 @@ def test_first_failing_check_is_reported():
     assert v._grid_token("the Donation entry top-center", meta(label="Donation", control="text", neighbors=())) \
         == "grid_token:top-center"
     assert err("the Donation entry top-center", meta(label="Donation", control="text", neighbors=())) is None
+
+
+def test_web_rows_without_control_may_say_button_or_link_only():
+    web = meta(label="Submit", control=None, neighbors=(), style="descriptive", platform="web")
+    assert err("the Submit button", web) is None and err("the Submit link", web) is None
+    assert err("the Submit text field", web) == "invented_control:text field"
+    assert err("the Submit icon", web) == "invented_control:icon"
+    mobile = meta(label="Submit", control=None, neighbors=(), style="descriptive", platform="mobile")
+    assert err("the Submit button", mobile) == "invented_control:button"
