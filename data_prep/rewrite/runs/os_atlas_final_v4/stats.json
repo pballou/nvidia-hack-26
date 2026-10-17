@@ -1,0 +1,343 @@
+{
+  "run": {
+    "run_id": "20261017T221703Z-ee3acf",
+    "started": "2026-10-17T22:17:03Z",
+    "finished": "2026-10-17T22:17:04Z",
+    "wall_s": 0.428,
+    "rows_done": 0,
+    "rule_drops": 0,
+    "rows_per_min": null,
+    "command": "python data_prep/rewrite/rewrite.py --manifest data/os_atlas_final/manifest.jsonl --out data/os_atlas_final/rewrite_v4 --endpoint hosted --splits train --group-retries --rpm 36 --note 'Generated 2026-10-17 (US Eastern evening) by two endpoints serving NVIDIA Nemotron 3.5 Lightning 30B-A3B: the NVIDIA-hosted API (build.nvidia.com, model nvidia/nemotron-3.5-lightning-30b-a3b) and, after hosted rate-limiting at ~18:00, the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal on a Mac, also used by the agent and demo). Each row'\"'\"'s endpoint and served checkpoint are in the cache; counts are in the provenance table.'",
+    "git_sha": "d0d9d625436be1ce6eef9184206330df9da0c1a1",
+    "git_dirty": false,
+    "endpoint": "hosted",
+    "base_url": "https://integrate.api.nvidia.com/v1",
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "model_label": "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b",
+    "models_reported": [],
+    "served_model_root": null,
+    "unofficial_model": false,
+    "unofficial_roots": [],
+    "allow_unofficial_model": false,
+    "prompt_version": "v4",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "max_tokens": 4096,
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    },
+    "batch_size": 20,
+    "concurrency": 16,
+    "max_attempts": 3,
+    "max_consecutive_empty_replies": 5,
+    "max_consecutive_transport_errors": 5,
+    "response_format_requested": "json_object",
+    "response_format_final": "json_object",
+    "dry_run": false,
+    "limit": null,
+    "splits": [
+      "train"
+    ],
+    "note": "Generated 2026-10-17 (US Eastern evening) by two endpoints serving NVIDIA Nemotron 3.5 Lightning 30B-A3B: the NVIDIA-hosted API (build.nvidia.com, model nvidia/nemotron-3.5-lightning-30b-a3b) and, after hosted rate-limiting at ~18:00, the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal on a Mac, also used by the agent and demo). Each row's endpoint and served checkpoint are in the cache; counts are in the provenance table.",
+    "raw_sources": [
+      "os_atlas/androidworld",
+      "os_atlas/fineweb",
+      "os_atlas/linux",
+      "os_atlas/macos",
+      "os_atlas/windows"
+    ],
+    "natural_sources": [
+      "groundcua",
+      "os_atlas/uibert",
+      "os_atlas/widget_captioning"
+    ],
+    "select_pct": 60,
+    "style_split": [
+      [
+        "functional",
+        50
+      ],
+      [
+        "descriptive",
+        30
+      ],
+      [
+        "positional",
+        20
+      ]
+    ],
+    "group_retries": true,
+    "rpm": 36.0,
+    "max_attempts_http": 6
+  },
+  "manifest": {
+    "path": "/Users/pballou/projects/nvidia-hack-26/.claude/worktrees/t3-data-engine/data/os_atlas_final/manifest.jsonl",
+    "sha256": "4ceb7ea3d7ac8e850fde81eaa935ed6d9d88de45a22a1faf007bc1d2cce541fa",
+    "rows": 19621,
+    "rows_by_source": {
+      "os_atlas/androidworld": 3000,
+      "os_atlas/fineweb": 6986,
+      "os_atlas/linux": 3271,
+      "os_atlas/macos": 3364,
+      "os_atlas/uibert": 3000
+    },
+    "selected_by_source": {
+      "os_atlas/androidworld": 1694,
+      "os_atlas/fineweb": 3920,
+      "os_atlas/linux": 1819,
+      "os_atlas/macos": 1951
+    },
+    "targets": 9384
+  },
+  "rewrites": {
+    "total": 9384,
+    "kept": 8620,
+    "dropped": 764,
+    "rule_drops": 353,
+    "rule_model": "rule:is_numeric_label",
+    "by_source": {
+      "os_atlas/androidworld": {
+        "targets": 1694,
+        "kept": 1411,
+        "dropped": 283,
+        "rule_dropped": 185,
+        "drop_rate": 0.1671
+      },
+      "os_atlas/fineweb": {
+        "targets": 3920,
+        "kept": 3759,
+        "dropped": 161,
+        "rule_dropped": 91,
+        "drop_rate": 0.0411
+      },
+      "os_atlas/linux": {
+        "targets": 1819,
+        "kept": 1699,
+        "dropped": 120,
+        "rule_dropped": 2,
+        "drop_rate": 0.066
+      },
+      "os_atlas/macos": {
+        "targets": 1951,
+        "kept": 1751,
+        "dropped": 200,
+        "rule_dropped": 75,
+        "drop_rate": 0.1025
+      }
+    },
+    "by_style": {
+      "functional": {
+        "targets": 4693,
+        "kept": 4272
+      },
+      "descriptive": {
+        "targets": 2784,
+        "kept": 2601
+      },
+      "positional": {
+        "targets": 1907,
+        "kept": 1747
+      }
+    },
+    "drop_reasons": {
+      "duplicate_neighbor": 26,
+      "llm_error": 24,
+      "needs_screen": 29,
+      "numeric": 421,
+      "unintelligible": 264
+    },
+    "warnings": {
+      "length": 883,
+      "neighbor_swap": 1,
+      "proper_noun": 84,
+      "stripped_style_word": 423,
+      "unchanged": 185
+    },
+    "models": {
+      "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b": 8028,
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16": 1003,
+      "rule:is_numeric_label": 353
+    },
+    "llm_models": {
+      "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b": 8028,
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16": 1003
+    },
+    "served_model_roots": {
+      "(not reported)": 8028,
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16": 1003
+    },
+    "endpoints": {
+      "hosted": 8028,
+      "local": 1003
+    },
+    "unofficial_records": 0
+  },
+  "quality": {
+    "first_try_valid_rate": 0.8952,
+    "batch_json_ok_rate": 1.0,
+    "llm_rows": 9031,
+    "rule_drops": 353,
+    "rows_retried": 946,
+    "llm_error_rows": 24,
+    "drop_rate_raw": 0.0789,
+    "drop_rate_model": 0.0429,
+    "validation_errors": {
+      "ambiguous_lookalike": 153,
+      "bad_drop_reason": 1,
+      "invented_control": 199,
+      "missing": 1,
+      "no_label_word": 176,
+      "style_word": 151,
+      "text_action_verb": 465,
+      "word_count": 75,
+      "wrong_direction": 196
+    }
+  },
+  "requests": {
+    "this_run": {
+      "n": 0,
+      "by_kind": {},
+      "by_status": {},
+      "http_attempts": 0,
+      "retries": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "latency_p50_s": null,
+      "latency_p95_s": null,
+      "downgrades": [],
+      "rate_limit_headers": {},
+      "transport_errors": 0
+    },
+    "all_runs": {
+      "n": 1015,
+      "by_kind": {
+        "batch": 526,
+        "retry": 259,
+        "single": 230
+      },
+      "by_status": {
+        "ok": 375,
+        "partial": 576,
+        "transport_error": 64
+      },
+      "http_attempts": 1932,
+      "retries": 917,
+      "prompt_tokens": 3330622,
+      "completion_tokens": 214016,
+      "total_tokens": 3544638,
+      "latency_p50_s": 59.596,
+      "latency_p95_s": 268.053
+    }
+  },
+  "throughput": {
+    "scope": "all invocations that sent >= 1 request",
+    "invocations": 5,
+    "rows": 9495,
+    "requests": 1015,
+    "wall_s": 5983.966,
+    "rows_per_min": 95.2,
+    "requests_per_min": 10.18,
+    "completion_tokens_per_s": 35.76
+  },
+  "runs": [
+    {
+      "run_id": "20261017T204115Z-ef71ce",
+      "started": "2026-10-17T20:41:15Z",
+      "finished": "2026-10-17T20:48:23Z",
+      "wall_s": 428.567,
+      "rows_done": 194,
+      "rule_drops": 6,
+      "requests": 67,
+      "prompt_tokens": 177642,
+      "completion_tokens": 5227,
+      "endpoint": "hosted",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "model_label": "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b",
+      "served_model_root": null,
+      "unofficial_model": false,
+      "command": "python data_prep/rewrite/rewrite.py --manifest data/os_atlas_final/manifest.jsonl --out data/os_atlas_final/rewrite_v4 --endpoint hosted --concurrency 16 --splits train --limit 200 --note 'Generated 2026-10-17 (US Eastern evening) via the NVIDIA-hosted API (build.nvidia.com), model nvidia/nemotron-3.5-lightning-30b-a3b. The agent and demo use the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal); the prompt was developed with dry runs on both.'"
+    },
+    {
+      "run_id": "20261017T205047Z-c39514",
+      "started": "2026-10-17T20:50:47Z",
+      "finished": "2026-10-17T20:51:19Z",
+      "wall_s": 31.827,
+      "rows_done": 78,
+      "rule_drops": 347,
+      "requests": 12,
+      "prompt_tokens": 19752,
+      "completion_tokens": 1601,
+      "endpoint": "hosted",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "model_label": "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b",
+      "served_model_root": null,
+      "unofficial_model": false,
+      "command": "python data_prep/rewrite/rewrite.py --manifest data/os_atlas_final/manifest.jsonl --out data/os_atlas_final/rewrite_v4 --endpoint hosted --concurrency 40 --splits train --retry-errors --note 'Generated 2026-10-17 (US Eastern evening) via the NVIDIA-hosted API (build.nvidia.com), model nvidia/nemotron-3.5-lightning-30b-a3b. The agent and demo use the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal); the prompt was developed with dry runs on both.'"
+    },
+    {
+      "run_id": "20261017T205532Z-d98d23",
+      "started": "2026-10-17T20:55:32Z",
+      "finished": "2026-10-17T21:18:55Z",
+      "wall_s": 1402.513,
+      "rows_done": 4020,
+      "rule_drops": 0,
+      "requests": 411,
+      "prompt_tokens": 1459164,
+      "completion_tokens": 90348,
+      "endpoint": "hosted",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "model_label": "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b",
+      "served_model_root": null,
+      "unofficial_model": false,
+      "command": "python data_prep/rewrite/rewrite.py --manifest data/os_atlas_final/manifest.jsonl --out data/os_atlas_final/rewrite_v4 --endpoint hosted --concurrency 24 --rpm 36 --max-attempts 10 --group-retries --splits train --retry-errors --note 'Generated 2026-10-17 (US Eastern evening) via the NVIDIA-hosted API (build.nvidia.com), model nvidia/nemotron-3.5-lightning-30b-a3b. The agent and demo use the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal); the prompt was developed with dry runs on both.'"
+    },
+    {
+      "run_id": "20261017T212032Z-9fadcf",
+      "started": "2026-10-17T21:20:32Z",
+      "finished": "2026-10-17T22:16:43Z",
+      "wall_s": 3370.411,
+      "rows_done": 3899,
+      "rule_drops": 0,
+      "requests": 405,
+      "prompt_tokens": 1249056,
+      "completion_tokens": 86976,
+      "endpoint": "hosted",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "model_label": "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b",
+      "served_model_root": null,
+      "unofficial_model": false,
+      "command": "python data_prep/rewrite/rewrite.py --manifest data/os_atlas_final/manifest.jsonl --out data/os_atlas_final/rewrite_v4 --endpoint hosted --concurrency 24 --rpm 36 --max-attempts 10 --group-retries --max-consecutive-empty-replies 10 --splits train --retry-errors --note 'Generated 2026-10-17 (US Eastern evening) via the NVIDIA-hosted API (build.nvidia.com), model nvidia/nemotron-3.5-lightning-30b-a3b. The agent and demo use the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal); the prompt was developed with dry runs on both.'"
+    },
+    {
+      "run_id": "20261017T220349Z-a4bffb",
+      "started": "2026-10-17T22:03:49Z",
+      "finished": "2026-10-17T22:16:19Z",
+      "wall_s": 750.648,
+      "rows_done": 1304,
+      "rule_drops": 0,
+      "requests": 120,
+      "prompt_tokens": 425008,
+      "completion_tokens": 29864,
+      "endpoint": "local",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "model_label": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      "served_model_root": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      "unofficial_model": false,
+      "command": "python data_prep/rewrite/rewrite.py --manifest data/os_atlas_final/manifest.jsonl --out data/os_atlas_final/rewrite_v4 --endpoint local --concurrency 3 --group-retries --max-consecutive-empty-replies 10 --splits train --retry-errors --reverse --note 'Generated 2026-10-17 (US Eastern evening) by two endpoints serving NVIDIA Nemotron 3.5 Lightning 30B-A3B: the NVIDIA-hosted API (build.nvidia.com, model nvidia/nemotron-3.5-lightning-30b-a3b) and, after hosted rate-limiting at ~18:00, the official local checkpoint nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 (vllm-metal on a Mac, also used by the agent and demo). Each row'\"'\"'s endpoint and served checkpoint are in the cache; counts are in the provenance table.'"
+    }
+  ],
+  "pending_rows": 0,
+  "gate": {
+    "first_try_valid_ok": false,
+    "drop_rate_ok": true,
+    "first_try_valid_min": 0.95,
+    "drop_rate_max": 0.25,
+    "faithful_min": 0.9,
+    "faithfulness": "manual: review_sample.py --n 50"
+  },
+  "aborted": null,
+  "exit_code": 0
+}

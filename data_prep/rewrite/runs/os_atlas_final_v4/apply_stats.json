@@ -1,0 +1,142 @@
+{
+  "manifest": {
+    "path": "data/os_atlas_final/manifest.jsonl",
+    "sha256": "4ceb7ea3d7ac8e850fde81eaa935ed6d9d88de45a22a1faf007bc1d2cce541fa",
+    "rows": 19621,
+    "splits": [
+      "train"
+    ],
+    "rows_in_splits": 18652
+  },
+  "rewrites": {
+    "path": "data/os_atlas_final/rewrite_v4/rewrites.jsonl",
+    "sha256": "390c46db50b13fb1fb1fe8a684a79623e5183281022ec8b22a76a88aaf4dc0dc",
+    "records": 9384,
+    "prompt_versions": {
+      "v4": 9384
+    },
+    "models": {
+      "NVIDIA-hosted API, nvidia/nemotron-3.5-lightning-30b-a3b": 8028,
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16": 1003,
+      "rule:is_numeric_label": 353
+    }
+  },
+  "image_root": "/Users/pballou/projects/nvidia-hack-26/.claude/worktrees/t3-data-engine/data/os_atlas_final",
+  "image_path_note": "image_path is unchanged from the manifest, relative to image_root: the manifest's directory, which also holds these train files (training/sft.py resolves image_path against the train file's directory)",
+  "allow_missing": false,
+  "raw_sources": [],
+  "natural_sources": [],
+  "outputs": {
+    "train_lightning.jsonl": {
+      "rows": 18299,
+      "sha256": "7039f73114f1e35ed64b10abe5140189a93d4dd7a2c3df1a87cfe5843dc0a1a7"
+    },
+    "train_template.jsonl": {
+      "rows": 18299,
+      "sha256": "93bee7ca56a266c4bf1dd791bc84a8dc79cbb3c1b80a4931b6ab03b64f3bf017"
+    }
+  },
+  "rows": {
+    "manifest": 18652,
+    "train": 18299,
+    "dropped": 353,
+    "missing": 0
+  },
+  "by_style": {
+    "descriptive": 2601,
+    "functional": 4272,
+    "natural": 2866,
+    "positional": 1747,
+    "raw": 6813
+  },
+  "by_source": {
+    "os_atlas/androidworld": {
+      "manifest": 2861,
+      "train": 2676,
+      "dropped": 185,
+      "missing": 0,
+      "by_style": {
+        "descriptive": 408,
+        "functional": 736,
+        "positional": 267,
+        "raw": 1265
+      }
+    },
+    "os_atlas/fineweb": {
+      "manifest": 6624,
+      "train": 6533,
+      "dropped": 91,
+      "missing": 0,
+      "by_style": {
+        "descriptive": 1124,
+        "functional": 1849,
+        "positional": 786,
+        "raw": 2774
+      }
+    },
+    "os_atlas/linux": {
+      "manifest": 3095,
+      "train": 3093,
+      "dropped": 2,
+      "missing": 0,
+      "by_style": {
+        "descriptive": 527,
+        "functional": 839,
+        "positional": 333,
+        "raw": 1394
+      }
+    },
+    "os_atlas/macos": {
+      "manifest": 3206,
+      "train": 3131,
+      "dropped": 75,
+      "missing": 0,
+      "by_style": {
+        "descriptive": 542,
+        "functional": 848,
+        "positional": 361,
+        "raw": 1380
+      }
+    },
+    "os_atlas/uibert": {
+      "manifest": 2866,
+      "train": 2866,
+      "dropped": 0,
+      "missing": 0,
+      "by_style": {
+        "natural": 2866
+      }
+    }
+  },
+  "dropped": {
+    "by_source": {
+      "os_atlas/androidworld": 185,
+      "os_atlas/fineweb": 91,
+      "os_atlas/linux": 2,
+      "os_atlas/macos": 75
+    },
+    "by_reason": {
+      "numeric": 353
+    },
+    "policy": "only numeric rule drops are removed; model drops keep the raw label"
+  },
+  "model_drop_raw_fallback": {
+    "rows": 411,
+    "by_reason": {
+      "duplicate_neighbor": 26,
+      "llm_error": 24,
+      "needs_screen": 29,
+      "numeric": 68,
+      "unintelligible": 264
+    },
+    "by_source": {
+      "os_atlas/androidworld": 98,
+      "os_atlas/fineweb": 70,
+      "os_atlas/linux": 118,
+      "os_atlas/macos": 125
+    }
+  },
+  "missing": {
+    "by_source": {}
+  }
+}
