@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 
 import pytest
 
@@ -11,15 +12,16 @@ from data_prep.rewrite.prompts import (DROP_REASONS, FEW_SHOT, FEW_SHOT_ANSWER, 
                                        format_item)
 
 # Bump PROMPT_VERSION whenever the prompt text changes (the rewrite cache is keyed by it), then add the new pin here.
-PROMPT_FINGERPRINTS = {"v1": "ca30d2812a875f50", "v2": "ba789479023ffcd4"}
+PROMPT_FINGERPRINTS = {"v1": "ca30d2812a875f50", "v2": "ba789479023ffcd4", "v3": "73fbcdcb90446c55"}
 
 POSITIONS = {"top-left", "top-center", "top-right", "middle-left", "center", "middle-right", "bottom-left",
              "bottom-center", "bottom-right"}
-DIRECTIONS = {"left", "right", "above", "below", "overlapping"}
+TARGET_IS = {"left of", "right of", "above", "below", "overlapping"}
+GRID_TOKENS = POSITIONS - {"center"}
 CONTRACT_KEYS = ["k", "label", "platform", "control", "kind", "position", "size", "neighbors", "style"]
 
 META = {"label": "More options", "platform": "mobile", "control": "ImageButton", "position": "top-right",
-        "size": "small", "neighbors": [{"label": "Search", "direction": "left"}], "style": "functional"}
+        "size": "small", "neighbors": [{"label": "Search", "target_is": "right of"}], "style": "functional"}
 
 
 def _is_type(value, name) -> bool:
@@ -76,12 +78,12 @@ def test_build_messages_structure():
 
 def test_format_item_single_line_contract_keys():
     meta = {**META, "kind": "icon", "id": "androidworld:x:0", "bbox": [1, 2, 3, 4], "extra": "leak?",
-            "neighbors": [{"label": "Search", "direction": "left", "id": "secret"}]}
+            "neighbors": [{"label": "Search", "target_is": "right of", "id": "secret", "direction": "left"}]}
     line = format_item(3, meta)
     assert "\n" not in line
     item = json.loads(line)
     assert list(item) == CONTRACT_KEYS
-    assert item["k"] == 3 and item["neighbors"] == [{"label": "Search", "direction": "left"}]
+    assert item["k"] == 3 and item["neighbors"] == [{"label": "Search", "target_is": "right of"}]
     assert {k: item[k] for k in ("label", "platform", "control", "kind", "position", "size", "style")} == \
         {k: meta[k] for k in ("label", "platform", "control", "kind", "position", "size", "style")}
 
@@ -124,6 +126,13 @@ def test_format_batch_on_real_metas():
         item = json.loads(line)
         assert item["k"] == k and set(item) <= set(CONTRACT_KEYS)
         assert item["style"] in STYLES and item["position"] in POSITIONS
+        assert all(set(n) == {"label", "target_is"} and n["target_is"] in TARGET_IS for n in item["neighbors"])
+
+
+def test_format_batch_reminds_target_is_and_own_label():
+    head = format_batch([META]).split("\n")[0]
+    assert "target_is" in head and "copy it as is" in head and "own label" in head
+    assert "direction" not in head
 
 
 def test_few_shot_metas_are_well_formed():
@@ -133,13 +142,14 @@ def test_few_shot_metas_are_well_formed():
         assert m["platform"] in {"mobile", "web", "desktop"} and m["position"] in POSITIONS
         assert m["size"] in {"small", "medium", "large"} and m["style"] in STYLES
         assert 1 <= len(m["neighbors"]) <= 8
-        assert all(n["direction"] in DIRECTIONS and len(n["label"]) <= 60 for n in m["neighbors"])
+        assert all(set(n) == {"label", "target_is"} and n["target_is"] in TARGET_IS and len(n["label"]) <= 60
+                   for n in m["neighbors"])
 
 
 def test_few_shot_answer_matches_schema_and_covers_cases():
     assert len(FEW_SHOT) % 2 == 0
-    total = 0
-    kept_styles, reasons = set(), set()
+    total = kept = 0
+    kept_styles, reasons = set(), []
     for user, assistant in zip(FEW_SHOT[::2], FEW_SHOT[1::2]):
         assert user["role"] == "user" and assistant["role"] == "assistant"
         answer = json.loads(assistant["content"])
@@ -148,18 +158,76 @@ def test_few_shot_answer_matches_schema_and_covers_cases():
         assert [it["k"] for it in answer["items"]] == [it["k"] for it in lines]
         for it, inp in zip(answer["items"], lines):
             if it["keep"]:
+                kept += 1
                 kept_styles.add(inp["style"])
                 assert 3 <= len(it["instruction"].split()) <= 8, it
                 assert "drop_reason" not in it and "\n" not in it["instruction"]
                 assert not it["instruction"].endswith(".") and '"' not in it["instruction"]
             else:
-                reasons.add(it["drop_reason"])
+                reasons.append(it["drop_reason"])
                 assert "instruction" not in it
         total += len(answer["items"])
-    assert 5 <= total <= 8
+    assert 8 <= total <= 9 and 5 <= kept <= 6
     assert kept_styles == set(STYLES)
-    assert reasons <= set(DROP_REASONS) and 2 <= len(answer["items"]) - sum(i["keep"] for i in answer["items"]) <= 3
+    assert sorted(reasons) == ["needs_screen", "numeric", "unintelligible"]
     assert json.loads(FEW_SHOT[1]["content"]) == FEW_SHOT_ANSWER
+
+
+# Local lints for the v2 audit fixes, so the few-shot teaches them whatever validate.py checks.
+STOP = set("a an and the of to in on for at by with from or your my this that is it".split())
+ELEMENT_NOUNS = {"button", "icon", "link", "tab", "field", "input", "checkbox", "dropdown", "menu", "slider",
+                 "switch", "toggle", "image", "picture"}
+NEUTRAL_VERBS = {"click", "tap", "select"}
+RELATION = re.compile(r"\b(left of|right of|above|below) ([A-Z][\w&' ]*)")
+
+
+def _words(text) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) >= 2 and w not in STOP]
+
+
+def _keeps():
+    return [(it["instruction"], m) for it, m in zip(FEW_SHOT_ANSWER["items"], FEW_SHOT_METAS) if it["keep"]]
+
+
+def test_few_shot_keeps_follow_v3_rules():
+    for instruction, m in _keeps():
+        low, words = instruction.lower(), set(_words(instruction))
+        assert words & set(_words(m["label"])), (instruction, "keeps a word of its own label")
+        assert not any(tok in low for tok in GRID_TOKENS) and not words & set(STYLES), instruction
+        context = set(_words(" ".join([m["label"], m.get("control") or "", *(n["label"] for n in m["neighbors"])])))
+        assert not (words & ELEMENT_NOUNS) - context, (instruction, "element noun not backed by control or labels")
+        if m.get("control") in ("text", "area") and m["style"] == "functional":
+            assert low.split()[0] in NEUTRAL_VERBS, instruction
+        for rel, name in RELATION.findall(instruction):
+            assert any(n["label"].startswith(name.strip()) and n["target_is"] == rel for n in m["neighbors"])
+
+
+def test_few_shot_covers_v2_audit_failures():
+    keeps = _keeps()
+    # a) a text control in functional style gets a neutral verb, not "open" or a button noun
+    assert any(m.get("control") == "text" and m["style"] == "functional" for _, m in keeps)
+    # c) a long accessibility description becomes a short phrase, not the copied sentence
+    long = [(i, m) for i, m in keeps if len(m["label"].split()) >= 8]
+    assert long and all(" ".join(m["label"].split()[:3]).lower() not in i.lower() for i, m in long)
+    # d) a look-alike neighbor (same first word) is told apart by a word only the target has
+    pairs = [(i, m, n) for i, m in keeps for n in m["neighbors"] if _words(n["label"])[:1] == _words(m["label"])[:1]]
+    assert pairs and all(set(_words(i)) & (set(_words(m["label"])) - set(_words(n["label"]))) for i, m, n in pairs)
+    # f) a positional keep copies a neighbor's target_is verbatim
+    assert any(f"{n['target_is']} {n['label']}" in i for i, m in keeps if m["style"] == "positional"
+               for n in m["neighbors"])
+    # g) a positional keep says its position in plain words
+    assert any(re.search(r"\b(at|on|in) the (top|bottom|left|right|middle)\b", i) for i, m in keeps
+               if m["style"] == "positional")
+    # h) web rows without a control get no element noun, in more than one style
+    assert len({m["style"] for _, m in keeps if "control" not in m}) >= 2
+
+
+def test_few_shot_numeric_example_reaches_the_model():
+    """Labels the numeric rule drops never reach Lightning, so the few-shot numeric drop must be one it lets through."""
+    validate = pytest.importorskip("data_prep.rewrite.validate", reason="validate.py not available")
+    if not hasattr(validate, "is_numeric_label"):
+        pytest.skip("validate.is_numeric_label not available yet")
+    assert not any(validate.is_numeric_label(m["label"]) for m in FEW_SHOT_METAS)
 
 
 def test_few_shot_duplicate_example_has_duplicate_neighbor():
@@ -202,5 +270,7 @@ def test_response_schema_enum_matches_validate():
 def test_system_prompt_names_vocabulary_and_stays_tight():
     for word in (*STYLES, *DROP_REASONS, "JSON", '"items"', "keep", "drop_reason", "instruction"):
         assert word in SYSTEM_PROMPT, word
-    assert "target is RIGHT of Search" in SYSTEM_PROMPT
+    assert 'target_is right of Search -> "right of Search"' in SYSTEM_PROMPT and "copy it as is" in SYSTEM_PROMPT
+    assert "direction" not in SYSTEM_PROMPT and "search for hotels" not in SYSTEM_PROMPT
+    assert "the app usage bar chart" in SYSTEM_PROMPT and "tap Digital Wellbeing" in SYSTEM_PROMPT
     assert len(SYSTEM_PROMPT.split()) <= 800

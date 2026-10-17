@@ -185,7 +185,9 @@ CONTROL_NOUNS = {
                      "view", "pane", "panel", "filler", "canvas", "frame", "section", "scrollarea", "scrollview",
                      "scrollpane", "recyclerview"), "area"),
     **dict.fromkeys(("list", "listview"), "list"), "table": "table", "toolbar": "toolbar", "statusbar": "status bar",
+    "radiogroup": "radio group", "colorwell": "color picker", **dict.fromkeys(("pagetablist", "tablist"), "tab list"),
 }
+TEXT_CONTROLS = frozenset({"text", "area"})  # the box is the text/region itself: never a button, link or toggle
 
 
 def control_noun(control: str | None) -> str | None:
@@ -237,6 +239,15 @@ def relative_direction(target_bbox, other_bbox) -> str:
     return "below" if dy > 0 else "above"
 
 
+# relative_direction(target, other) -> where the target lies relative to other (the neighbor's "target_is").
+TARGET_IS = {"left": "right of", "right": "left of", "above": "below", "below": "above", "overlapping": "overlapping"}
+
+
+def target_relation(target_bbox, other_bbox) -> str:
+    """Where TARGET lies relative to OTHER, phrased to copy ("right of" Search): inverse of relative_direction."""
+    return TARGET_IS[relative_direction(target_bbox, other_bbox)]
+
+
 def normalize_label(text) -> str:
     """Collapse whitespace and drop invisible format characters (bidi marks like U+200E/U+2068, zero-width chars)."""
     return " ".join("".join(ch for ch in str(text) if unicodedata.category(ch) != "Cf").split())
@@ -247,7 +258,9 @@ def _original(row) -> str:
 
 
 def neighbors(row, image_rows, k=MAX_NEIGHBORS) -> list[dict]:
-    """Up to k other targets on the same screenshot, nearest center first (ties by label, id). Same-label rows kept."""
+    """Up to k other targets on the same screenshot, nearest center first (ties by label, id), as {"label",
+    "target_is"}: where the target lies relative to that neighbor, so the model copies it ("right of Search") instead
+    of inverting it. Same-label rows kept."""
     tc = _center(row["bbox"])
     ranked = []
     for other in image_rows:
@@ -257,7 +270,7 @@ def neighbors(row, image_rows, k=MAX_NEIGHBORS) -> list[dict]:
         label = _original(other)[:LABEL_MAX_CHARS]
         ranked.append((math.hypot(oc[0] - tc[0], oc[1] - tc[1]), label, str(other["id"]), other))
     ranked.sort(key=lambda t: t[:3])
-    return [{"label": label, "direction": relative_direction(row["bbox"], other["bbox"])}
+    return [{"label": label, "target_is": target_relation(row["bbox"], other["bbox"])}
             for _, label, _, other in ranked[:max(0, k)]]
 
 

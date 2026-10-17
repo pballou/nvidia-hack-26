@@ -1,5 +1,5 @@
-"""meta.py: selection, styles, ScreenSpot/GroundUI contamination and manifest checks, buckets, directions, neighbors,
-row_meta; synth."""
+"""meta.py: selection, styles, ScreenSpot/GroundUI contamination and manifest checks, buckets, directions, target_is
+neighbors, control nouns, row_meta; synth."""
 
 import hashlib
 import json
@@ -268,6 +268,32 @@ def test_relative_direction(other, expected):
     assert meta.relative_direction([100, 100, 200, 200], other) == expected
 
 
+@pytest.mark.parametrize("other,expected", [
+    ([300, 120, 400, 180], "left of"),         # other is right of the target -> target is left of other
+    ([0, 120, 50, 180], "right of"),
+    ([120, 0, 180, 50], "below"),              # other is above -> target is below it
+    ([120, 300, 180, 400], "above"),
+    ([140, 140, 160, 160], "overlapping"),
+    ([0, 0, 1000, 1000], "overlapping"),
+    ([250, 250, 350, 350], "left of"),         # |dx| == |dy| -> horizontal
+])
+def test_target_relation_inverts_relative_direction(other, expected):
+    target = [100, 100, 200, 200]
+    assert meta.target_relation(target, other) == expected
+    assert meta.target_relation(target, other) == meta.TARGET_IS[meta.relative_direction(target, other)]
+
+
+def test_target_relation_is_symmetric_with_swapped_boxes():
+    """target_is of A seen from B is what B's relative_direction says A is, for random non-tied boxes."""
+    import random
+    rng = random.Random(7)
+    phrase = {"left": "left of", "right": "right of", "above": "above", "below": "below", "overlapping": "overlapping"}
+    for _ in range(300):
+        a, b = (box_at(rng.uniform(0, 1000), rng.uniform(0, 1000), rng.uniform(1, 60)) for _ in range(2))
+        assert meta.target_relation(a, b) == phrase[meta.relative_direction(b, a)]
+        assert meta.target_relation(a, b) in {"left of", "right of", "above", "below", "overlapping"}
+
+
 def test_neighbors_sort_k_self_and_duplicates():
     img = "images/androidworld/s.png"
     target = row(rid="a:s:0", label="Share", bbox=box_at(100, 100), image=img)
@@ -283,10 +309,23 @@ def test_neighbors_sort_k_self_and_duplicates():
     image_rows = [target] + others
     got = meta.neighbors(target, image_rows)
     assert [n["label"] for n in got] == ["Share", "alpha", "alpha", "beta", "Two words", "x" * 60, "Far away"]
-    assert [n["direction"] for n in got] == ["right", "right", "left", "above", "below", "below", "right"]
+    assert all(set(n) == {"label", "target_is"} for n in got)
+    # where the TARGET is: "alpha" at x=140 is right of the target, so the target is "left of" alpha
+    assert [n["target_is"] for n in got] == ["left of", "left of", "right of", "below", "above", "above", "left of"]
     assert meta.neighbors(target, image_rows, k=2) == got[:2]
     assert meta.neighbors(target, image_rows, k=0) == []
     assert meta.neighbors(target, [target]) == []
+
+
+def test_neighbors_target_is_all_relations():
+    img = "i"
+    target = row(rid="a:i:0", label="Target", bbox=box_at(150, 150, 10), image=img)
+    others = {"L": box_at(50, 150), "R": box_at(250, 150), "U": box_at(150, 50), "D": box_at(150, 250),
+              "Card": [100, 100, 200, 200]}
+    rows = [target] + [row(rid=f"a:i:{k}", label=label, bbox=b, image=img)
+                       for k, (label, b) in enumerate(others.items(), 1)]
+    got = {n["label"]: n["target_is"] for n in meta.neighbors(target, rows)}
+    assert got == {"L": "right of", "R": "left of", "U": "below", "D": "above", "Card": "overlapping"}
 
 
 def test_neighbors_cap_and_self_by_id():
@@ -294,7 +333,7 @@ def test_neighbors_cap_and_self_by_id():
     rows = [row(rid=f"a:i:{k}", label="Same", bbox=box_at(10 + 20 * k, 10), image=img) for k in range(12)]
     got = meta.neighbors(rows[0], rows)
     assert len(got) == meta.MAX_NEIGHBORS == 8
-    assert all(n["label"] == "Same" and n["direction"] == "right" for n in got)
+    assert all(n["label"] == "Same" and n["target_is"] == "left of" for n in got)
 
 
 def test_neighbors_use_original_label():
@@ -320,9 +359,20 @@ def test_normalize_label():
     ("android.widget.CheckBox", "checkbox"), ("android.widget.Button", "button"),
     ("android.widget.FrameLayout", "area"), ("android.widget.LinearLayout", "area"),
     ("android.widget.ImageButton", "button"), ("Hyperlink", "link"), ("something-new", "element"), (None, None),
+    ("AXRadioGroup", "radio group"), ("radio-group", "radio group"), ("AXColorWell", "color picker"),
+    ("page-tab-list", "tab list"), ("tab-list", "tab list"), ("AXTabGroup", "tab"),
+    ("android.view.ViewGroup", "area"), ("AXUnknownThing", "element"),
 ])
 def test_control_noun(raw, noun):
     assert meta.control_noun(raw if raw is None else meta.control_type({"role": raw})) == noun
+
+
+def test_text_controls():
+    assert meta.TEXT_CONTROLS == {"text", "area"} and meta.TEXT_CONTROLS <= set(meta.CONTROL_NOUNS.values())
+    for raw in ("AXStaticText", "android.widget.TextView", "label", "android.view.ViewGroup", "AXGroup", "panel"):
+        assert meta.control_noun(raw) in meta.TEXT_CONTROLS, raw
+    for raw in ("push-button", "AXButton", "link", "toggle-button", "android.widget.Switch", "AXTextField"):
+        assert meta.control_noun(raw) not in meta.TEXT_CONTROLS, raw
 
 
 def test_row_meta_shape_and_style():
@@ -334,7 +384,7 @@ def test_row_meta_shape_and_style():
     m = meta.row_meta(target, by)
     assert list(m) == ["label", "platform", "control", "position", "size", "neighbors", "style"]
     assert m == {"label": "More options", "platform": "mobile", "control": "button", "position": "top-right",
-                 "size": "small", "neighbors": [{"label": "Search", "direction": "left"}],
+                 "size": "small", "neighbors": [{"label": "Search", "target_is": "right of"}],
                  "style": meta.assign_style("a:s:0")}
     assert meta.row_meta(target, by, style="positional")["style"] == "positional"
     m2 = meta.row_meta(row(data_type="icon"), {})
