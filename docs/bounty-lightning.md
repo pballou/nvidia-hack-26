@@ -248,7 +248,9 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 | Sun, Gym | `grounder` (final) | off | 12 × 3 | TBD | TBD | TBD | final (`agent-v4`) |
 | Sun, interactive | `grounder` | off vs retry | 12 × TBD | TBD | TBD | TBD | thinking ablation |
 
-All Saturday reads used prompt `agent-v3` (see §4.2); Sunday's use `agent-v4`.
+All Saturday reads used prompt `agent-v3` (see §4.2) and the task checks from before sandbox
+`68c7671`, which made the checks stricter (no unrequested payments, messages, reports or autopay;
+every notification row and star pinned). Sunday's runs use `agent-v4` and the stricter checks.
 
 ¹ Sandbox `02a8e1b`, VLM on `:8001`, no oracle (`runs/summary_20261017-160547.json`):
 `AGENT_SANDBOX_URL=http://127.0.0.1:8091 $PY scripts/run_agent_tasks.py --tags easy --lightning local
