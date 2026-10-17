@@ -82,8 +82,11 @@ a user describes what they want, and the agent does it from pixels alone.
   - NeMo RL + Gym can't train small Qwen VLMs: it asserts a Nemotron-only processor.
   - VeRL + Gym is text-only.
   - Don't switch frameworks mid-weekend.
-- **Base-model shortlist:** `Qwen/Qwen3.5-2B` and `Qwen/Qwen3-VL-2B-Instruct`. Choose
-  at gate D1 in docs/plan.md.
+- **Base model (gate D1, decided Sat 2026-10-17): `Qwen/Qwen3.5-2B`**, image cap
+  **2 MP** (`MAX_PIXELS = 2_073_600`, frozen).
+  - Served on `:8001` (`base`; `grounder` = LoRA after SFT), `model_family:
+    qwen3_5`.
+  - Rationale and baselines: docs/plan.md "Decisions so far".
 - **Served names (vLLM :8001):** `base` is the base weights (baselines, and the
   screen summaries Lightning reads). `grounder` is the current LoRA adapter on top of
   `base`.

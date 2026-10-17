@@ -30,7 +30,7 @@ export VLLM_PKG=/usr/local/lib/python3.12/dist-packages/vllm
 export HF_HOME=/home/ubuntu/hf
 export PLAYWRIGHT_BROWSERS_PATH=/home/ubuntu/ms-playwright
 # Grounder image cap: MUST equal MAX_PIXELS / MIN_PIXELS in common/grounding.py.
-# M1 compares ~1 MP (1003520) vs ~2 MP (2073600); update this after D1.
+# FROZEN at 2 MP by gate D1 (Sat 2026-10-17). The chosen base model is Qwen/Qwen3.5-2B on :8001.
 export GROUNDER_MAX_PIXELS=2073600
 export GROUNDER_MIN_PIXELS=65536
 EOF

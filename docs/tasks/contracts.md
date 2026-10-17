@@ -43,7 +43,7 @@ paths, never force-push, never commit secrets.
 ## 2. Model interface: `common/grounding.py` (T2 creates; everyone imports)
 
 ```python
-MAX_PIXELS: int = 2_073_600   # placeholder until gate D1 freezes it (must equal serving.env GROUNDER_MAX_PIXELS)
+MAX_PIXELS: int = 2_073_600   # FROZEN at 2 MP by gate D1 (must equal serving.env GROUNDER_MAX_PIXELS)
 MIN_PIXELS: int = 65_536
 def preprocess_screenshot(img: PIL.Image.Image) -> PIL.Image.Image   # RGB; aspect-preserving resize into [MIN,MAX] pixels; W,H multiples of 32; no pad/crop/stretch
 def to_data_url(img: PIL.Image.Image) -> str                         # PNG base64 data URL
@@ -73,10 +73,10 @@ def build_summary_messages(image_url: str) -> list[dict]             # structure
 ```yaml
 sandbox_url: http://127.0.0.1:8090
 lightning: {base_url: https://integrate.api.nvidia.com/v1, model: nvidia/nemotron-3.5-lightning-30b-a3b, api_key_env: NVIDIA_API_KEY}
-vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}
+vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}   # :8001 = Qwen3.5-2B (gate D1)
 grounder_model: base        # base | grounder
 summary_model: base         # base | grounder (grounder when Mac-local fully local)
-model_family: qwen3_vl      # qwen3_vl | qwen3_5
+model_family: qwen3_5       # gate D1: Qwen/Qwen3.5-2B (qwen3_vl was the other candidate)
 max_steps: 12
 thinking: retry             # off | on | retry (on only after a no-change/failed step)
 viewport: {width: 1280, height: 800}

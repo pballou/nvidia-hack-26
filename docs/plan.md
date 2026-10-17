@@ -191,8 +191,18 @@ it.
   - Keep the adapter, for the base/LoRA serving above. Also export a merged copy for
     publishing.
 - **Gates D1 and D2:** agreed as written below.
-- **Base models:** baseline both Qwen3.5-2B and Qwen3-VL-2B (cheap). Train only one
-  (gate D1).
+- **Gate D1 decided (Sat ~4:30pm): fine-tune `Qwen/Qwen3.5-2B` at 2 MP.**
+  - Baselines on Charlie's OS-Atlas sample: Qwen3-VL-2B 80.6% (6% near-miss),
+    Qwen3.5-2B 79.8%. That's a statistical tie, so the tie-break rule applies.
+  - Both passed Kyle's D1 checks: LoRA loads in vLLM, including Qwen3.5's
+    linear-attention layers, and the 20-step SFT smoke runs (Qwen3.5 1.75 s/step
+    at 2 MP).
+  - Qwen3.5 is covered by TRL's VLM GRPO tests and has a published single-H200 TRL
+    recipe, which lowers the risk of the GRPO step the Gym bounty depends on.
+  - Pixel cap frozen at **2 MP** (`MAX_PIXELS = 2_073_600`) everywhere:
+    `common/grounding.py`, `serving.env`, TRL.
+  - Charlie's per-split breakdown is still pending. We'd reconsider only if Qwen3-VL
+    leads by more than ~5 points on icons or desktop.
 - **Eval (option C):** OS-Atlas `dev` split (by screenshot) for choosing checkpoints.
   The final held-out test is **ScreenSpot-v2-clean**: 1,244 rows, all of SSv2 minus
   the 28 desktop rows captured on the same machines as our Linux/macOS training data
