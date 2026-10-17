@@ -40,7 +40,8 @@ mkdir -p /home/ubuntu/hf /home/ubuntu/vllm-cache /home/ubuntu/data /home/ubuntu/
 docker pull "$VLLM_IMAGE"                # ~9 GB
 
 # Pre-download weights as ubuntu (not root), so the training venv can share the cache.
-# HF_TOKEN: export a READ-ONLY token in your shell first. Never `hf auth login` with a write token on this shared box.
+# HF_TOKEN: export a READ-ONLY token in your shell first. For uploads, use the fine-grained token scoped to
+# patrickballou/gui-assist-* (upload shell only). Never `hf auth login` on this shared box.
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e HF_HOME=/hf -e HF_TOKEN \
   -v /home/ubuntu/hf:/hf --entrypoint python3 "$VLLM_IMAGE" -c \
   "from huggingface_hub import snapshot_download as d; [print(d(r)) for r in ['nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4','Qwen/Qwen3.5-2B','Qwen/Qwen3-VL-2B-Instruct']]"

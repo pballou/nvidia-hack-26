@@ -25,9 +25,9 @@ and the official rules on the [Luma page](https://luma.com/nvidia-redhat-small-m
   - So the pinned stack is fine: nemo-gym 0.7.0, vllm 0.31.0, trl 1.16.0. So is the
     vLLM #61718 Lightning patch, a file from the vLLM project, which has been public
     for years.
-- **Base + LoRA counted once:** our reading is that the screen-summary role (base
-  weights, adapter off) and the grounder (adapter on) are one model. That's
-  **unconfirmed**; ask alongside the 2-week question.
+- **Model counting:** separate instances of the base and the fine-tuned model count
+  as two models. One loaded model with a LoRA adapter switched per request counts
+  as one model (team understanding, 2026-10-17).
 - **Data:** must meaningfully use open data and cite sources. Synthetic data must be
   published together with its methodology.
 - **Judging:** "systems engineering", meaning a working end-to-end system. Criteria:

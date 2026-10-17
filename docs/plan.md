@@ -118,10 +118,14 @@ it.
     the **base VLM**, plus the URL and whether the screen changed.
   - The base VLM is the same weights as the grounder with the LoRA adapter turned
     off.
-  - **Never serve the base and the tuned model as two full copies.** They would count
-    twice toward the 33B cap (card counts: 30 + 2 + 2 = 34 > 33).
-  - Serve one base model plus the LoRA adapter from a single vLLM process
-    (`--enable-lora`; stream B verifies this for the chosen model).
+  - **Separate instances count as two models** (card counts: 30 + 2 + 2 = 34 > 33),
+    so never serve the base and the tuned model separately.
+  - **Agreed design: one loaded 2B model, with the LoRA adapter switched per
+    request.** It counts as one model (32B total).
+    - vLLM does this natively: `--enable-lora --lora-modules grounder=<adapter>`.
+      Requests to `base` skip the adapter; requests to `grounder` apply it.
+    - There's no reload between requests, and mixed requests batch together.
+    - Stream B verifies vLLM LoRA support for the chosen model at gate D1.
   - The env reads the screen-summary model name from config (`summary_model: base`).
     If the organizers count base + adapter as two models, switch it to `grounder`
     (the tuned model for both roles) and spot-check summary quality.

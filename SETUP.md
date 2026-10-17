@@ -168,8 +168,8 @@ set -a; source .env; set +a       # exports the values, so child processes (Pyth
   (`nvidia/nemotron-3.5-lightning-30b-a3b` at `https://integrate.api.nvidia.com/v1`).
 - **`HF_TOKEN`:** <https://huggingface.co/settings/tokens>.
   - A **read** token is enough for everyone.
-  - Only Patrick, who publishes, needs a write token, and only on his laptop. Never
-    put it on the shared box.
+  - Patrick's write token stays on his laptop.
+  - Uploads from the Brev box use a separate fine-grained token scoped to write only `patrickballou/gui-assist-grounder` and `patrickballou/gui-assist-data`. Revoke it after the event.
 
 Smoke test for hosted Lightning:
 
@@ -185,8 +185,9 @@ curl -s https://integrate.api.nvidia.com/v1/chat/completions \
 The box has one shared `ubuntu` user, so:
 - **Keep your own clone.** That way nobody overwrites anyone else's working tree.
 - **Push from your laptop.** Don't store GitHub credentials there.
-- **Use only a read-only HF token on the box,** exported in your shell. Never run
-  `hf auth login` with a write token there.
+- **HF tokens on the box:** export a read-only token in your shell.
+  - Uploads (Patrick/Kyle) use the fine-grained token scoped to write only `patrickballou/gui-assist-grounder` and `patrickballou/gui-assist-data`, exported only in the upload shell.
+  - Never run `hf auth login` there: it saves the token into the shared `HF_HOME`.
 
 | Path | Contents |
 | --- | --- |
@@ -257,7 +258,7 @@ gym eval run --no-serve --agent mcqa_simple_agent --input resources_servers/mcqa
 
 | Tool | Install | Notes |
 | --- | --- | --- |
-| Hugging Face CLI | `uv tool install 'hf==2.2.0'` | Laptop: `hf auth login`. Box: export a read-only `HF_TOKEN` instead. `export HF_XET_HIGH_PERFORMANCE=1` for fast downloads. |
+| Hugging Face CLI | `uv tool install 'hf==2.2.0'` | Laptop: `hf auth login`. Box: export `HF_TOKEN` in the shell (read-only, or the scoped upload token) instead. `export HF_XET_HIGH_PERFORMANCE=1` for fast downloads. |
 | Playwright (stream C) | `uv pip install 'playwright==1.62.0'`, then `playwright install chromium` (`--with-deps` on Ubuntu) | Gym's `interactive_browser` pins `>=1.62,<1.63`; matching the browser build matters. On the box, `PLAYWRIGHT_BROWSERS_PATH` (in `serving.env`) keeps browsers off `/ephemeral`. |
 
 **Training and serving stack on the GPU box:** [docs/gpu-box.md](docs/gpu-box.md)
