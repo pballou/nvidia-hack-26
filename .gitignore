@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+env.yaml
+
+# Data, models, outputs (publish to Hugging Face, not git)
+data/
+datasets/
+checkpoints/
+outputs/
+results/
+runs/
+wandb/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+*.gguf
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.parquet
+*.arrow
+
+# Playwright / Node
+node_modules/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
