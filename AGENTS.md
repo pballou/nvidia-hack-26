@@ -11,6 +11,7 @@ plans browser tasks and calls the grounder as a tool.
 - Plan, milestones, workstreams: [docs/plan.md](docs/plan.md).
 - Verified facts and sources: [docs/research-notes.md](docs/research-notes.md).
   Read it before re-researching anything.
+- Submission checklist, publishing, video plan: [docs/submission.md](docs/submission.md).
 - Tool setup: [SETUP.md](SETUP.md). GPU box serving and training (pinned stack):
   [docs/gpu-box.md](docs/gpu-box.md).
 
@@ -25,6 +26,8 @@ plans browser tasks and calls the grounder as a tool.
     total parameters, not active.
   - Lightning's card says 30B, so the grounding VLM must be ≤ 3B. Don't add external
     draft models (DSpark/DFlash) or a separate judge LLM.
+  - Never serve the base and the fine-tuned VLM as two full copies; they count
+    twice. Use one base model plus a LoRA adapter.
 - **Code provenance:** all code must be written during the hackathon. Open-source
   code may be reused only if its project has been public for 2+ weeks. When copying
   a template (e.g. from NeMo Gym), note its source path and first-commit date.
@@ -70,6 +73,11 @@ plans browser tasks and calls the grounder as a tool.
   **ScreenSpot-v2** `bbox` is `[x, y, w, h]` in pixels. Convert both to the canonical
   pixel xyxy schema in docs/plan.md. Drop invalid or zero-area boxes, and rows whose
   instruction text appears twice on the same screenshot.
+- **Image preprocessing has one owner:** `common/grounding.py:preprocess_screenshot`.
+  It converts to RGB and resizes, preserving aspect ratio, to the shared
+  `MAX_PIXELS` with dims that are multiples of 32. No padding, cropping, stretching,
+  or manual mean/std. Data prep, Gym rows, TRL, vLLM (`--mm-processor-kwargs`) and
+  the MVP all use the same cap. Details: docs/plan.md "Decisions so far".
 - **Qwen3-VL / Qwen3.5 emit points on a relative 0–1000 grid.** Prompts, output
   parsing and coordinate conversion live only in `common/grounding.py`; everything
   imports from there. Spot-check visually after any conversion change.

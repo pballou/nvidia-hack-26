@@ -111,19 +111,85 @@ it.
 - **Agent loop:** multi-step, built on Gym's `simple_agent` tool loop with
   `max_steps`. Tasks are short (2–4 steps, e.g. open a menu and then pick an item).
   Single-screen click tasks are the fallback demo.
-- **How Lightning "sees" (proposed; C to confirm):**
+- **How Lightning "sees" (confirmed):**
   - Lightning is text-only. After every action, the env returns a text observation:
-    a screen summary written by the **base VLM**, plus the URL and whether the
-    screen changed.
-  - The base VLM is the same weights as the grounder with LoRA turned off, so it
-    adds no parameters. Serve base + LoRA from one vLLM process.
+    a structured screen summary (visible headings and clickable elements) written by
+    the **base VLM**, plus the URL and whether the screen changed.
+  - The base VLM is the same weights as the grounder with the LoRA adapter turned
+    off.
+  - **Never serve the base and the tuned model as two full copies.** They would count
+    twice toward the 33B cap (30 + 2.3 + 2.3 > 33).
+  - Serve one base model plus the LoRA adapter from a single vLLM process
+    (`--enable-lora`; stream B verifies this for the chosen model). The fallback is
+    to use the tuned model for both roles.
 - **Data and training flow:** set everything up, then a small POC run end to end,
   then size the full run from the POC's measured throughput.
+- **Training data mix (A), by share of targets:**
+
+| Platform | Source | Share | Instructions |
+| --- | --- | --- | --- |
+| Desktop 40% | OS-Atlas **Windows** | 20% | Raw labels; Lightning rewrites ~60% |
+| | **GroundCUA** (MIT) | 20% | Its own natural instructions |
+| Mobile 30% | OS-Atlas AndroidWorld | 10% | Raw labels; Lightning rewrites ~60% |
+| | OS-Atlas UIBert | 10% | Natural (keep) |
+| | OS-Atlas Widget Captioning | 10% | Natural (keep) |
+| Web 30% | OS-Atlas FineWeb (range-extracted) | 30% | HTML text; Lightning rewrites ~60% |
+
+  - Excluded: OS-Atlas Linux and macOS (contaminated) and RICOSCA (redundant).
+  - Aim for ≥ 40% icon-like targets per platform. OS-Atlas has no text/icon label,
+    so use a proxy: small, near-square boxes or icon control types.
+  - Pilot: about 2k targets in these proportions. Full run: sized from the pilot,
+    probably 20–30k.
+  - `dev`: 5% of screenshots per source, held out by screenshot.
+  - One target per training example for the pilot. Packing several targets per
+    screenshot needs a custom collator, because `assistant_only_loss` isn't
+    available on our stack. Only do it if time allows.
+- **Image preprocessing contract (A owns it; everyone imports it):**
+  - **One function** in `common/grounding.py`, used by data prep, Gym eval rows, TRL
+    and the MVP app: `preprocess_screenshot(img) -> img_resized`.
+    1. Convert to RGB (composite any alpha on white).
+    2. Resize **preserving aspect ratio** so `MIN_PIXELS ≤ W·H ≤ MAX_PIXELS`.
+    3. Round W and H to multiples of 32 (Qwen3-VL/3.5: 16 px patch × 2×2 merge).
+       This is the same math as the processor's `smart_resize`.
+    4. Save PNG (or JPEG q≥95).
+  - **Never** pad/letterbox, crop, stretch, or apply mean/std yourself; the
+    processor normalizes pixels.
+  - **Phones and desktops:** aspect-preserving resize handles both tall and wide
+    screens. Don't force a fixed size.
+  - **Targets:** the bbox center in **relative 0–1000** coordinates, which are
+    resize-invariant. Stream A confirms that Qwen3.5 uses the same 0–1000 convention
+    at baseline.
+  - **The same `MAX_PIXELS` everywhere.** Use the identical cap in vLLM
+    `--mm-processor-kwargs size` and the TRL processor, so nothing gets resized
+    twice. Choose ~1 MP vs ~2 MP during the M1 baselines, then freeze it as a
+    constant.
+  - **MVP:** Playwright with a fixed viewport (e.g. 1280×800) and
+    `device_scale_factor=1`. Screenshot → the same preprocess → model → 0–1000 →
+    viewport CSS pixels.
+- **Fine-tuning method (B):** LoRA on the language model, with the vision encoder
+  frozen.
+  - It matched full fine-tuning in published GUI-grounding results at a fraction of
+    the cost.
+  - Keep the adapter, for the base/LoRA serving above. Also export a merged copy for
+    publishing.
+- **Gates D1 and D2:** agreed as written below.
 - **Base models:** baseline both Qwen3.5-2B and Qwen3-VL-2B (cheap). Train only one
   (gate D1).
 - **Eval:** OS-Atlas `dev` split (by screenshot) for choosing checkpoints;
-  **ScreenSpot-v2 stays the final held-out test.**
+  **ScreenSpot-v2 stays the final held-out test**, reported three ways.
+- **Hosting:**
+  - Training and eval run on Brev (vLLM).
+  - For the demo, Patrick wants everything local on his M4 Max (128 GB). Feasibility
+    is being checked; see the demo-hosting note in
+    [research-notes.md](research-notes.md) §6.
+  - The safe fallback is models served with vLLM on Brev, and the app plus browser
+    on the laptop through an SSH tunnel.
+- **Publishing:** required by the track. Patrick owns the HF account. Details are in
+  [submission.md](submission.md).
+- **Submission:** the form has bounty checkboxes for Lightning, NeMo Gym and vLLM;
+  the first two need written explanations. See [submission.md](submission.md).
 - **Brev:** the instance stays stopped while we code; start it for GPU work only.
+  Use `brev login` (browser flow).
 
 ## Decision gates
 

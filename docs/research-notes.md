@@ -309,6 +309,14 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   3. Reasoning control as a measured feature: thinking off for routine steps, a
      budget on retries; plot success vs. latency.
 
+**Demo hosting (being evaluated):**
+- Patrick wants to run everything on an M4 Max (128 GB) for the demo. Local
+  runtimes (vLLM on Apple Silicon, MLX, llama.cpp) are being checked for Lightning
+  tool-calling support, Qwen3.5/Qwen3-VL vision support, and matching image
+  preprocessing.
+- The fallback is vLLM on the Brev H200, with the app and browser on the laptop
+  through an SSH tunnel.
+
 ## 7. Compute estimates (*estimates*: confirm with a 20-step pilot)
 
 - **Budget:** $160 at **$6.90/hr** for the running H200 (console price; the list price
