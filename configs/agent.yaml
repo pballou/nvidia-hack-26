@@ -4,12 +4,10 @@ sandbox_url: http://127.0.0.1:8090
 # Local Lightning on the Mac (vllm-metal, docs/local-mac.md) is the default; AGENT_LIGHTNING=hosted switches
 # to build.nvidia.com (NVIDIA_API_KEY, 25-80 s per call).
 lightning: {base_url: http://127.0.0.1:8000/v1, model: lightning, api_key_env: null}
-# Until gate D1: :8002 = Qwen3-VL-2B (model_family qwen3_vl), :8001 = Qwen3.5-2B (qwen3_5), both served as
-# `base` through Patrick's tunnel. After D1 the chosen model moves to :8001 (the contract URL).
-vlm: {base_url: http://127.0.0.1:8002/v1, api_key: EMPTY}
+vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}   # :8001 = Qwen3.5-2B (gate D1)
 grounder_model: base        # base | grounder
 summary_model: base         # base | grounder (grounder when Mac-local fully local)
-model_family: qwen3_vl      # qwen3_vl | qwen3_5
+model_family: qwen3_5       # gate D1: Qwen/Qwen3.5-2B (qwen3_vl was the other candidate)
 max_steps: 12
 thinking: retry             # off | on | retry (on only after a no-change/failed step)
 viewport: {width: 1280, height: 800}

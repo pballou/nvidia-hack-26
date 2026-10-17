@@ -47,23 +47,32 @@ _GROUNDING_PROMPTS = {
     ),
 }
 
-# Screen description for the text-only planner (agent/observation.py). Concrete example
-# lines matter: with a "<type>" placeholder Qwen3.5-2B copied it literally, and Qwen3-VL-2B
-# skipped icon-only buttons (checked on the fake sandbox, 2026-10-17).
+# Screen description for the text-only planner (agent/observation.py). Checked against
+# Qwen3-VL-2B and Qwen3.5-2B on the sandbox pages (2026-10-17):
+# - concrete example lines, not a "<type>" placeholder (Qwen3.5 copied it literally);
+# - the bars on every page squeezed into NAV, or they eat the 40-line budget and the
+#   page's own controls get cut;
+# - one line per list/table row, so per-row icon buttons survive.
+# The examples are deliberately not taken from the sandbox tasks.
 SUMMARY_PROMPT = """\
 Describe this app screenshot for someone who cannot see it, so they can tell a helper what to click.
-Plain text, at most 40 lines, exactly these four sections:
+Plain text, at most 40 lines, exactly these five sections:
 
-PAGE: the app or page title and the main headings, top to bottom, on one line.
-ELEMENTS: every visible clickable or editable element, one per line, top to bottom. Include \
-icon-only buttons (describe the icon's shape), links, buttons, tabs, inputs, toggles, \
-checkboxes, menu items, list rows and chart bars. Format: "- <kind>: <its text, or the icon \
-shape if it has no text> (<the label or row it belongs to>) @ <position>", where position is \
-top-left, top, top-right, left, center, right, bottom-left, bottom or bottom-right. Examples:
-- icon button: bell icon @ top-right
-- toggle: off (High contrast) @ center
-- button: Download (September row) @ right
-- input: "Sam Rivera" (Display name) @ center
+PAGE: the page title and its main headings, on one line.
+NAV: the bars that are on every page, at most two lines, e.g. "top bar: menu icon, \
+bell icon with a red 2 badge, gear icon, avatar" and "side menu: Home, Orders (selected), \
+Reports, Help".
+MAIN: one line per clickable or editable thing in the rest of the page, top to bottom: \
+buttons, icon-only buttons (describe the icon's shape), links, tabs, inputs, toggles, \
+checkboxes, chart bars. Each list or table row gets its own line naming the row and its \
+buttons. A group of options is one line listing every option. Format: "- <kind>: <its \
+text or icon shape> (<the label or row it belongs to>) @ <position>", position = top-left, \
+top, top-right, left, center, right, bottom-left, bottom or bottom-right. Examples:
+- toggle: off (Dark mode) @ right
+- options: Low, Medium (selected), High (Volume) @ right
+- row: March 2025 invoice, $80.00, Paid; download arrow icon button @ right
+- row: Dana Smith, "Team lunch"; star icon, not starred @ center
+- input: "Alex Doe" (Full name) @ center
 STATE: what is selected, checked, switched on, or filled in; "none" if nothing.
 OVERLAYS: any open dialog, menu, dropdown, toast or banner and its text; "none" if none.
 

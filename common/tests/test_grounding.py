@@ -216,6 +216,6 @@ def test_summary_messages_shape():
     msgs = g.build_summary_messages("file:///tmp/x.png")
     img, txt = msgs[0]["content"]
     assert img["image_url"]["url"] == "file:///tmp/x.png"
-    for section in ("PAGE:", "ELEMENTS:", "STATE:", "OVERLAYS:"):
+    for section in ("PAGE:", "NAV:", "MAIN:", "STATE:", "OVERLAYS:"):
         assert section in txt["text"]
     assert "40 lines" in txt["text"]
