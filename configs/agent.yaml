@@ -1,0 +1,23 @@
+# Agent config (docs/tasks/contracts.md §4). Loaded by agent/config.py; env vars override
+# (AGENT_<KEY>, e.g. AGENT_GROUNDER_MODEL=grounder, AGENT_LIGHTNING=local; see agent/config.py).
+sandbox_url: http://127.0.0.1:8090
+lightning: {base_url: https://integrate.api.nvidia.com/v1, model: nvidia/nemotron-3.5-lightning-30b-a3b, api_key_env: NVIDIA_API_KEY}
+vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}
+grounder_model: base        # base | grounder
+summary_model: base         # base | grounder (grounder when Mac-local fully local)
+model_family: qwen3_vl      # qwen3_vl | qwen3_5
+max_steps: 12
+thinking: retry             # off | on | retry (on only after a no-change/failed step)
+viewport: {width: 1280, height: 800}
+runs_dir: runs
+
+# --- Extras (not part of the contract; defaults are fine) ---------------------------
+# `lightning: hosted|local` in an override picks one of these presets.
+lightning_presets:
+  hosted: {base_url: https://integrate.api.nvidia.com/v1, model: nvidia/nemotron-3.5-lightning-30b-a3b, api_key_env: NVIDIA_API_KEY}
+  local: {base_url: http://127.0.0.1:8000/v1, model: lightning, api_key_env: null}
+# Lightning model card values. No speculative decoding anywhere (AGENTS.md).
+sampling: {temperature: 1.0, top_p: 0.95, max_tokens: 1024}
+timeouts: {lightning_s: 180, vlm_s: 45, navigation_s: 15}
+history_full_steps: 6       # last N step exchanges kept verbatim; older ones become one-liners
+browser: {headless: true, locale: en-US, timezone_id: America/New_York, settle_ms: 350, network_idle_ms: 2500}
