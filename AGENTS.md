@@ -15,7 +15,8 @@ plans browser tasks and calls the grounder as a tool.
 
 ## Hard constraints
 
-- **Deadline:** Sunday 2026-10-18, 4:00pm EDT.
+- **Deadline:** everything, including the demo videos, is due **Sunday 2026-10-18,
+  11:00am EDT**. Fine-tuning should be finished by the end of Saturday.
 - **Parameter budget:** ≤ 33B total across *all* generative models in the system,
   including any used for verification, critique, routing, or speculative decoding
   (embedding and reranking models are excluded).

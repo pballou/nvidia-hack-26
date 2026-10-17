@@ -21,7 +21,7 @@ Headline results we want:
 
 ## Architecture
 
-```
+```text
             OS-Atlas slice ──► data_prep ──► canonical JSONL ──► Gym rows ─┐
   Lightning (rewrites a11y labels into natural instructions) ──┘           │
                                                                            ▼
@@ -37,7 +37,7 @@ Headline results we want:
 
 ## Planned repo layout
 
-```
+```text
 common/                  shared code: grounding prompt(s), output parsing, coordinate conversion
 data_prep/               OS-Atlas slicing/cleaning/dedup, ScreenSpot-v2 → JSONL, Lightning rewriting
 resources_servers/
@@ -70,16 +70,23 @@ docs/                    plan, research notes, results
 
 ## Milestones
 
-The deadline is **Sun 4:00pm EDT**; aim to submit by 3:30.
+**Hard deadline: everything (including demo videos) is due Sun 11:00am EDT.** Aim to
+be finished by 10:30. The fine-tune (SFT, plus GRPO if it passes its gate) should be
+finished by the end of Saturday, so Sunday morning is only evals, the demo, and
+publishing.
 
 | # | When (target) | Done when |
 | --- | --- | --- |
-| M0 Setup | Sat early afternoon | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
-| M1 Baseline | Sat ~4pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
-| M2 Data + SFT | Sat evening | OS-Atlas slice cleaned, deduped against SSv2, and split; Lightning instructions generated; SFT pilot (~2k samples, ~15 min) and then the main SFT run; dev and SSv2 evals; `gym eval compare`. |
-| M3 Gym loop / GRPO | Overnight → Sun morning | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. **Gate D2: keep GRPO only if dev improves.** |
-| M4 Agent | Sat afternoon → Sun morning (parallel) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with Lightning; base vs. tuned grounder runs; click-overlay traces. |
-| M5 Ship | Sun by 3pm | Final evals, BLADE report, HF publish (model, data, methodology), README results, demo video, submission. |
+| M0 Setup | Sat 1pm | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
+| M1 Baseline | Sat 3pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
+| M2 Data + SFT | Sat 3pm → 8pm | OS-Atlas slice cleaned, deduped against SSv2, and split (start in parallel with M1); Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
+| M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Hard stop at ~1am. **Gate D2: keep GRPO only if dev improves.** |
+| M4 Agent | Sat afternoon → Sat night (parallel) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with Lightning; base vs. tuned grounder runs; click-overlay traces. |
+| M5 Ship | Sun 7am → 10:30am | Final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |
+
+**Budget vs. clock:** running the H200 nonstop from now until 11am Sunday would
+use almost the whole $160 at ~$6.90/hr. Stop it whenever no job is running,
+including overnight once GRPO and the evals finish.
 
 ## Workstreams (for dividing the work)
 
@@ -97,8 +104,9 @@ it.
 - **D1 base model:** use the higher dev/SSv2 score that still leaves headroom (the
   icon splits). Prefer the model whose TRL GRPO smoke test passes. If it's a tie, take
   Qwen3.5-2B (best-documented single-H200 recipe).
-- **D2 GRPO:** go only if the smoke test runs at ≤ ~35 s/step and ≥ 8 GPU-hours remain.
-  Keep GRPO only if dev accuracy beats SFT. Otherwise ship SFT and say so.
+- **D2 GRPO:** go only if SFT finished by ~9pm Saturday and the smoke test runs at
+  ≤ ~35 s/step, so the run can finish by ~1am. Keep GRPO only if dev accuracy beats
+  SFT. Otherwise ship SFT and say so.
 - **Demo hardware:** run Lightning NVFP4 and the grounder co-resident on the H200.
   Stop all training first.
 

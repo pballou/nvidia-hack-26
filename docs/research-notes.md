@@ -36,9 +36,10 @@ and the official rules on the [Luma page](https://luma.com/nvidia-redhat-small-m
     feedback loops.
   - "**Best Model Improvement** With NVIDIA NeMo Gym": the model has to get *better*
     through Gym, not just be evaluated in it.
-- **Deadline:** the event ends **Sunday 2026-10-18, 4:00pm EDT** (Luma `endDate`).
-  Submit through the Airtable form linked from the Notion page. Teams have at most 3
-  members.
+- **Deadline:** the team's deadline for everything is **Sunday 2026-10-18,
+  11:00am EDT**, when demo videos are due. The event itself ends at 4:00pm EDT (Luma
+  `endDate`). Submit through the Airtable form linked from the Notion page. Teams
+  have at most 3 members.
 
 ## 2. Grounding-model candidates (≤ 3B)
 
@@ -95,6 +96,7 @@ is text-only.
 There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
 
 **`verify()` contract:**
+
 - It receives the original JSONL row plus `response`; `response.output` is the whole
   trajectory.
 - Custom row fields (e.g. `bbox`) survive only if they're declared on your
@@ -103,6 +105,7 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
   metrics.
 
 **`simple_agent` loop:**
+
 - It stops when the model replies without a tool call, or when `max_steps` is hit
   (the default is unlimited).
 - A `done` tool does **not** end the loop.
@@ -110,10 +113,12 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
   with an `error` field.
 
 **Session state:**
+
 - State is keyed by `request.session["session_id"]`.
 - Stateful servers need `num_workers: 1` and must release resources inside `verify()`.
 
 **Eval tooling:**
+
 - `gym eval run` writes rollouts, materialized inputs, `_aggregate_metrics.json` and
   failures.
 - `gym eval profile` gives per-task pass rates (needs `--num-repeats` > 1).
@@ -122,6 +127,7 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
 - Use `compute_subset_metrics` for per-platform and per-text/icon breakdowns.
 
 **Gotchas:**
+
 - **One exception in a tool or `verify()` aborts the whole `gym eval run`.** Catch
   everything; return `reward=0, mask_sample=True`.
 - Base64 screenshots get copied into the materialized-input and rollout files. Prefer
@@ -137,6 +143,7 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
   past it; for example, `drop_unrepresentable_request_fields` exists only on `main`.
 
 **Failure analysis with BLADE** ([tutorial](https://docs.nvidia.com/nemo/gym/tutorials/evaluation-tutorials/blade-analysis-skill)):
+
 - BLADE is an agent skill, vendored in `.agents/skills/nemo-gym-blade-analysis`.
 - Point it at the artifacts from a `gym eval run` (rollouts JSONL,
   `_aggregate_metrics.json`, reward profile, config).
@@ -160,6 +167,7 @@ There's no ScreenSpot env in Gym, so ours could be an upstream contribution.
 | NeMo Automodel VLM SFT | Mostly ≥ 4B recipes | — |
 
 TRL notes:
+
 - TRL's VLM + vLLM GRPO test is skipped upstream (no CI), so **run a 20-step smoke test
   before relying on it**. The fallback is `use_vllm=False`, which is fine for outputs
   of ≤ 48 tokens.
@@ -167,6 +175,7 @@ TRL notes:
 - Set `vllm_max_model_length`; the default allocates the full 262k context.
 
 **Gym-native improvement loop** (the "model improvement with Gym" story):
+
 1. Run `gym eval run --num-repeats 8 --temperature 1.0` on training rows (never on
    ScreenSpot-v2).
 2. Run `gym eval profile`.
@@ -177,6 +186,7 @@ TRL notes:
 ## 5. Data
 
 **ScreenSpot-v2** ([HF](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2), Apache-2.0):
+
 - 1,272 samples on 730 screenshots: mobile 501, desktop 334, web 437; text 718, icon 554.
 - `bbox` is **[x, y, w, h] in pixels**. Convert to xyxy; a hit is inclusive.
 - Files are `screenspot_{mobile,desktop,web}_v2.json` and `screenspotv2_image.zip` (1.33 GB).
@@ -185,6 +195,7 @@ TRL notes:
 - ScreenSpot-Pro (1,581 samples, xyxy pixels, MIT) is an optional harder benchmark.
 
 **OS-Atlas-data** ([HF](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data), Apache-2.0 card; 816 GB): our training pool.
+
 - Rows are `{img_filename, instruction, bbox}`. `bbox` is `[left, top, right, bottom]`
   normalized to [0, 1]. Desktop and AndroidWorld rows also have `data_type`.
 - Small, self-contained subsets:
@@ -208,6 +219,7 @@ TRL notes:
   hashing before training.
 
 **License-clean complements** if needed:
+
 - [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) (MIT, desktop, ~1.15M
   LLM-written instructions).
 - MolmoPoint-GUISyn.

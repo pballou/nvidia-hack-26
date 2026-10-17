@@ -69,6 +69,7 @@ mkdir -p ~/.local/bin && mv brev ~/.local/bin/ && chmod 755 ~/.local/bin/brev
 </details>
 
 **Log in:**
+
 1. Brev console → your avatar → Settings → **CLI**. Copy the
    `brev login --token ...` line and run it in your own terminal. Don't paste the
    token into chat or a coding agent.
