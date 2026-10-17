@@ -400,9 +400,12 @@ def render_method(stats: dict) -> str:
         f"- `keep=false` must give a `drop_reason` in {', '.join(f'`{r}`' for r in validate.DROP_REASONS)} "
         "(common synonyms are mapped onto these).",
         f"- Retries: one request carries up to {run.get('batch_size')} rows. Rows whose item is missing or invalid, or "
-        "every row when the reply is not valid JSON or was cut off (`finish_reason=length`), are re-asked one row per "
-        "request, up to 2 more times (3 attempts per invocation). Rows still invalid are dropped as "
-        f"`drop_reason={validate.LLM_ERROR}`.",
+        "every row when the reply is not valid JSON or was cut off (`finish_reason=length`), are re-asked up to 2 "
+        "more times (3 attempts per invocation): "
+        + ("together, in one request per failed reply (its failed rows only, renumbered from k=1; `--group-retries`)"
+           if run.get("group_retries") else "one row per request")
+        + f". Rows still invalid are dropped as `drop_reason={validate.LLM_ERROR}`."
+        + (f" Requests were paced client-side at {run.get('rpm')} per minute (`--rpm`)." if run.get("rpm") else ""),
         "- Attempt accounting: every failed attempt is stored per row, so a row's `attempts` counts all its LLM "
         "attempts across invocations (an abort mid-retry, `--retry-errors`), and a row that ever failed is never "
         "counted as valid on the first try.",

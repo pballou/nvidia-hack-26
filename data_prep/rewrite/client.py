@@ -138,7 +138,8 @@ class LightningClient:
     def __init__(self, endpoint: Endpoint | str, *, api_key: str | None = None, base_url: str | None = None,
                  model: str | None = None, concurrency: int = 6, max_attempts: int = 6, backoff_base: float = 2.0,
                  backoff_max: float = 60.0, timeout_s: float = 300.0, response_format: str = "json_object",
-                 transport: httpx.AsyncBaseTransport | None = None, sleep=asyncio.sleep):
+                 transport: httpx.AsyncBaseTransport | None = None, sleep=asyncio.sleep, rpm: float | None = None,
+                 rate_limit_min_delay: float = 10.0):
         if response_format not in RESPONSE_FORMATS:
             raise ValueError(f"response_format must be one of {RESPONSE_FORMATS}, got {response_format!r}")
         if concurrency < 1 or max_attempts < 1:
@@ -156,6 +157,8 @@ class LightningClient:
         self._http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(timeout_s), headers=headers)
         self._sem = asyncio.Semaphore(concurrency)
         self._sleep = sleep
+        self.rpm, self.rate_limit_min_delay = rpm, rate_limit_min_delay
+        self._pace_lock, self._next_start = asyncio.Lock(), 0.0
         self._rng = random.Random()
         self.stats = {"requests": 0, "http_attempts": 0, "retries": 0, "by_status": {}, "prompt_tokens": 0,
                       "completion_tokens": 0, "downgrades": [], "transport_errors": 0, "fatal_errors": 0, "rate_limit": {}}
@@ -195,6 +198,7 @@ class LightningClient:
             attempts += 1
             self.stats["http_attempts"] += 1
             retry_after = None
+            await self._pace()
             try:
                 resp = await self._http.post(self.url, json=self._body(messages, json_schema, mode))
             except RETRYABLE_EXCEPTIONS as e:  # timeouts, connection errors, undecodable bodies
@@ -215,6 +219,8 @@ class LightningClient:
                 elif _retryable(status):
                     error = f"HTTP {status}: {self._scrub(resp.text)[:300]}"
                     retry_after = _retry_after(resp.headers.get("retry-after"))
+                    if status == 429 and retry_after is None:  # build.nvidia.com sends no Retry-After
+                        retry_after = self.rate_limit_min_delay * (failures + 1)
                 else:
                     self.stats["fatal_errors"] += 1
                     raise FatalHTTPError(status, self._scrub(resp.text)[:300], self.url, self._hint(status))
@@ -227,6 +233,16 @@ class LightningClient:
                 delay = max(delay, retry_after)
             self.stats["retries"] += 1
             await self._sleep(delay)
+
+    async def _pace(self) -> None:
+        """Space request starts (every HTTP attempt) at least 60/rpm seconds apart across the whole client."""
+        if not self.rpm:
+            return
+        async with self._pace_lock:
+            now = time.monotonic()
+            if self._next_start > now:
+                await self._sleep(self._next_start - now)
+            self._next_start = max(now, self._next_start) + 60.0 / self.rpm
 
     def _mode(self, json_schema) -> str:
         mode = self.response_format

@@ -750,3 +750,15 @@ def test_select_targets_splits_filter():
     assert selected and {r["split"] for r in selected} == {"train"}
     all_selected, _ = rewrite.select_targets(rows)
     assert len(all_selected) > len(selected) and {r["id"] for r in selected} <= {r["id"] for r in all_selected}
+
+
+def test_group_retries_reasks_a_failed_batch_in_one_request(manifest, tmp_path):
+    out, llm = tmp_path / "out", sent_rows(manifest)
+    handler = fake.make_handler(malformed_first=1)
+    stats = run_rewrite(manifest, out, handler, "--batch-size", 4, "--concurrency", 1, "--group-retries")
+    assert stats["exit_code"] == 0 and stats["pending_rows"] == 0 and stats["run"]["group_retries"] is True
+    recs = cached(out, [r["id"] for r in llm])
+    assert all(recs[r["id"]]["attempts"] == 2 and not recs[r["id"]]["first_try_valid"] for r in llm[:4])
+    assert [len(c["items"]) for c in handler.calls[1:2]] == [4]  # one retry request for the 4 failed rows, k = 1..4
+    assert stats["requests"]["this_run"]["by_kind"] == {"batch": math.ceil(len(llm) / 4), "retry": 1}
+    assert "together, in one request per failed reply" in (out / "METHOD.md").read_text(encoding="utf-8")

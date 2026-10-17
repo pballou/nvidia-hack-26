@@ -148,12 +148,12 @@ def test_retry_after_smaller_than_backoff_keeps_backoff():
 
 def test_exponential_backoff_full_jitter_and_cap():
     h = Script(*[httpx.Response(429)] * 4)
-    c, sleep = make(h, backoff_base=2.0, backoff_max=5.0)
+    c, sleep = make(h, backoff_base=2.0, backoff_max=5.0, rate_limit_min_delay=0.0)
     c._rng = types.SimpleNamespace(uniform=lambda a, b: b)  # upper bound of the jitter window
     [comp] = run(c, (MSGS, None))
     assert sleep.delays == [2.0, 4.0, 5.0, 5.0] and comp.http_attempts == 5
     h2 = Script(*[httpx.Response(429)] * 3)
-    c2, sleep2 = make(h2)
+    c2, sleep2 = make(h2, rate_limit_min_delay=0.0)
     run(c2, (MSGS, None))
     assert len(sleep2.delays) == 3 and all(0 <= d <= cap for d, cap in zip(sleep2.delays, (2, 4, 8)))
 
@@ -458,3 +458,20 @@ def test_load_api_key_default_path_is_cwd(dotenv, tmp_path, monkeypatch):
     dotenv(f"export {ENV}=cwd-value\n")
     monkeypatch.chdir(tmp_path)
     assert load_api_key(ENV) == "cwd-value"
+
+
+def test_429_without_retry_after_waits_at_least_the_rate_limit_floor():
+    h = Script(httpx.Response(429), httpx.Response(429), httpx.Response(503))
+    c, sleep = make(h, rate_limit_min_delay=10.0)
+    c._rng = types.SimpleNamespace(uniform=lambda a, b: 0.0)
+    run(c, (MSGS, None))
+    assert sleep.delays[:2] == [10.0, 20.0] and sleep.delays[2] == 0.0  # the floor is for 429 only
+
+
+def test_rpm_paces_request_starts():
+    h = Script(*[httpx.Response(429)] * 2)
+    c, sleep = make(h, rpm=30.0, rate_limit_min_delay=0.0)
+    c._rng = types.SimpleNamespace(uniform=lambda a, b: 0.0)
+    c._next_start = __import__("time").monotonic() + 1.5  # as if a request had just started
+    run(c, (MSGS, None))
+    assert sleep.delays and 1.0 < sleep.delays[0] <= 1.5

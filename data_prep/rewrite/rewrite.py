@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--raw-sources", type=_csv, default=(), help="extra raw-label sources, comma-separated")
     ap.add_argument("--natural-sources", type=_csv, default=(), help="extra natural sources, comma-separated")
     ap.add_argument("--max-consecutive-transport-errors", type=_positive, default=5)
+    ap.add_argument("--rpm", type=float, default=None, help="client-side cap on request starts per minute (hosted "
+                    "build.nvidia.com rate-limits with 429 and no Retry-After)")
+    ap.add_argument("--max-attempts", type=_positive, default=6, help="HTTP attempts per request (429/5xx/timeouts)")
+    ap.add_argument("--group-retries", action="store_true", help="re-ask a reply's failed rows together in one "
+                    "request (k renumbered from 1) instead of one request per row; ~10x fewer retry requests")
     ap.add_argument("--max-consecutive-empty-replies", type=_positive, default=MAX_EMPTY_REPLIES,
                     help="stop (exit 2, rows stay pending) after this many replies in a row with no valid item")
     ap.add_argument("--allow-unofficial-model", action="store_true",
@@ -245,9 +250,9 @@ async def process(pending, metas, client, store, ctx, *, batch_size, concurrency
              **({} if status == "ok" else {"sample_text": comp.text[:1000]})})
         if ok:
             state["empty_streak"] = 0
-        elif kind == "batch" or not payload_ok or state["empty_streak"]:
+        elif kind != "single" or not payload_ok or state["empty_streak"]:
             state["empty_streak"] += 1
-        records, failed = [], []
+        records, failed, retry = [], [], []
         for k, row in enumerate(rows, 1):
             n_before, past = past_by_id.get(row["id"], (0, []))
             if k in ok:
@@ -257,12 +262,17 @@ async def process(pending, metas, client, store, ctx, *, batch_size, concurrency
             errs = [*past, str(errors.get(k, "missing"))[:300]]
             failed.append(history_record(row, n_before + 1, errs, ctx))
             if attempt < MAX_ATTEMPTS:
-                push(0, ("single", [row], attempt + 1, {row["id"]: (n_before + 1, errs)}))
+                retry.append((row, (n_before + 1, errs)))
             else:
                 norm = {"keep": False, "rewritten": None, "drop_reason": validate.LLM_ERROR}
                 rec = make_record(row, ms[k - 1], norm, attempts=n_before + 1, errors=errs,
                                   warnings=warns.get(k, []), ctx=ctx)
                 (state["held"] if state["empty_streak"] else records).append(rec)
+        if retry and ctx.get("group_retries") and len(retry) > 1:
+            push(0, ("retry", [r for r, _ in retry], attempt + 1, {r["id"]: h for r, h in retry}))
+        else:
+            for r, h in retry:
+                push(0, ("single", [r], attempt + 1, {r["id"]: h}))
         if failed:
             store.put_history(ctx["pv"], failed)
         save(records)
@@ -432,7 +442,9 @@ def build_stats(*, ctx, args, rows, selected, targets, records, req_this, req_al
                 "dry_run": bool(args.dry_run), "limit": limit, "splits": list(args.splits or ()), "note": args.note or "",
                 "raw_sources": sorted(meta.RAW_LABEL_SOURCES - extra_natural | extra_raw),
                 "natural_sources": sorted(meta.NATURAL_SOURCES - extra_raw | extra_natural),
-                "select_pct": meta.SELECT_PCT, "style_split": [list(s) for s in meta.STYLE_SPLIT]},
+                "select_pct": meta.SELECT_PCT, "style_split": [list(s) for s in meta.STYLE_SPLIT],
+                "group_retries": bool(getattr(args, "group_retries", False)), "rpm": getattr(args, "rpm", None),
+                "max_attempts_http": getattr(args, "max_attempts", None)},
         "manifest": {"path": str(Path(args.manifest).resolve()), "sha256": file_sha256(args.manifest), "rows": len(rows),
                      "rows_by_source": _counts(r["source"] for r in rows),
                      "selected_by_source": _counts(r["source"] for r in selected), "targets": len(targets)},
@@ -542,6 +554,7 @@ async def run(args, *, transport=None, sleep=asyncio.sleep, now=None) -> dict:
            "model": model, "model_label": args.model_label or model, "endpoint": endpoint.name,
            "base_url": (args.base_url or endpoint.base_url).rstrip("/"), "now": now,
            "concurrency": args.concurrency or client_mod.DEFAULT_CONCURRENCY.get(endpoint.name, 6),
+           "group_retries": bool(args.group_retries),
            "command": shlex.join(["python", SCRIPT, *(sys.argv[1:] if argv is None else argv)])}
     allow_unofficial = bool(args.allow_unofficial_model)
     out = Path(args.out)
@@ -564,7 +577,8 @@ async def run(args, *, transport=None, sleep=asyncio.sleep, now=None) -> dict:
             return _fail(f"{endpoint.api_key_env} is not set (environment or ./.env; run from the repo root)")
         client = client_mod.LightningClient(endpoint, api_key=api_key, base_url=args.base_url, model=args.model,
                                             concurrency=ctx["concurrency"], response_format=args.response_format,
-                                            transport=transport, sleep=sleep)
+                                            transport=transport, sleep=sleep, rpm=args.rpm,
+                                            max_attempts=args.max_attempts)
         try:
             root = client_mod.served_root(await client.list_models(), model)
             hosted = is_nvidia_hosted(ctx["base_url"])
