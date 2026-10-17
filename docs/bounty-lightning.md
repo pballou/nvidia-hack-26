@@ -244,8 +244,9 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 | Sat, Gym acceptance³ | `base` | off | 5 rows (4 easy + 1 medium) × 1 | 3/5 | 2/5 (1 false claim) | 1/43 | n=1, not final |
 | Sat, interactive, all tasks⁴ | `base` | off | 12 × 1 | 5/12 | 7/12 | 0/109 | n=1 |
 | Sat, interactive, all tasks⁴ | `base` | retry | 12 × 1 | 6/12 | 7/12 | 1/96 | n=1 |
-| Sun, Gym | `base` | off | 12 × 3 | TBD | TBD | TBD | final (`agent-v4`) |
-| Sun, Gym | `grounder` (final) | off | 12 × 3 | TBD | TBD | TBD | final (`agent-v4`) |
+| Sat night, Gym⁵ | `base` | off | 12 × 3 | 18/36 | 24/36 (26 match, 8 false) | 10/259 | reportable (`agent-v4`) |
+| Sat night, Gym⁵ | `grounder` = sft-template | off | 12 × 3 | **22/36** | 25/36 (31 match, 4 false) | 6/234 | reportable (`agent-v4`) |
+| Sun, Gym (if the overnight adapter beats sft-template on dev) | `grounder` (final) | off | 12 × 3 | TBD | TBD | TBD | final |
 | Sun, interactive | `grounder` | off vs retry | 12 × TBD | TBD | TBD | TBD | thinking ablation |
 
 All Saturday reads used prompt `agent-v3` (see §4.2) and the task checks from before sandbox
@@ -264,6 +265,12 @@ other three runs report the official BF16. `runs/` isn't committed, and neither 
 
 ³ Logged in `docs/runs.md` (Sat 16:43; artifacts in `results/acceptance_base/` on Patrick's Mac,
 not committed), `reportable=yes`. The false claim was `high-contrast` (reward 0, success claimed).
+
+⁵ `docs/runs.md` Sat 18:45: official BF16 Lightning, sandbox `68c7671`, the same rows and planner
+in both conditions, `base` screen descriptions in both, 0 masked. With the tuned grounder,
+no-change actions fell 83 → 45 and failed actions 10 → 0 (CI excludes 0), and Lightning's done
+claims matched the sandbox 31/36 vs 26/36. `gym eval compare`: reward +0.111, 95% CI
+[−0.06, +0.28] (n=36: suggestive, not significant); 3 fail→pass, 1 pass→fail.
 
 ⁴ `$PY scripts/run_agent_tasks.py --tasks sandbox/tasks.json --sandbox-url http://127.0.0.1:8091
 --grounder base --thinking off|retry` (`runs/summary_20261017-165130.json` and

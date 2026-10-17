@@ -22,6 +22,36 @@ Lightning, the real sandbox, and grounder choices made on the dev split.
 
 ## Agent (sandbox tasks, verified from sandbox state)
 
+### Gym `web_agent`: base vs SFT grounder (Sat 18:45–19:25, reportable)
+
+All 12 sandbox tasks × 3 repeats, the same rows and planner for both conditions: official BF16
+Lightning (thinking off), sandbox `68c7671` (stricter checks), prompt `agent-v4`, start screens
+from Qwen3.5-2B `base`, screen descriptions `base` in both. Grounder `base` vs `grounder` =
+`sft-template` LoRA, one vLLM process on `:8001`. 0 masked, 0 VLM infra errors, 0 stale start
+screens. `gym eval compare`: 3 fail→pass, 1 pass→fail.
+
+| | `base` grounder | `grounder` (sft-template) |
+| --- | --- | --- |
+| Verified success | 18/36 (50%) | **22/36 (61%)** |
+| Claim matches verified | 26/36 (72%) | **31/36 (86%)** |
+| False success claims | 8 | **4** |
+| No-change actions | 83 | **45** |
+| Failed actions (grounding/browser) | 10 | **0** |
+| Tool-call validity | 249/259 (96%) | 228/234 (97%) |
+| Mean steps | 7.2 | 6.5 |
+
+- **Significance:** `mean/reward` +0.111, 95% CI [−0.06, +0.28]: suggestive, not significant
+  at n=36. `n_failed_actions` −0.28/episode, CI [−0.52, −0.04]: significant.
+- **Per task (verified/3, base → grounder):** text-size-large 0→2 (the L-vs-M grounding miss),
+  sms-billing-off 0→2, message-support-meter 1→2, high-contrast 2→1. Unchanged: download,
+  mark-all-read, pay-50, report-outage, autopay (3→3); max-usage-month (canvas),
+  star-landlord-message (scroll), stop-promotions (scroll) stay 0→0.
+- **Latency:** not comparable; Kyle's SFT shared the GPU during the grounder run.
+- **Artifacts (T2's Mac):** `results/agent_v4_sft_template/` (rollouts, aggregate metrics,
+  run_info, `agent_compare/compare_report.md`). BLADE: TBD.
+
+### First reads (Sat afternoon, prompt `agent-v3`, checks before `68c7671`; absolute numbers optimistic)
+
 First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
 
 | Grounder | Verified | Claimed | Notes |
@@ -46,6 +76,7 @@ First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
   planner sometimes can't see that its action worked. The pilot-adapter run did
   claim it (6 steps). Tracked in the claimed-vs-verified column. This is useful
   material for BLADE and the Lightning write-up.
+
 ### All 12 sandbox tasks, base grounder (2026-10-17 ~17:05, n=1 per task per mode, sequential)
 
 | Metric | Thinking off | Thinking on retry |
