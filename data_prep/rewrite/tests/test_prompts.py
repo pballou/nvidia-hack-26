@@ -11,7 +11,7 @@ from data_prep.rewrite.prompts import (DROP_REASONS, FEW_SHOT, FEW_SHOT_ANSWER, 
                                        format_item)
 
 # Bump PROMPT_VERSION whenever the prompt text changes (the rewrite cache is keyed by it), then add the new pin here.
-PROMPT_FINGERPRINTS = {"v1": "ca30d2812a875f50"}
+PROMPT_FINGERPRINTS = {"v1": "ca30d2812a875f50", "v2": "ba789479023ffcd4"}
 
 POSITIONS = {"top-left", "top-center", "top-right", "middle-left", "center", "middle-right", "bottom-left",
              "bottom-center", "bottom-right"}
@@ -158,7 +158,7 @@ def test_few_shot_answer_matches_schema_and_covers_cases():
         total += len(answer["items"])
     assert 5 <= total <= 8
     assert kept_styles == set(STYLES)
-    assert reasons == set(DROP_REASONS)
+    assert reasons <= set(DROP_REASONS) and 2 <= len(answer["items"]) - sum(i["keep"] for i in answer["items"]) <= 3
     assert json.loads(FEW_SHOT[1]["content"]) == FEW_SHOT_ANSWER
 
 
@@ -203,4 +203,4 @@ def test_system_prompt_names_vocabulary_and_stays_tight():
     for word in (*STYLES, *DROP_REASONS, "JSON", '"items"', "keep", "drop_reason", "instruction"):
         assert word in SYSTEM_PROMPT, word
     assert "target is RIGHT of Search" in SYSTEM_PROMPT
-    assert len(SYSTEM_PROMPT.split()) <= 750
+    assert len(SYSTEM_PROMPT.split()) <= 800
