@@ -151,10 +151,12 @@ log with per-platform splits: [docs/results.md](docs/results.md); commands: [doc
 | --- | --- | --- |
 | Base | 76.4% | 86.3% (text 92.5, icon 78.1) |
 | SFT, raw labels (`sft-template`: LoRA r16, 1 epoch on 18,652 rows) | 85.66% | 89.07% (text 92.3, icon 84.8) |
-| SFT, Lightning-rewritten instructions (`sft-lightning`: 18,299 rows, same config and seed) | 86.27% | TBD |
+| SFT, Lightning-rewritten instructions (`sft-lightning`: 18,299 rows, same config and seed) | 86.27% | 88.10% (text 93.0, icon 81.7) |
 
 `sft-lightning` won the round-0 pick on dev (the template scored 85.86% in the same harness;
-dev run-to-run noise is about 0.2 points), so the overnight loop starts from it.
+dev run-to-run noise is about 0.2 points), so the overnight loop starts from it. On the held-out
+ScreenSpot-v2-clean it scores 0.97 points below the template, so the rewrite ablation is mixed. We
+choose checkpoints on dev only and report both.
 
 **Browser tasks** (Gym `web_agent`, 12 sandbox tasks × 3 repeats, official BF16 Lightning;
 only the grounder changes): verified success 18/36 with `base` vs **22/36** with

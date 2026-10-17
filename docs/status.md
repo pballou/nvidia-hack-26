@@ -50,7 +50,10 @@ If this page disagrees with them, they win.
   | --- | --- | --- |
   | Base | 76.4% | 86.3% |
   | SFT template (one epoch on 18,652 raw-label rows) | 85.66% (85.86 in the loop harness) | 89.07% |
-  | SFT rewritten-data (18,299 rows, Lightning-rewritten instructions) | **86.27%** (loop harness) | TBD |
+  | SFT rewritten-data (18,299 rows, Lightning-rewritten instructions) | **86.27%** (loop harness) | 88.10% |
+
+  The Lightning-rewrite ablation is mixed: +0.41 on dev, which picks the round-0 checkpoint per protocol, but −0.97
+  on ScreenSpot-v2-clean (icons 81.7 vs 84.8). The overnight loop starts from `sft-lightning`.
 
   On ScreenSpot-v2-clean, icons went from 78.1% to 84.8%.
 - **Night-loop rehearsal:** GRPO round 1 (111-row pool, 30 steps) gave +0.83 on dev. Dev
