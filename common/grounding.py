@@ -47,23 +47,31 @@ _GROUNDING_PROMPTS = {
     ),
 }
 
+# Screen description for the text-only planner (agent/observation.py). Concrete example
+# lines matter: with a "<type>" placeholder Qwen3.5-2B copied it literally, and Qwen3-VL-2B
+# skipped icon-only buttons (checked on the fake sandbox, 2026-10-17).
 SUMMARY_PROMPT = """\
-Describe this screenshot of an app so that someone who cannot see it can operate it.
-Use plain text, at most 40 lines, in exactly these sections:
+Describe this app screenshot for someone who cannot see it, so they can tell a helper what to click.
+Plain text, at most 40 lines, exactly these four sections:
 
-PAGE: the page or app title, then the main headings, in reading order.
-ELEMENTS: one line per visible interactive element (button, icon button, link, \
-input, toggle, checkbox, tab, menu item, chart bar, map region), most important first:
-- <type>: <visible text, or a short visual description if it has no text> @ <location>
-  where <location> is one of top-left, top, top-right, left, center, right, \
-bottom-left, bottom, bottom-right. Add the row or section it belongs to when there \
-are several similar elements.
-STATE: selected tabs, checked or toggled-on controls, current values of inputs and \
-segmented controls.
-OVERLAYS: any open dialog, menu, dropdown, toast or banner and its text; "none" if \
-there are none.
+PAGE: the app or page title and the main headings, top to bottom, on one line.
+ELEMENTS: every visible clickable or editable element, one per line, top to bottom. Include \
+icon-only buttons (describe the icon's shape), links, buttons, tabs, inputs, toggles, \
+checkboxes, menu items, list rows and chart bars. Format: "- <kind>: <its text, or the icon \
+shape if it has no text> (<the label or row it belongs to>) @ <position>", where position is \
+top-left, top, top-right, left, center, right, bottom-left, bottom or bottom-right. Examples:
+- icon button: bell icon @ top-right
+- toggle: off (High contrast) @ center
+- button: Download (September row) @ right
+- input: "Sam Rivera" (Display name) @ center
+STATE: what is selected, checked, switched on, or filled in; "none" if nothing.
+OVERLAYS: any open dialog, menu, dropdown, toast or banner and its text; "none" if none.
 
-Describe only what is visible. Do not guess hidden content or invent text."""
+Describe only what is visible. Never invent text."""
+
+# Greedy decoding alone makes Qwen3-VL-2B loop on sparse screens (the same 5 lines until
+# max_tokens); a mild frequency penalty fixes it without hurting Qwen3.5-2B.
+SUMMARY_SAMPLING = {"temperature": 0.0, "frequency_penalty": 0.3, "max_tokens": 600}
 
 # "point_2d": [x, y]  (also tolerates single quotes and missing quotes)
 _POINT_KEY_RE = re.compile(
