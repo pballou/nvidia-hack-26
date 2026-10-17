@@ -107,7 +107,8 @@ async def run_task(request: str, *, start_url: str, cfg: AgentConfig,
   viewport CSS px.
 - **Models are fixed: Lightning (30B), one VLM (Qwen3.5-2B + LoRA), and NVIDIA
   Parakeet TDT 0.6B for local speech-to-text** (approved 2026-10-17). Card counts:
-  30 + 2 + 0.6 = **32.6B ≤ 33B** (HF counts: 30 + 2.27 + 0.6 = 32.87B, still within
-  the cap). Add no other models: no judges, drafters or cloud speech APIs.
+  30 + 2 + 0.6 = **32.6B ≤ 33B**. The rule is "official parameter count published
+  in the model developer's model card". Raw HF tensor totals differ (Lightning
+  ~31.6B), so report card counts only. Add no other models: no judges, drafters or cloud speech APIs.
 - **Pins:** Playwright `1.62.0` (matches Gym's browser build), Python 3.13 (shared
   with `.venv-gym`), `nemo-gym==0.7.0`.

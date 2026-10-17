@@ -31,8 +31,10 @@ a user describes what they want, and the agent does it from pixels alone.
   - Lightning's card says 30B, so the grounding VLM must be ≤ 3B. No separate judge
     LLM.
   - **System total:** Lightning 30B + Qwen3.5-2B (card "2B"; HF 2.27B) + NVIDIA
-    Parakeet TDT 0.6B (local speech-to-text for voice input) = **32.6B by card**
-    (32.87B by HF count), ≤ 33B. Add no other models.
+    Parakeet TDT 0.6B (local speech-to-text for voice input) = **32.6B by model-card
+    counts**, ≤ 33B. The rule uses card counts. Raw HF tensor totals (Lightning
+    31.58B incl. extras) would exceed 33B, so always report card counts. Add no other
+    models.
   - **No speculative decoding of any kind:** not DSpark, not DFlash, not Lightning's
     built-in MTP (no `--speculative-config`). Don't copy serve commands from
     Lightning's model card, because its recipes enable DSpark.
