@@ -15,7 +15,7 @@ Rows are built by `data_prep/gym_rows.py` and stay on the box, never in git. Onl
 
 | Set | Command | Rows |
 | --- | --- | --- |
-| OS-Atlas dev (checkpoint selection) | `python -m data_prep.gym_rows manifest --manifest <slice>/manifest.jsonl --split dev --out /home/ubuntu/data/gym/os_atlas_dev.jsonl` | 5% of screenshots |
+| OS-Atlas dev (checkpoint selection) | `python -m data_prep.gym_rows manifest --manifest <slice>/manifest.jsonl --split dev --out /home/ubuntu/data/gym/os_atlas_dev.jsonl` | 969 (5% of screenshot groups per source) |
 | ScreenSpot-v2-clean (held-out test) | `python -m data_prep.gym_rows ssv2 --out /home/ubuntu/data/gym/ssv2_clean.jsonl` | 1,244 |
 
 Each row carries the canonical fields `verify()` needs (`bbox`, `img_w`, `img_h`,

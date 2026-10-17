@@ -44,7 +44,7 @@ a user describes what they want, and the agent does it from pixels alone.
   - **Never run the base and the fine-tuned VLM as separate instances.** Separate
     instances count as two models (30 + 2 + 2 > 33).
   - **One loaded model with a LoRA adapter switched per request counts as one
-    model (32B total).** That's our design: served name `base` = adapter off,
+    model (32.6B total with Parakeet).** That's our design: served name `base` = adapter off,
     `grounder` = adapter on, from one vLLM process.
   - Keep the screen-summary model name configurable (`base` or `grounder`). The
     fallback is the tuned model for both roles.
@@ -118,8 +118,8 @@ a user describes what they want, and the agent does it from pixels alone.
   - No padding, cropping, stretching, or manual mean/std.
   - Data prep, Gym rows, TRL, vLLM (`--mm-processor-kwargs`) and the MVP all use the
     same cap. Details: docs/plan.md "Decisions so far".
-- **Coordinates:** Qwen3-VL emits points on a relative 0–1000 grid. Qwen3.5 is
-  assumed to do the same; stream A verifies this at the M1 baseline.
+- **Coordinates:** Qwen3-VL emits points on a relative 0–1000 grid. Qwen3.5 does
+  the same; the M1 baseline confirmed it (base 86.3% on SSv2-clean, 99.6% parsed).
   - Prompts, output parsing and coordinate conversion live only in
     `common/grounding.py`; everything imports from there.
   - Spot-check visually after any conversion change.
@@ -158,7 +158,7 @@ a user describes what they want, and the agent does it from pixels alone.
   Gym checkout, which breaks the venv builds. A server that needs `common/`,
   `agent/` or `sandbox/` adds the repo root to `sys.path` at the top of its
   `app.py`, with a comment saying why (`resources_servers/web_agent/app.py` does
-  this). Charlie's `gui_grounding` should do the same to import
+  this). `resources_servers/gui_grounding/app.py` does the same to import
   `common/grounding.py`.
 - **Failure analysis:** after every comparable pair of eval runs (e.g. base vs.
   tuned), run the **BLADE** skill (`.agents/skills/nemo-gym-blade-analysis`, also

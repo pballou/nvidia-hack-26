@@ -39,14 +39,15 @@ Then open http://127.0.0.1:8095.
 | Route | Returns |
 | --- | --- |
 | `GET /`, `GET /static/*` | `console/static/index.html` and assets |
-| `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "base", thinking: "retry", lightning: "local"}}` (`--lightning` sets the last one) |
+| `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "base", thinking: "retry", lightning: "local"}, asr: {available, model, label, error?}}` (`--lightning` sets `defaults.lightning`) |
 | `GET /api/tasks` | `[{id, request, start_path, tags, steps_min}]` from `sandbox/tasks.json` (no checks) |
-| `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local}}` → `{run_id: "c-<hex>", sid, start_url}`. Errors: 400 `{error}` (validation), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
+| `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local}, voice?: {text, model, latency_ms, duration_s}}` (`voice` is logged in `console.json`, never sent to the agent) → `{run_id: "c-<hex>", sid, start_url}`. Errors: 400 `{error}` (validation), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
 | `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, options, agent_run_id, result, verdict, n_events}`. `n_events` counts stream messages (it equals the last `id`). |
 | `GET /api/runs/{run_id}/events` | SSE stream (below) |
 | `POST /api/runs/{run_id}/stop` | `{ok: true}`. Idempotent; waits up to ~10 s for the agent to stop. |
 | `POST /api/transcribe` | Voice input. Body: a 16 kHz mono PCM16 WAV, either raw `audio/wav` or multipart field `audio`, 0.2–60 s → `{text, duration_s, latency_ms, model}`. Errors: 400 bad audio, 413 too large, 503 engine unavailable. |
 | `GET /runs/{agent_run_id}/{file}` | Trace PNG; `file` must match `step_XX.png` or `step_XX_overlay.png`. |
+| `GET /logs`, `GET /api/logs/runs[/{run_id}[/download]]` | The Logs page and its API (`console/logs.py`): every run and event from `runs/<id>/events.jsonl` plus `console.json` |
 
 Unknown runs return 404 `{error}`.
 
@@ -111,8 +112,9 @@ written from screenshots of the real pages. Each step has:
 - the tool call, with the target description in the grounder's style (short, visual,
   positional, e.g. "the download icon at the right end of the September 2026 row");
 - plain-words reasoning;
-- the screen description the VLM would write afterwards, in `SUMMARY_PROMPT`'s
-  PAGE / ELEMENTS / STATE / OVERLAYS sections.
+- the screen description the VLM would write afterwards, in PAGE / ELEMENTS / STATE /
+  OVERLAYS sections (an earlier `SUMMARY_PROMPT`; the current one splits ELEMENTS into
+  NAV and MAIN).
 
 Targets below the fold get explicit mouse-wheel scroll steps (`star-landlord-message`,
 `stop-promotions`). For each task the tool:

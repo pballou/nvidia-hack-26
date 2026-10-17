@@ -2,6 +2,7 @@
 
 Agreed plan (as of Sat 2026-10-17). Background facts are
 in [research-notes.md](research-notes.md), and tool setup is in [SETUP.md](../SETUP.md).
+Live team status: [status.md](status.md).
 
 ## Goal
 
@@ -45,6 +46,9 @@ resources_servers/
   web_agent/             Gym env B (from Gym's interactive_browser): Lightning drives the sandbox
 benchmarks/screenspot_v2/  BLADE package: skill/, rollouts/, golden_reports/
 training/                TRL SFT + GRPO configs and scripts (reward = Gym /verify)
+agent/                   interactive Lightning agent loop (planner, click tool, observations)
+console/                 demo console (:8095): requests, voice input, click overlay, /logs
+configs/agent.yaml       agent config: endpoints, served names, max_steps, thinking
 sandbox/                 demo web app exposing per-session state
 scripts/                 serving and launch helpers for the Brev box
 docs/                    plan, research notes, results
@@ -70,11 +74,15 @@ docs/                    plan, research notes, results
   - `dev` is carved from OS-Atlas **by screenshot** (never by row), and is used to
     choose checkpoints.
   - `test` is ScreenSpot-v2 only.
-- **Endpoints on the Brev box:**
+- **Endpoints (Brev box unless noted):**
   - VLM vLLM at `:8001`, with served names `base` (base weights: baselines and
-    screen summaries) and `grounder` (the LoRA adapter, after SFT);
-  - Lightning vLLM at `:8000`, served-model-name `lightning`.
-  - During development, use hosted Lightning instead of the `:8000` server.
+    screen summaries) and `grounder` (the LoRA adapter, after SFT), from one process;
+  - Lightning at `:8000`, served-model-name `lightning`: on Patrick's Mac via
+    vllm-metal (official BF16) for the agent evals and the demo, on the box only in the
+    all-H200 fallback.
+  - Batch jobs (instruction rewriting) mostly use hosted Lightning on build.nvidia.com.
+  - Demo services (local, `scripts/demo_up.sh`): sandbox `:8090`, console `:8095`,
+    Parakeet ASR `:8096`.
 - **Box paths:** see [SETUP.md](../SETUP.md#5-shared-paths-on-the-brev-box).
 
 ## Milestones
@@ -89,9 +97,9 @@ publishing.
 | M0 Setup | Sat 1pm | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
 | M1 Baseline | Sat 3pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
 | M2 Data + SFT | Sat 3pm → 8pm | Training slice built with `data_prep/sample_os_atlas.py` (Linux/macOS **included**; their 28 overlapping SSv2 rows are excluded from eval instead), sized from the pilot, per the Training data mix table below. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
-| M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Overnight loop limits: code defaults 01:30 last round start / 02:40 last GRPO step / 02:50 hard end; tonight extended to 04:15 / 05:25 / 05:40 so a slow round isn't cut short. **Gate D2: keep GRPO only if dev improves.** |
-| M4 Agent | Sat afternoon → night (parallel, mostly without the GPU) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with hosted Lightning. Run it against the `base` grounder before ~5pm and in the gaps between training runs; click-overlay traces. **Base-vs-tuned agent runs move to M5.** |
-| M5 Ship | Sun 7am → 10:30am | Base-vs-tuned agent runs, final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |
+| M3 Gym loop / GRPO | Sat ~8pm → Sun 05:40 (unattended loop) | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Overnight loop limits: code defaults 01:30 last round start / 02:40 last GRPO step / 02:50 hard end; tonight extended to 04:15 / 05:25 / 05:40 so a slow round isn't cut short. **Gate D2: keep GRPO only if dev improves by ≥ 0.5 points.** |
+| M4 Agent | Sat afternoon → night (parallel, mostly without the GPU) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with hosted Lightning. Run it against the `base` grounder before ~5pm and in the gaps between training runs; click-overlay traces. **Base-vs-tuned agent eval done Sat 19:30** (Gym `web_agent`, 12 tasks × 3, `base` vs `grounder` = `sft-template`: verified 18/36 → 22/36). |
+| M5 Ship | Sun 7am → 10:30am | Final ScreenSpot-v2-clean eval of the final adapter (plus an agent rerun of the `grounder` arm with the final adapter), BLADE report, HF publish (model, data, methodology; public ~9:30 after Patrick's release check), README results, demo video recorded, everything submitted by 11:00. |
 
 **Budget vs. clock:** running the H200 nonstop from Sat 1pm to Sun 11am (~22 h)
 would cost ≈ $152 at ~$6.90/hr, almost the whole $160. Stop it whenever no job is running,
@@ -117,8 +125,10 @@ it.
     which is most real apps.
   - In our sandbox, the DOM and app state are used **only by `verify()` for
     scoring**, never by the agent.
-- **Agent loop:** multi-step, built on Gym's `simple_agent` tool loop with
-  `max_steps`. Tasks are short (2–4 steps, e.g. open a menu and then pick an item).
+- **Agent loop:** multi-step. The interactive agent (`agent/core.py`) and the Gym
+  eval (`simple_agent`) both count every Lightning call as a step, up to `max_steps`
+  (`configs/agent.yaml`). Tasks are short: the 12 sandbox tasks need 1–6 actions
+  (`steps_min` in `sandbox/tasks.json`, e.g. open a menu and then pick an item).
   Single-screen click tasks are the fallback demo.
 - **How Lightning "sees" (confirmed):**
   - Lightning is text-only. After every action, the env returns a text observation:
@@ -129,11 +139,12 @@ it.
   - **Separate instances count as two models** (card counts: 30 + 2 + 2 = 34 > 33),
     so never serve the base and the tuned model separately.
   - **Agreed design: one loaded 2B model, with the LoRA adapter switched per
-    request.** It counts as one model (32B total).
+    request.** It counts as one model (32.6B total with Parakeet).
     - vLLM does this natively: `--enable-lora --lora-modules grounder=<adapter>`.
       Requests to `base` skip the adapter; requests to `grounder` apply it.
     - There's no reload between requests, and mixed requests batch together.
-    - Stream B verifies vLLM LoRA support for the chosen model at gate D1.
+    - Stream B verified vLLM LoRA support for both candidates at gate D1
+      (docs/runs.md).
   - The env reads the screen-summary model name from config (`summary_model: base`).
     If the organizers count base + adapter as two models, switch it to `grounder`
     (the tuned model for both roles) and spot-check summary quality.
@@ -157,8 +168,10 @@ it.
     or icon-like control types.
   - **FineWeb must pass a ScreenSpot-overlap check before use** (research-notes §5).
     The fallback is SeeClick web.
-  - Pilot: about 2k targets in these proportions. Full run: sized from the pilot,
-    probably 20–30k.
+  - Pilot: about 2k targets in these proportions. Full runs: `sft-template` on all
+    18,652 train rows of the final manifest (see "Shared contracts"), and
+    `sft-lightning` on T3's 18,299 rewritten rows. `sft-lightning` won the round-0 pick
+    on dev (86.27 vs 85.86, [results.md](results.md)).
   - `dev`: 5% of **base screenshots** per source, grouped so no screenshot is in
     both train and dev:
     - by Rico ID across UIBert and Widget Captioning, which share images;
@@ -183,12 +196,11 @@ it.
   - **Phones and desktops:** aspect-preserving resize handles both tall and wide
     screens. Don't force a fixed size.
   - **Targets:** the bbox center in **relative 0–1000** coordinates, which are
-    resize-invariant. Stream A confirms that Qwen3.5 uses the same 0–1000 convention
-    at baseline.
+    resize-invariant. The M1 baseline confirmed that Qwen3.5 uses the same 0–1000
+    convention (base 86.3% on SSv2-clean, 99.6% parsed).
   - **The same `MAX_PIXELS` everywhere.** Use the identical cap in vLLM
     `--mm-processor-kwargs size` and the TRL processor, so nothing gets resized
-    twice. Choose ~1 MP vs ~2 MP during the M1 baselines, then freeze it as a
-    constant.
+    twice. Frozen at **2 MP** (`MAX_PIXELS = 2_073_600`) at gate D1.
   - **MVP:** Playwright with a fixed viewport (e.g. 1280×800) and
     `device_scale_factor=1`. Screenshot → the same preprocess → model → 0–1000 →
     viewport CSS pixels.
@@ -225,16 +237,19 @@ it.
   - Training and eval run on Brev (vLLM).
   - **Demo: hybrid first** (details in [local-mac.md](local-mac.md)).
     - Lightning runs on Patrick's Mac via **vllm-metal**, the official vLLM plugin
-      for Apple GPUs. Gate L by ~5pm.
+      for Apple GPUs. Official BF16 runs on `:8000` at `--gpu-memory-utilization 0.68`
+      and ran every agent eval, which meets Gate L's criteria (tool-call validity
+      109/109 and 95/96, plan p50 4.1–4.8 s; [results.md](results.md)).
     - The grounder runs on the H200 (base + LoRA) through a tunnel.
     - **Fully local** (adding a merged grounder on the Mac, used for both roles)
       only if Gate G passes at ~8pm.
     - **Fallback:** everything on the H200.
   - The video says "runs locally" only for what actually ran on the Mac. Otherwise
-    say "fits on one GPU (~32B total)".
+    say "fits on one GPU (32.6B total)".
 - **Lightning data generation (instruction rewriting):** hosted Lightning by default.
   Batch several labels per request and check the rate limit early. Self-host only if
-  the rate limit blocks it.
+  the rate limit blocks it. As run: 8,028 rewrites hosted, 1,003 on the Mac's official
+  BF16 ([results.md](results.md)).
 - **BLADE packages:** commit only small sampled rollouts that use `file://` paths
   (no base64) under `benchmarks/screenspot_v2/rollouts/`. Full rollouts go to HF.
 - **Publishing:** required by the track. Patrick owns the HF account. Details are in
@@ -255,8 +270,10 @@ it.
   - **Decided 2026-10-17: Qwen3.5-2B at 2 MP.** Details are under "Decisions so far"
     above.
 - **D2 GRPO:** go only if SFT finished by ~9pm Saturday and the smoke test runs at
-  ≤ ~35 s/step, so rounds fit before the loop's last round start (04:15 tonight). Keep GRPO only if dev accuracy beats
-  SFT. Otherwise ship SFT and say so.
+  ≤ ~35 s/step, so rounds fit before the loop's last round start (04:15 tonight). The
+  smoke passed at 31.9 s/step (docs/runs.md). Keep GRPO only if dev accuracy beats SFT
+  by ≥ 0.5 points (`KEEP_MIN_GAIN` in `training/night_loop.py`). Otherwise ship SFT
+  and say so.
 - **Demo hardware:** see "Hosting" above. Hybrid if Gate L passes; fully local only
   if Gate G also passes; otherwise all on the H200 (official Lightning BF16 plus the
   grounder co-resident, all training stopped).

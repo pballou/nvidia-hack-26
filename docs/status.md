@@ -1,6 +1,6 @@
 # Team status (living doc)
 
-**Updated:** Sat 2026-10-17 19:35 EDT by the orchestrator thread. This is the team-facing
+**Updated:** Sat 2026-10-17 20:05 EDT by the orchestrator thread. This is the team-facing
 "where is everything" page. Numbers come from [results.md](results.md) and [runs.md](runs.md).
 If this page disagrees with them, they win.
 
@@ -8,12 +8,13 @@ If this page disagrees with them, they win.
 
 | What | Who | State |
 | --- | --- | --- |
-| Rewritten-data SFT (`train_lightning.jsonl`, same config and seed as `sft-template`) | Kyle | Running since ~18:50, ~55 min |
-| Pick the round-0 adapter on dev (template 85.86 in the loop harness vs the rewritten-data SFT) | Kyle | After the SFT |
-| Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Kyle starts it, then it runs on its own | Target start ~20:00 |
+| Rewritten-data SFT (`train_lightning.jsonl`, same config and seed as `sft-template`) | Kyle | **Done 19:33** (`/home/ubuntu/ckpt/sft-lightning`, 572 steps) |
+| Pick the round-0 adapter on dev | Kyle | **Done:** `sft-lightning` 86.27 vs `sft-template` 85.86 (same harness) |
+| Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | **Running since 19:38** from `sft-lightning`, extended flags. `:8001` `grounder` stays `sft-template` until the loop's end step re-serves the best adapter |
 | Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36**; see below |
+| Agent step cap: interactive agent goes to 25 steps plus a `stuck` stop (no progress for 4 actions, or the same action 3× with no change); the Gym eval stays at 12 | T2 (+T1 for the console) | In progress |
 | Console `/logs` page (325848f) + review fixes | T1 | Fix pass in progress |
-| Fully local grounder on the Mac (Gate G, [local-mac.md](local-mac.md)) | T4 | Cleared to load models (19:30) |
+| Fully local grounder on the Mac (Gate G, [local-mac.md](local-mac.md)) | T4 | Attempt 1 stopped safely on memory pressure (the model loads fine). One retry after the video dry run, once ~10 GB is freed; otherwise we stay hybrid |
 | BLADE base vs SFT on dev, plus the overnight BLADE runbook (`docs/blade/`) | Orchestrator | Running |
 | HF dataset and model cards (`docs/hf/`), private data upload | Orchestrator | Tonight |
 | Video script ([demo-video-script.md](demo-video-script.md)), pitch segments from [pitch.md](pitch.md) §10 | Charlie | Updating numbers; dry run after ~19:45 |
@@ -34,7 +35,7 @@ If this page disagrees with them, they win.
 | Time (EDT) | What | Who |
 | --- | --- | --- |
 | ~7:00 | `brev start`, re-serve `:8001` with the final adapter | Orchestrator (Kyle's OK) |
-| 7:15–8:15 | One ScreenSpot-v2-clean eval of the final adapter; agent rerun only if GRPO won | Kyle, T2 |
+| 7:15–8:15 | One ScreenSpot-v2-clean eval of the final adapter; **agent rerun of the `grounder` arm with the final adapter** (always: tonight's 22/36 is `sft-template`, and the loop starts from `sft-lightning`; tonight's base arm is reused) | Kyle, T2 |
 | ~8:00 | HF model upload (private) | Orchestrator |
 | 8:30–10:00 | Record the video | Charlie (+ everyone on camera) |
 | ~9:30 | Release check, then make both HF repos public | Patrick |
@@ -48,7 +49,8 @@ If this page disagrees with them, they win.
   | | Dev (969 rows) | ScreenSpot-v2-clean (1,244 rows) |
   | --- | --- | --- |
   | Base | 76.4% | 86.3% |
-  | SFT (one epoch on 18,652 raw-label rows) | 85.66% | 89.07% |
+  | SFT template (one epoch on 18,652 raw-label rows) | 85.66% (85.86 in the loop harness) | 89.07% |
+  | SFT rewritten-data (18,299 rows, Lightning-rewritten instructions) | **86.27%** (loop harness) | TBD |
 
   On ScreenSpot-v2-clean, icons went from 78.1% to 84.8%.
 - **Night-loop rehearsal:** GRPO round 1 (111-row pool, 30 steps) gave +0.83 on dev. Dev

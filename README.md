@@ -111,7 +111,7 @@ user request ─► Nemotron 3.5 Lightning (planner, tool calls) ──► click
 
 | Component | Role |
 | --- | --- |
-| Small open VLM (≤ 3B): Qwen3.5-2B or Qwen3-VL-2B + LoRA, picked after baselines | Grounding model we fine-tune |
+| Small open VLM (≤ 3B): Qwen3.5-2B + LoRA, chosen over Qwen3-VL-2B after baselines (gate D1) | Grounding model we fine-tune |
 | Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16) | Text planner and tool-calling agent; also rewrites training instructions |
 | NVIDIA NeMo Gym | Environments (`gui_grounding`, `web_agent`), rollouts, rewards, profiling, eval compare, BLADE failure analysis |
 | TRL | SFT and GRPO; the GRPO reward comes from the Gym `/verify` endpoint |
@@ -128,26 +128,51 @@ adapter turned off (one 2B model plus an adapter).
 - **Setup:** [SETUP.md](SETUP.md) covers tools, access and keys. Copy `.env.example`
   to `.env` and `env.yaml.example` to `env.yaml`.
 - **GPU serving and training:** [docs/gpu-box.md](docs/gpu-box.md).
-- *TBD:* data prep, training and eval commands.
+- **Data prep, training and eval:** the exact command behind every GPU job is in
+  [docs/runs.md](docs/runs.md); the end-to-end sequence is under "Reproduce" in
+  [docs/bounty-nemo-gym.md](docs/bounty-nemo-gym.md).
 
 ## Data & provenance
 
 | Data | Use | License / notes |
 | --- | --- | --- |
 | [OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data): Linux, macOS, AndroidWorld, UIBert, FineWeb subsets | Training | Apache-2.0 (dataset card). The Linux/macOS desktop data was captured on the same machines as 28 ScreenSpot-v2 desktop screenshots, so those 28 rows are excluded from our test set (see below). |
-| Lightning-rewritten instructions | Training | Synthetic; published with its prompt and script (*TBD link*) |
+| Lightning-rewritten instructions | Training (`sft-lightning`, the overnight loop's starting point) | Synthetic; prompt, script and method in [data_prep/rewrite/](data_prep/rewrite/) (run record `data_prep/rewrite/runs/os_atlas_final_v4/`); data in [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data) (public from Sunday ~9:30) |
 | [ScreenSpot-v2](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2) (revision `5efbb1f1b5`) | **Held-out test only**, as **SSv2-clean**: 1,244 of 1,272 rows. The excluded 28 are listed in `benchmarks/screenspot_v2/excluded_rows.json`. | Apache-2.0 |
 
 ## Results
 
-*TBD.* ScreenSpot-v2-clean (1,244 rows) for base vs. SFT vs. SFT+GRPO, split by
-mobile/desktop/web × text/icon, plus the OS-Atlas dev split.
-Plus browser-task completion with the base grounder vs. the tuned grounder, all
-produced with `gym eval run` and `gym eval compare`.
+So far (Saturday evening), all produced with `gym eval run` and `gym eval compare`. Full
+log with per-platform splits: [docs/results.md](docs/results.md); commands: [docs/runs.md](docs/runs.md).
+
+**Grounding** (Qwen3.5-2B, 2 MP; accuracy = the click point lands inside the target box):
+
+| Grounder | OS-Atlas dev (969 rows) | ScreenSpot-v2-clean (1,244 rows) |
+| --- | --- | --- |
+| Base | 76.4% | 86.3% (text 92.5, icon 78.1) |
+| SFT, raw labels (`sft-template`: LoRA r16, 1 epoch on 18,652 rows) | 85.66% | 89.07% (text 92.3, icon 84.8) |
+| SFT, Lightning-rewritten instructions (`sft-lightning`: 18,299 rows, same config and seed) | 86.27% | TBD |
+
+`sft-lightning` won the round-0 pick on dev (the template scored 85.86% in the same harness;
+dev run-to-run noise is about 0.2 points), so the overnight loop starts from it.
+
+**Browser tasks** (Gym `web_agent`, 12 sandbox tasks × 3 repeats, official BF16 Lightning;
+only the grounder changes): verified success 18/36 with `base` vs **22/36** with
+`grounder` = `sft-template`. Failed actions went from 10 to 0, and false success claims
+from 8 to 4.
+
+*TBD Sunday:* SFT+GRPO from the overnight loop (a round is kept only if it gains ≥ 0.5
+points on dev), then one ScreenSpot-v2-clean eval of the final adapter.
 
 ## Known limitations & next steps
 
-*TBD.*
+- **One sandbox app** for the agent eval, and the prompts were tuned on its traces, so treat
+  absolute success as in-domain. Base vs tuned (same rows, prompts and tools) is the
+  comparable number.
+- **Small n:** the agent gain (+4 of 36) is suggestive but not significant (mean reward
+  gain +0.11, 95% CI [-0.06, +0.28]). The drop in failed actions is significant.
+- **Still 0/3:** the canvas-chart task and the two scroll-dependent tasks.
+- *TBD:* next steps, after Sunday's results.
 
 ## Team
 
@@ -159,6 +184,7 @@ produced with `gym eval run` and `gym eval compare`.
 
 ## Docs
 
+- [docs/status.md](docs/status.md): team status, where everything is right now
 - [SETUP.md](SETUP.md): tool setup (GitHub, Brev CLI, API keys, Python envs)
 - [docs/gpu-box.md](docs/gpu-box.md): GPU serving and training commands (pinned stack)
 - [docs/local-mac.md](docs/local-mac.md): running the demo on a Mac (vllm-metal), gates and fallbacks

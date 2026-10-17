@@ -61,18 +61,20 @@ def build_summary_messages(image_url: str) -> list[dict]             # structure
 
 - **VLM:** `http://127.0.0.1:8001/v1` (tunnel to the H200, or Mac-local).
   - `base` = adapter off: summaries and baselines.
-  - `grounder` = LoRA adapter on: clicks, after SFT. Until SFT lands, point the
-    grounder role at `base`.
-- **Lightning:** hosted (`https://integrate.api.nvidia.com/v1`, model
-  `nvidia/nemotron-3.5-lightning-30b-a3b`, key `NVIDIA_API_KEY`) or local
-  `http://127.0.0.1:8000/v1`, model `lightning`. Use the OpenAI-compatible chat
-  completions API with tools.
+  - `grounder` = LoRA adapter on: clicks. Since Sat 18:42 it is `sft-template`. The
+    overnight loop starts from `sft-lightning` (the round-0 pick on dev); from Sunday
+    ~7:00 `grounder` is the loop's final adapter (`FINAL.json`).
+- **Lightning:** local `http://127.0.0.1:8000/v1`, model `lightning` (the default:
+  official BF16 on Patrick's Mac via vllm-metal, for the demo and agent evals), or
+  hosted (`https://integrate.api.nvidia.com/v1`, model
+  `nvidia/nemotron-3.5-lightning-30b-a3b`, key `NVIDIA_API_KEY`; batch jobs). Use the
+  OpenAI-compatible chat completions API with tools.
 
 ## 4. Agent config: `configs/agent.yaml` (T2; env vars override)
 
 ```yaml
 sandbox_url: http://127.0.0.1:8090
-lightning: {base_url: https://integrate.api.nvidia.com/v1, model: nvidia/nemotron-3.5-lightning-30b-a3b, api_key_env: NVIDIA_API_KEY}
+lightning: {base_url: http://127.0.0.1:8000/v1, model: lightning, api_key_env: null}   # AGENT_LIGHTNING=hosted = build.nvidia.com
 vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}   # :8001 = Qwen3.5-2B (gate D1)
 grounder_model: base        # base | grounder
 summary_model: base         # base | grounder (grounder when Mac-local fully local)

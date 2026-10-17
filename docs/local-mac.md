@@ -1,8 +1,9 @@
 # Local Mac demo (Patrick's M4 Max, 128 GB)
 
 How much of the demo can run on the laptop. Verified 2026-10-17 against vllm-metal,
-mlx-lm and llama.cpp sources, releases and issues; nothing here has been run yet.
-Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
+mlx-lm and llama.cpp sources, releases and issues. Since then, Lightning (§0–§2) and the
+tunnel (§3a) have run the agent evals and are the demo setup; §3b / Gate G is in progress
+([status.md](status.md)). Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
 
 ## Decision: hybrid first, fully local if it passes, H200 as the fallback
 
@@ -24,9 +25,10 @@ Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
   vllm-project plugin for Apple GPUs.
 
 **Parameter cap:**
-- Hybrid: one Lightning (30B) plus one grounder instance (2B), so 32B.
+- Hybrid: one Lightning (30B) plus one grounder instance (2B) plus Parakeet TDT 0.6B
+  (voice input), so 32.6B by model-card counts.
 - Fully local: Lightning plus **one** merged grounder used for both clicks and screen
-  summaries. Never load a second VLM copy.
+  summaries (plus Parakeet, same 32.6B). Never load a second VLM copy.
 - Show base-vs-tuned from the H200 or the Gym numbers, not from a second local
   instance.
 - No speculative decoding or MTP flags anywhere.
@@ -95,7 +97,7 @@ ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 pe
 
 ```bash
 source ~/.venv-vllm-metal/bin/activate
-export GROUNDER_MAX_PIXELS=<frozen value from common/grounding.py> GROUNDER_MIN_PIXELS=65536
+export GROUNDER_MAX_PIXELS=2073600 GROUNDER_MIN_PIXELS=65536   # = common/grounding.py (2 MP, frozen at gate D1)
 HF_HUB_OFFLINE=1 vllm serve ~/models/grounder-merged --served-model-name grounder \
   --host 127.0.0.1 --port 8001 --max-model-len 16384 --max-num-seqs 1 --gpu-memory-utilization 0.12 \
   --limit-mm-per-prompt '{"image": 1, "video": 0}' \
@@ -122,8 +124,8 @@ HF_HUB_OFFLINE=1 vllm serve ~/models/grounder-merged --served-model-name grounde
    - median step ≤ ~8 s at a realistic prompt length.
 4. **Validate arguments in the agent anyway.** On the community 4-bit build, 1–2 of 5
    calls used wrong argument names even with `tool_choice: "required"` (vllm-metal
-   doesn't enforce the schema). T2's planner must check the arguments against the
-   schema and send back a corrective message.
+   doesn't enforce the schema). The agent checks every call against the schema
+   (`agent/session.py:validate_args`) and sends back a corrective tool result.
 5. **If BF16 on Mac fails,** use the H200 official BF16 (gpu-box.md §2) through the
    tunnel. llama-server with a community GGUF is **emergency only and doesn't
    count for the bounty**:

@@ -21,14 +21,18 @@ artifacts and may adjust a few pre-approved knobs before the next round.
 
 1. **Two full SFT runs, same config and seed:**
    - **template:** raw labels, all 18,652 train rows.
-   - **lightning:** T3's `train_lightning.jsonl`, expected ~6pm at
-     `/home/ubuntu/data/os_atlas_20k/`.
+   - **lightning:** T3's `train_lightning.jsonl`, delivered 18:19 at
+     `/home/ubuntu/data/os_atlas_20k/` (18,299 rows: 353 fewer than template, removed
+     by T3's numeric rule).
 2. **Evaluate both on dev** (969 rows) with `gym eval run` through `gui_grounding`.
    Also evaluate on SSv2-clean (1,244 rows), but **for the results table only**.
 3. **Pick the better one on dev.** That's the loop's round-0 checkpoint. Log both in
    `docs/runs.md`; this is the template-vs-Lightning ablation.
 4. **Serve the round-0 adapter on `:8001`** as `grounder` (base + LoRA,
-   gpu-box.md §3), so T2 can run the base-vs-tuned agent eval tonight.
+   gpu-box.md §3), so T2 can run the base-vs-tuned agent eval tonight. (`sft-template`
+   has been served since 18:42; T2's eval with it finished at 19:30. The round-0 pick
+   was `sft-lightning`, dev 86.27 vs 85.86 in the same harness, and the loop started
+   from it at 19:38; [results.md](../results.md).)
 
 ## Loop (round r = 1, 2, 3; stop early per the rules below)
 
@@ -112,7 +116,8 @@ Work dir `/home/ubuntu/night/round_<r>/`. Each round:
   - Stop `:8002` (Qwen3-VL) and `:8003` (pilot) before the loop.
   - TRL colocate needs `vllm_gpu_memory_utilization` set explicitly; the default is
     0.3.
-  - Keep `:8001` down during GRPO if memory is tight, and bring it back at the end.
+  - The loop profiles and evaluates on its own server `:8004` and stops it during
+    GRPO. `:8001` stays up all night and is re-served only at the end.
 - **Robustness:**
   - Run everything in tmux (`night` session).
   - Write logs to `/home/ubuntu/night/round_<r>/*.log`.

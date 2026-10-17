@@ -15,6 +15,7 @@ and the official rules on the [Luma page](https://luma.com/nvidia-redhat-small-m
   parameter count published in the model developer's model card". MoE models count
   total parameters.
   - Lightning's card says **30B total / 3B active**, which leaves **≤ 3B for the VLM**.
+    Our system: 30B + Qwen3.5-2B (card "2B") + Parakeet TDT 0.6B (voice) = **32.6B** by card counts.
   - For reference only: the HF API reports 31.58B for Lightning, and 32.91B including
     its MTP (multi-token prediction) head. The rule uses the card number.
   - Don't enable Lightning's external draft models, DSpark (~0.97B) or DFlash
@@ -49,7 +50,8 @@ and the official rules on the [Luma page](https://luma.com/nvidia-redhat-small-m
 ## 2. Grounding-model candidates (≤ 3B)
 
 Parameter counts are HF `safetensors.total`. ScreenSpot-v2 (SSv2) scores vary a lot
-with the prompt and harness, so **measure our own baselines** before choosing.
+with the prompt and harness, so **measure our own baselines** before choosing. (Done:
+gate D1 chose Qwen3.5-2B; our base scores 86.3% on SSv2-clean, [results.md](results.md).)
 
 | Model | Params | SSv2 overall | Notes |
 | --- | --- | --- | --- |
@@ -69,7 +71,7 @@ with the prompt and harness, so **measure our own baselines** before choosing.
   - MAI-UI-2B 92.5, UI-Venus-1.5-2B 92.8, UI-TARS-2B-SFT 84.7.
 - **Coordinates:** Qwen3-VL emits points on a relative **0–1000 grid**, so resizing
   doesn't change the target (confirmed by the Qwen maintainers). Qwen3.5 shares the
-  processor, but its convention is inferred; verify it with a baseline.
+  processor and the convention; our M1 baseline confirmed it (86.3% on SSv2-clean, 99.6% parsed).
   Qwen2.5-VL emits absolute pixels.
 - **Baseline trap** ([NeMo RL #2260](https://github.com/NVIDIA-NeMo/RL/issues/2260)):
   Qwen3-VL-2B scored 41.9% on a click task with the wrong output format, and 95% with
@@ -256,8 +258,8 @@ references are in T2's research notes):
 TRL notes:
 
 - TRL's VLM + vLLM GRPO test is skipped upstream (no CI), so **run a 20-step smoke test
-  before relying on it**. The fallback is `use_vllm=False`, which is fine for outputs
-  of ≤ 48 tokens.
+  before relying on it** (done: gate D2 passed, 31.9 s/step on a shared GPU; [runs.md](runs.md)).
+  The fallback is `use_vllm=False`, which is fine for outputs of ≤ 48 tokens.
 - `gradient_checkpointing` defaults to True.
 - Set `vllm_max_model_length`; the default allocates the full 262k context.
 
@@ -448,7 +450,8 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   2026-10-13) supports Nemotron-H/Lightning and Qwen3.5/Qwen3-VL images, all
   marked experimental.
   - Prefix caching is off for Lightning.
-  - Lightning tool calling on Metal is unverified, which is why Gate L exists.
+  - Lightning tool calling on Metal works with official BF16 (median 1.2 s/step; see
+    above and local-mac.md).
   - VLM LoRA isn't usable in the stable release, so the Mac serves a merged
     grounder.
 - **Plan:** hybrid (Lightning on the Mac, grounder on the H200). Fully local only if
@@ -462,14 +465,17 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
   is $6.48) ≈ **23 GPU-hours** total.
 - **Image tokens:** Qwen3-VL is 32 px per token.
   - 1280×800 ≈ 1,000 tokens; 1920×1080 ≈ 2,040.
-  - Capping at ~1 MP gives ~940 tokens.
+  - Capping at ~1 MP gives ~940 tokens. We froze 2 MP (~2,025 tokens; ~2.0k prompt
+    tokens measured).
   - The full SSv2 set is ~3.4M tokens at default resolution, or ~1.15M capped.
 - **Throughput:**
-  - SSv2 eval: ~2–5 min per model.
+  - SSv2 eval: ~2–5 min per model (measured: ~1 min for SSv2-clean through Gym).
   - SFT: ~25–50 min per 10k **packed** samples (several targets per screenshot).
     Our pilot is unpacked (one target per example, so each target re-encodes the
-    image), so measure it rather than using this estimate.
-  - GRPO: ~20–35 s/step on 1×H200, ≈ 1–2 h for 200 steps.
+    image), so measure it rather than using this estimate. Measured: the full
+    18,652-row train split took 54 min at 2 MP (583 steps).
+  - GRPO: ~20–35 s/step on 1×H200, ≈ 1–2 h for 200 steps (measured: 19.6 s/step
+    alone, 31.9 s/step sharing the GPU with SFT; [runs.md](runs.md)).
 
 **Planned H200-hours:**
 

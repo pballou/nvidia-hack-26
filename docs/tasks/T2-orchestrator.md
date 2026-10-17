@@ -130,16 +130,19 @@ styles.
   `data/example.jsonl` (5 tasks). The full file is generated, not committed.
 - **Imports inside the Gym server venv:** Gym builds a per-server venv from
   `requirements.txt` (pin `nemo-gym[dev]==0.7.0`, `playwright==1.62.0`, `openai`,
-  `pillow`). Our `agent`, `common` and `sandbox` packages must be importable. Prefer
-  a root `pyproject.toml` installed as `-e` with a path that Gym's builder actually
-  resolves (verify it). The fallback is a `sys.path` insert of the repo root in
-  `app.py`, clearly commented.
+  `pillow`). Our `agent`, `common` and `sandbox` packages must be importable. There is
+  deliberately no root `pyproject.toml` (it would switch Gym's venv builder into
+  editable mode for every server), so `app.py` inserts the repo root into `sys.path`,
+  clearly commented (AGENTS.md).
 - **Eval script** `scripts/agent_eval.sh`:
-  1. `gym env start --config resources_servers/web_agent/configs/web_agent.yaml`.
+  1. `gym env start --config resources_servers/web_agent/configs/web_agent_local.yaml`
+     (local Lightning, the default; `LIGHTNING=hosted` uses `web_agent.yaml`).
   2. `gym eval run --no-serve --agent web_agent_simple_agent --input <tasks.jsonl> --output results/agent_<grounder_model>.jsonl --num-repeats 3`.
   3. Then `gym eval compare` between base and grounder, plus a reminder to run BLADE.
-  - Base runs can happen whenever Kyle's `:8001` is up. **Base-vs-tuned runs are
-    Sunday 7am+** (docs/plan.md M5).
+  - Base runs can happen whenever Kyle's `:8001` is up. **Base-vs-tuned is done**
+    (Sat 19:30; 12 tasks × 3, `grounder` = `sft-template`): verified 18/36 → 22/36
+    ([docs/status.md](../status.md)). Sunday reruns only if the overnight GRPO adapter
+    wins.
 
 ## Testing without a GPU
 
@@ -164,7 +167,7 @@ styles.
 - per-stage latency p50/p90;
 - thinking off vs retry.
 
-These numbers go into `docs/bounty-lightning.md` on Sunday.
+These numbers go into `docs/bounty-lightning.md` as they land.
 
 ## Acceptance criteria
 

@@ -15,7 +15,7 @@ Target: everything finished by 10:30.
 | Demo Video URL | Unlisted **YouTube** (accepted by both the form and the checklist), 3–5 min | Charlie (records and uploads) | §Video |
 | GitHub Repo | `https://github.com/pballou/nvidia-hack-26` (public) | — | — |
 | AI Models Used | Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16 checkpoint); our fine-tuned grounder (Qwen3.5-2B + LoRA); NVIDIA Parakeet TDT 0.6B v3 (local voice input) | Kyle | — |
-| Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM (+ vllm-metal on the Mac), NVIDIA Brev (H200), TRL, Playwright | all | — |
+| Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM (+ vllm-metal on the Mac), NVIDIA Brev (H200), NeMo-Speech.cpp (Parakeet voice input), TRL, Playwright | all | — |
 | ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (draft; final Sunday). Form text: §Form text |
 | ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (draft; final Sunday). Form text: §Form text |
 | ☑ Red Hat vLLM bounty | (checkbox only) vLLM serves both models; GRPO rollouts via vLLM colocate | Kyle | — |
@@ -23,7 +23,10 @@ Target: everything finished by 10:30.
 ## Form text (paste-ready drafts)
 
 Short versions of the bounty write-ups for the form's explanation boxes. Fill in the **TBD**s from
-`docs/results.md` on Sunday, and keep them consistent with the full docs. Each one links to its
+`docs/results.md` on Sunday, and keep them consistent with the full docs. The SFT numbers and
+the 18/36 → 22/36 agent result below are `sft-template`'s. The overnight loop starts from
+`sft-lightning` (dev 86.27%), so add its numbers, and update the agent numbers if the agent eval
+is rerun with the final adapter. Each one links to its
 full doc for judges who want more.
 
 **Lightning bounty:**
@@ -39,8 +42,9 @@ full doc for judges who want more.
 > idle server, against about 26 s on the hosted free tier. We tune it with corrective schema
 > validation, compact observations and per-step thinking control. Turning thinking on only after
 > a problem step raised claimed-equals-verified from 6/12 to 9/12 tasks and cut actions that
-> changed nothing on screen from 45 to 27 (n=1 per task). In the NeMo Gym `web_agent` env: TBD verified success, base vs
-> fine-tuned grounder. Full write-up:
+> changed nothing on screen from 45 to 27 (n=1 per task). In the NeMo Gym `web_agent` env (12 tasks × 3),
+> swapping the base grounder for the fine-tuned one raised verified success from 18/36 to 22/36 and cut
+> failed actions from 10 to 0. Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-lightning.md`
 
 **NeMo Gym bounty:**
@@ -54,8 +58,8 @@ full doc for judges who want more.
 > +6.7). The improvement loop runs through Gym: `gym eval profile` finds rows the model sometimes
 > gets right, TRL GRPO trains on them with the Gym server's `/verify` as the reward, and a dev
 > eval plus `gym eval compare` decides keep or revert. BLADE failure analysis steers the next
-> round. After GRPO: TBD dev, TBD ScreenSpot-v2-clean, and TBD agent task success, base vs
-> tuned. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
+> round. In the `web_agent` env, the tuned grounder raised verified task success from 18/36 to
+> 22/36 over the base. After GRPO: TBD dev and TBD ScreenSpot-v2-clean. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
 > were captured on the same machines as OS-Atlas training data. Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-nemo-gym.md`
 
@@ -73,7 +77,7 @@ The README skeleton has a section for each:
 - [ ] **Quick start**: commands to run (Patrick: localhost app plus model serving)
 - [ ] **Tech stack & architecture diagram** (simple is fine)
 - [ ] **How to reproduce the demo**: env vars, API keys, sample `.env` (`.env.example`, `env.yaml.example`)
-- [ ] **Datasets / synthetic data + provenance**: OS-Atlas subsets used and excluded (and why), GroundCUA, Lightning-rewritten instructions (published plus method), ScreenSpot-v2 (eval only)
+- [ ] **Datasets / synthetic data + provenance**: OS-Atlas subsets used and excluded (and why), Lightning-rewritten instructions (published plus method), ScreenSpot-v2 (eval only)
 - [ ] **Known limitations & next steps**
 - [ ] **Deployed URL or a short screen capture** of the working app
 - [ ] **Team roster**: names, roles and contacts. The README is public, so use contacts you're happy to publish (e.g. GitHub handles or work emails).
@@ -86,7 +90,8 @@ Patrick publishes under the Hugging Face account **`patrickballou`**.
   saved with `hf auth login`, never committed, and revoked after the event.
 - Patrick's full write token stays in `.env` on his laptop.
 
-The repos already exist and are **private**. Make them public at release (Sun morning).
+The repos already exist and are **private**. Uploads go in private (data Saturday night, model
+~8:00 Sunday). Patrick makes both public at release, Sun ~9:30, after his release check.
 
 Upload commands (on the box):
 
@@ -114,7 +119,7 @@ Follow the organizers' recommended flow:
 | 4. How we built it | 60–90 s | Architecture diagram; NeMo Gym envs and the base → SFT → GRPO results; BLADE failure analysis; vLLM on the H200; official Lightning BF16 on vLLM (vllm-metal on the Mac) plus thinking control. Challenges: the ScreenSpot contamination we found and excluded, coordinate conventions, the one-GPU budget. |
 | 5. So what | 20–30 s | ROI (illustrative): a 2M-customer utility saves ~$4–8M/yr at 20–40% call deflection; no API needed; measured improvement (icons 78 → 85%); "fits on one GPU" (or "runs on this Mac" only if that check passed); the ask: one design partner. **Script: [pitch.md §10](pitch.md#10-60-second-video-script); "don't say" list there too.** |
 
-**Owner:** Charlie records and uploads. **Recording plan:** do a dry run Saturday night if possible. Record Sunday 8:30–10:00,
+**Owner:** Charlie records and uploads; full script: [demo-video-script.md](demo-video-script.md). **Recording plan:** dry run Saturday after ~19:45. Record Sunday 8:30–10:00,
 upload unlisted by 10:15, submit the form by 10:30.
 
 ## Judging criteria → our evidence (use in the video and write-ups)
@@ -123,7 +128,7 @@ upload unlisted by 10:15, submit the form by 10:30.
 | --- | --- | --- |
 | **Completeness:** works end to end; uses open data | Voice → Lightning plans → grounder clicks → task verified from app state, live on the Acme portal. Trained on open OS-Atlas data, published with provenance. | console demo, `docs/results.md`, README data table |
 | **Fine-Tuned track:** measurable improvement over a baseline on eval data | Base vs. SFT (vs. GRPO) on dev and **ScreenSpot-v2-clean**, plus base-vs-tuned **agent task success** in the Gym `web_agent` env | `docs/results.md`, `gym eval compare` reports |
-| **Technical depth** | LoRA SFT + GRPO with **NeMo Gym rewards**; an automated overnight profile→GRPO→dev-gate loop; BLADE failure analysis; contamination found and removed; Lightning data engine with a human audit | `docs/tasks/B-night-loop.md`, `docs/blade/`, METHOD.md |
+| **Technical depth** | LoRA SFT + GRPO with **NeMo Gym rewards**; an automated overnight profile→GRPO→dev-gate loop; BLADE failure analysis; contamination found and removed; Lightning data engine with a human audit | `docs/tasks/B-night-loop.md`, `docs/blade/`, `data_prep/rewrite/runs/os_atlas_final_v4/METHOD.md` |
 | **NVIDIA/Red Hat use, and why** | Nemotron Lightning (planner + data engine), NeMo Gym (envs, rewards, profiling, BLADE), Parakeet (voice), vLLM on H200 + vllm-metal on the Mac, Brev. **Why:** private, local inference; 32.6B total runs on one GPU or a MacBook | README stack table, `docs/bounty-lightning.md` |
 | **Problem fit / usability** | Customer self-service on existing websites, with no integration. Fewer support calls; accessibility. Usable tomorrow by an everyday person, by voice. | `docs/pitch.md` |
 | **Creativity** | Voice + vision-only grounding + a text-only planner. Works on canvas and legacy UIs that DOM agents can't operate. | demo canvas tasks |

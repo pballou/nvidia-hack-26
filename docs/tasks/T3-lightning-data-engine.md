@@ -29,8 +29,8 @@ be **published with its method**.
   `{id, source, image_path, img_w, img_h, instruction, bbox[x1,y1,x2,y2 px], platform, data_type, split}`.
 - The path is on the box under `/home/ubuntu/data/<slice>/`. Copy it locally for
   development.
-- **Ask Charlie to populate `data_type`** (the control type) where the source has it.
-  He currently writes `None`.
+- `data_type` (the control type) is filled in by `sample_os_atlas.py` where the
+  source has it, else `None`.
 
 ## What to rewrite
 
@@ -86,14 +86,15 @@ be **published with its method**.
 | --- | --- |
 | `rewrite.py` | CLI: `--manifest`, `--out`, `--endpoint hosted\|local\|h200`, `--limit`, `--dry-run` |
 | `prompts.py` | System prompt and few-shot examples (5–8, covering each style and the drop cases), `PROMPT_VERSION` |
-| `apply.py` | `apply_rewrites(manifest, rewrites) -> train manifest`. Replaces `instruction` where `keep && rewritten`, adds `instruction_original` and `instruction_style`, drops rows marked `keep=false` only if they were selected for rewriting. Deterministic. Also writes the **two ablation variants** Kyle can train on: `train_template.jsonl` (raw labels) and `train_lightning.jsonl` (mixed). |
+| `apply.py` | `apply_rewrites(manifest, rewrites) -> train manifest`. Replaces `instruction` where `keep && rewritten`, adds `instruction_original` and `instruction_style`. Since the v4 audit, rows the model dropped keep their raw label (`lightning_drop_reason` set); only the numeric rule removes rows. Deterministic. Also writes the **two ablation variants** Kyle can train on: `train_template.jsonl` (raw labels) and `train_lightning.jsonl` (mixed). |
 | `review_sample.py` | Writes an HTML contact sheet of 50 random rewritten rows: image crop with the target box drawn, original label, rewrite, style. A human can audit it in ~5 minutes. |
 | `<out>/rewrites.jsonl` | `{id, source, original, rewritten \| null, style, keep, drop_reason, prompt_version, model, ts}` |
 | `<out>/stats.json` | Counts by source, style and drop reason; tokens; wall time; requests; errors |
 | `<out>/METHOD.md` | **For publication:** prompt verbatim, model and parameters, selection rule, metadata given, filters, counts, known limitations |
 
-**Publication:** Patrick uploads `rewrites.jsonl`, `METHOD.md` and `stats.json` to
-`patrickballou/gui-assist-data` (see `docs/submission.md`). Image filenames reference
+**Publication:** `rewrites.jsonl`, `METHOD.md` and `stats.json` go to
+`patrickballou/gui-assist-data` (see `docs/submission.md`): private upload Saturday
+night, public ~9:30 Sunday after Patrick's release check. Image filenames reference
 OS-Atlas; images aren't re-hosted.
 
 ## Quality gate (before the full run)

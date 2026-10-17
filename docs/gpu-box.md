@@ -1,9 +1,9 @@
 # GPU box: serving and training (`permanent-tan-marmot`)
 
 Copy-paste commands for the shared Brev H200. Every pin was verified on 2026-10-17
-against PyPI, Docker Hub, the GitHub sources and the model cards. Nothing has been
-run on the box yet, so treat the first run of each section as a smoke test, and log
-GPU jobs in [runs.md](runs.md). Owner: workstream B (Kyle).
+against PyPI, Docker Hub, the GitHub sources and the model cards. The grounder, training and
+Gym sections (§3, §5, §6) have since run on the box; Lightning on the H200 (§2 and its
+patch in §1) hasn't, so treat a first run of §2 as a smoke test, and log GPU jobs in [runs.md](runs.md). Owner: workstream B (Kyle).
 
 **Box:** 1× H200 (143 GB), driver 580.173.02 (CUDA 13.0), Ubuntu 24.04, 16 vCPU,
 196 GB RAM, 2.4 TB disk, Docker with the NVIDIA runtime, no `nvcc`. `~/.cache` is a
@@ -62,10 +62,10 @@ curl -fsSL -o /home/ubuntu/patches/ssd_chunk_scan.py \
 echo "b3851069c1e37c25dd9afaecc348f8f8868b3c50bb0d1fe5e0dde3dfa23b3a01  /home/ubuntu/patches/ssd_chunk_scan.py" | sha256sum -c -
 ```
 
-## 2. Serve Lightning on :8000: official BF16 (demo fallback and final agent eval only)
+## 2. Serve Lightning on :8000: official BF16 (fallback for the demo and the agent eval only)
 
-During development, use the hosted endpoint or the Mac-local server instead (SETUP.md
-§4, docs/local-mac.md). Start Lightning first, then the grounder.
+The agent eval and the demo use the Mac-local server (docs/local-mac.md); batch jobs use
+the hosted endpoint (SETUP.md §4). Start Lightning first, then the grounder.
 
 **Use only official NVIDIA checkpoints** (bounty requirement). The team uses
 **BF16**. The NVFP4 build is the only other official one, and we've chosen not to
@@ -142,11 +142,11 @@ docker rm -f vllm-vlm
 curl -s localhost:8001/v1/models    # expect both "base" and "grounder"
 ```
 
-- **Gate D1 check (before 3pm):** vLLM must load a dummy adapter for the chosen base
-  model. Make it with the *exact* PEFT config you'll train with.
+- **Gate D1 check (passed Sat for both models; docs/runs.md):** vLLM must load a dummy
+  adapter for the chosen base model. Make it with the *exact* PEFT config you'll train with.
   - Target only the language-model modules, never the vision tower.
-  - If vLLM rejects Qwen3.5's linear-attention projections, limit `target_modules`
-    to the MLP and full-attention projections.
+  - vLLM accepted Qwen3.5's linear-attention projections (0 LM modules ignored), so
+    `training/lora.py` targets them along with the MLP and full-attention projections.
   - Record which adapter each eval used in docs/runs.md.
 
 - **Don't pass a `--reasoning-parser` for Qwen3.5.** It would return the answer as
@@ -156,7 +156,7 @@ curl -s localhost:8001/v1/models    # expect both "base" and "grounder"
   - The values come from `GROUNDER_MAX_PIXELS` / `GROUNDER_MIN_PIXELS` in
     `serving.env`. They must match `common/grounding.py` and the TRL processor; see
     the image preprocessing contract in docs/plan.md "Decisions so far".
-  - M1 baselines run at ~1 MP and at ~2 MP. Freeze the winner.
+  - Frozen at 2 MP by gate D1 (`MAX_PIXELS = 2_073_600`).
 - **If requests hang under load** (#37729): add `--gdn-prefill-backend triton`; if it
   still hangs, add `--no-enable-prefix-caching`.
 - **Tool calling** (if needed): `--enable-auto-tool-choice --tool-call-parser qwen3_coder`.
@@ -182,9 +182,9 @@ curl -s localhost:8001/v1/chat/completions -H 'Content-Type: application/json' -
 | Situation | Plan |
 | --- | --- |
 | Eval | Grounder server 0.30 (raise to 0.45 for `--num-repeats 8` evals). Add Lightning BF16 at 0.60 only when self-hosting it here. |
-| Agent dev (stream C) | Use hosted Lightning plus the grounder server whenever it's up: before the SFT pilot (~5pm) and in the gaps between training runs. **Base-vs-tuned agent runs happen Sunday 7am+ (M5),** not during training. |
-| SFT | Stop both servers (`docker stop vllm-vlm vllm-lightning`). |
-| GRPO (TRL colocate) | Stop the grounder server. Use hosted or Mac-local Lightning, and stop this one. Set `vllm_gpu_memory_utilization` explicitly (the TRL default is 0.3). |
+| Agent dev (stream C) | Use Mac-local (or hosted) Lightning plus the grounder server whenever it's up. **The base-vs-tuned agent eval finished Sat 19:30** (`grounder` = `sft-template`, docs/status.md) while an SFT was training; Sunday 7:15–8:15 reruns the `grounder` arm with the final adapter (the loop starts from `sft-lightning`, so 22/36 doesn't describe the final model). |
+| SFT | The grounder server at 0.30 can stay up: SFT peaks at 8.6 GiB at 2 MP, and both full SFTs ran next to it (runs.md, Sat 16:35 and 18:44). Stop `vllm-lightning` if it's running here. |
+| GRPO (TRL colocate) | `:8001` (0.30) stays up; the night loop stops its own eval server (:8004) before GRPO. Use Mac-local or hosted Lightning, not this box. Set `vllm_gpu_memory_utilization` explicitly (the loop uses 0.25; the TRL default is 0.3). |
 | Demo (fallback path) | Lightning BF16 0.60 + grounder 0.25–0.30. All training stopped. |
 
 ## 5. Training venv (`/home/ubuntu/venvs/train`)

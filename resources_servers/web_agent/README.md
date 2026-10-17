@@ -4,7 +4,7 @@ Nemotron 3.5 Lightning (the policy) gets a user request and a text description o
 It acts only through five tools. A `click` target description goes to the grounding VLM (served
 names `base` / `grounder`), which returns a point, and Playwright clicks those pixels. The reward
 is the task's check on the sandbox's state (`sandbox/checks.py`): 1.0 if it passes, else 0.0.
-This env gives the base-vs-tuned grounder comparison inside a real agent loop (docs/plan.md M5).
+This env gives the base-vs-tuned grounder comparison inside a real agent loop (docs/plan.md M4).
 
 The tools and observations are the interactive agent's own (`agent/`). Every tool route calls
 `agent.session.AgentSession.execute`, so the console agent and this env behave the same way.
@@ -35,7 +35,9 @@ Run everything from the repo root.
   - The script pins `NEMO_GYM_EXTRA_ROOTS` to its own checkout. Gym searches that variable before
     the cwd for configs, `--input`, server dirs and imports, and SETUP.md exports it per checkout.
     If you run `gym` by hand, point it at this checkout too.
-  - Base-vs-tuned runs are Sunday 7am+.
+  - The base-vs-tuned run (12 tasks × 3, `grounder` = `sft-template`) finished Sat 19:30:
+    verified 18/36 → 22/36 ([docs/status.md](../../docs/status.md)). Sunday reruns only if
+    the overnight GRPO adapter wins.
 - **Server tests:**
   - `.venv-gym/bin/python -m pytest resources_servers/web_agent/tests -q` (fast; no GPU, no sandbox)
   - `.venv-gym/bin/gym env test --resources-server web_agent` (the same tests in the server venv
