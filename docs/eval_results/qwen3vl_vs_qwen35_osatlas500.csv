@@ -1,0 +1,19 @@
+# Base-model comparison (gate D1 input), not the official ScreenSpot-v2 baseline.
+# Sample: 500 rows, seed 1, drawn from the OS-Atlas 20k slice BEFORE the overlay-drop /
+# dedup / split pass in data_prep/finalize_manifest.py (so results include some rows
+# since removed; treat as directional, not final).
+# Models: Qwen/Qwen3-VL-2B-Instruct @89644892e4 vs Qwen/Qwen3.5-2B @15852e8c16, both
+# zero-shot bf16 on the H200 (scripts/base_grounding_smoke.py, scripts/compare_grounding.py).
+# OS-Atlas has no ScreenSpot-style text/icon label, so there is no icon-split row here;
+# use ScreenSpot-v2 for that comparison before finalizing D1.
+# McNemar p=0.694 on the "all" row (372 both-hit, 31 only qwen3vl, 27 only qwen35, 70 neither).
+split,qwen3vl_hits,qwen3vl_n,qwen3vl_acc,qwen35_hits,qwen35_n,qwen35_acc,qwen3vl_minus_qwen35_pts
+all,403,500,0.806,399,500,0.798,0.8
+desktop,120,171,0.702,132,171,0.772,-7.0
+mobile,127,154,0.825,118,154,0.766,5.9
+web,156,175,0.891,149,175,0.851,4.0
+linux,59,88,0.670,65,88,0.739,-6.9
+macos,61,83,0.735,67,83,0.807,-7.2
+androidworld,67,79,0.848,65,79,0.823,2.5
+uibert,60,75,0.800,53,75,0.707,9.3
+fineweb,156,175,0.891,149,175,0.851,4.0
