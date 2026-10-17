@@ -239,6 +239,18 @@ def test_event_recompute_matches_done_stats():
     assert am._stats_from_events(run_b()[:-1])[0]["n_failed_actions"] == 1
 
 
+def test_lightning_outage_run_is_excluded_not_failed():
+    """A run that ended because Lightning was unreachable (done reason 'error') is infra, like a Gym mask."""
+    r = "20261017-150200-cccccc"
+    events = [start(r, "Turn on autopay.", "retry"),
+              ev(r, 1, "error", {"message": "APIConnectionError: Connection error.", "where": "planner",
+                                 "recoverable": False}),
+              done_ev(r, 1, False, "error", {"n_api_errors": 2}, {})]
+    ep = am.interactive_episode(r, events, None, {}, ["thinking"])
+    assert ep.excluded == "infra_error" and ep.end_reason == "error"
+    assert am.interactive_episode(r, run_b(), None, {}, ["thinking"]).excluded is None  # max_steps still counts
+
+
 def test_test_runs_group_by_and_summary_selection(runs_dir: Path, tasks_file: Path, tmp_path: Path, capsys):
     out = tmp_path / "m.json"
     run_main("--runs", runs_dir, "--tasks", tasks_file, "--include-test-runs", "--json", out,

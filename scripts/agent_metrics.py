@@ -27,8 +27,9 @@ files by --label, default the file stem)
   latency    p50/p90 per stage (plan, summary, ground, act, settle, screenshot) from the
              events' timings_ms; wall = start -> done per run, in seconds.
   coverage   masked (Gym mask_sample) and dropped (sidecar) rollouts, and interactive runs
-             that are incomplete (no done event) or were stopped by the user, are excluded from
-             every quality metric and counted separately.
+             that are incomplete (no done event), were stopped by the user, or ended because
+             Lightning was unreachable (done reason 'error'), are excluded from every quality
+             metric and counted separately.
 
 Test runs (oracle grounder or fake sandbox) are excluded unless --include-test-runs. Report
 only runs made with the official BF16 Lightning: select them with --since or --summary.
@@ -85,7 +86,7 @@ class Episode:
     tags: list[str] = field(default_factory=list)
     verified: bool | None = None       # None: no verifier result (no summary row, harness error, masked)
     claimed: bool | None = None
-    excluded: str | None = None        # masked | dropped | incomplete | stopped | no_reward -> not scored
+    excluded: str | None = None        # masked | dropped | incomplete | stopped | infra_error | no_reward -> not scored
     end_reason: str | None = None      # done | max_steps | error | no_tool_call | ...
     steps: int | None = None
     n_lightning_calls: int = 0
@@ -311,6 +312,8 @@ def interactive_episode(run_id: str, events: list[dict], summary: dict | None, t
             ep.wall_s = round(float(done["ts"]) - float(start["ts"]), 3)
         if ep.end_reason == "stopped":
             ep.excluded = "stopped"
+        elif ep.end_reason == "error":  # Lightning unreachable (agent/core.py), like Gym's masked outages
+            ep.excluded = "infra_error"
     else:
         stats, ep.latency_ms = _stats_from_events(events)
         for key, value in stats.items():
@@ -729,7 +732,7 @@ def render_markdown(report: dict) -> str:
                 f"{sk['corrupt_lines']} corrupt lines" if sk["corrupt_lines"] else ""]
     if any(excluded):
         notes.append("Skipped: " + ", ".join(x for x in excluded if x) + ".")
-    out += ["", "Runs = scored runs (+ masked / dropped / incomplete / stopped, which are excluded from every "
+    out += ["", "Runs = scored runs (+ masked / dropped / incomplete / stopped / infra_error, which are excluded from every "
             "other column). Steps = Lightning calls per run. Validity = valid / total tool calls. Problems = "
             "corrections (invalid calls + replies without a tool call), failed actions and no-change actions; "
             "Recovered = problems followed by an ok, screen-changing action. " + " ".join(notes),
