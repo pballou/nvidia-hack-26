@@ -57,12 +57,34 @@ the sandbox's own state (the agent never sees that state).
 scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API; --headed to watch the browser
 ```
 
-The script checks that :8001 and Lightning respond, then prints the console URL. In
-the console, choose Grounder `base` (before SFT) or `grounder`, then run an easy task
-such as "Make the text bigger, I can't read this."
+The script checks that the VLM (`vlm.base_url` in `configs/agent.yaml`) and Lightning
+respond, then prints the console URL. In the console, choose Grounder `base` (before
+SFT) or `grounder`, then run an easy task such as "Make the text bigger, I can't read
+this."
 
-Run the pieces separately with `scripts/run_sandbox.sh` and
-`scripts/run_console.sh --agent mock|real [--headed]`.
+**5. Voice input (optional).** NVIDIA Parakeet TDT 0.6B v3 runs locally through
+NeMo-Speech.cpp 0.2.0. Audio never leaves the machine, and there's no cloud speech.
+
+- **Install** the pinned release binary and the official weights
+  (`nvidia/parakeet-tdt-0.6b-v3`, q8_0 GGUF, 714 MB; the tool checks both SHAs):
+
+  ```bash
+  curl -fsSLO https://raw.githubusercontent.com/NVIDIA/NeMo-Speech.cpp/v0.2.0/scripts/install.sh
+  shasum -a 256 install.sh   # c364c26ba45fb61b772dc75e9d9d2cb7373cddcda20d6f4a3a1347823c31fc9b
+  sh install.sh --version 0.2.0 --backend metal --binary-only --no-modify-path
+  ~/.local/bin/nemo-speech pull parakeet-tdt
+  ```
+
+- **Serve** with `scripts/run_asr.sh` (127.0.0.1:8096). `demo_up.sh` uses it when
+  `/health` answers; otherwise voice falls back to a stub that returns fixed text.
+- **Use it in the console:**
+  - Click the mic, or hold Right Option (or Space when no text field has focus), and
+    say the request.
+  - It runs after a 1.5 s countdown, which Esc cancels.
+  - Saying "stop" during a run stops it.
+
+Run the pieces separately with `scripts/run_sandbox.sh`, `scripts/run_asr.sh` and
+`scripts/run_console.sh --agent mock|real [--asr parakeet] [--headed]`.
 
 Tests:
 `.venv-gym/bin/python -m pytest sandbox/tests console/tests -q`. They cover the
