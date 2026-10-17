@@ -63,10 +63,10 @@ Follow the organizers' recommended flow:
 | Segment | Time | Content |
 | --- | --- | --- |
 | 1. Team | 20–30 s | Team name; who did what |
-| 2. Pitch | 30–40 s | Accessibility: "say what you want, the agent does it in any app, from pixels alone", using small local models |
+| 2. Pitch | 30–40 s | Commercial framing (judge advice): self-service fails (14% resolved), so customers call ($13.50 vs $1.84); the accessibility gap. Then "say what you want, and it does it on the real site, from the screen alone". **Script: [pitch.md §10](pitch.md#10-60-second-video-script).** |
 | 3. Live demo | 45–60 s | Core loop with minimal cuts: user request → Lightning plans → grounder clicks (show the click overlay) → page changes → task done. Show one base-vs-tuned difference. |
 | 4. How we built it | 60–90 s | Architecture diagram; NeMo Gym envs and the base → SFT → GRPO results; BLADE failure analysis; vLLM on the H200; official Lightning BF16 on vLLM (vllm-metal on the Mac) plus thinking control. Challenges: the ScreenSpot contamination we found and excluded, coordinate conventions, the one-GPU budget. |
-| 5. So what | 20–30 s | Works on apps without accessible code; measured improvement; small: "runs locally" only if the Mac-local check passed, otherwise "fits on one GPU (~32B total)" |
+| 5. So what | 20–30 s | ROI (illustrative): a 2M-customer utility saves ~$4–8M/yr at 20–40% call deflection; no API needed; measured improvement (icons 78 → 85%); "fits on one GPU" (or "runs on this Mac" only if that check passed); the ask: one design partner. **Script: [pitch.md §10](pitch.md#10-60-second-video-script); "don't say" list there too.** |
 
 **Owner:** Charlie records and uploads. **Recording plan:** do a dry run Saturday night if possible. Record Sunday 8:30–10:00,
 upload unlisted by 10:15, submit the form by 10:30.
