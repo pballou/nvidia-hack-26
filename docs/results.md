@@ -1,5 +1,10 @@
 # Results log
 
+> **Note:** the Saturday agent reads ran on planner prompt agent-v3, whose examples
+> overlapped some sandbox tasks, so their absolute numbers are optimistic. From
+> tonight on, runs use agent-v4 (examples from unrelated apps). Base-vs-tuned is fair
+> either way, because both sides use the same prompts.
+
 Numbers as they land. The newest row in each table is the most recent result.
 Commands and configs are in [runs.md](runs.md). "Reportable" means official BF16
 Lightning, the real sandbox, and grounder choices made on the dev split.
@@ -67,3 +72,11 @@ First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
 
 - **Next:** the Gym `web_agent` eval with `--num-repeats 3`, base vs final
   grounder (tonight, once :8001 serves `grounder`).
+
+## Lightning data engine (T3) audit
+
+- **Prompt v4, hosted Lightning, 50 kept + 16 dropped rows (Patrick, 2026-10-17):**
+  - Rewrite faithfulness **42/43 = 97.7%** of the cards he could verify (6 unsure,
+    all unverifiable by the reviewer; 1 unfaithful from a source ambiguity).
+  - **13 of 16 model drops overturned** (readable labels dropped as
+    "unintelligible"). Policy: model drops fall back to the raw label.
