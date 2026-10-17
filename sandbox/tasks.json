@@ -122,7 +122,7 @@
       {"path": "billing.payments.1", "op": "exists", "value": false},
       {"path": "billing.balance_cents", "op": "eq", "value": 9237}
     ]},
-    "steps_min": 5,
+    "steps_min": 4,
     "tags": ["hard", "billing"]
   },
   {
@@ -136,7 +136,7 @@
       {"path": "messages.sent.0.body", "op": "contains", "value": "broken"},
       {"path": "messages.sent.1", "op": "exists", "value": false}
     ]},
-    "steps_min": 6,
+    "steps_min": 5,
     "tags": ["hard", "messages"]
   },
   {
