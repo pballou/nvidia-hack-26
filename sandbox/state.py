@@ -295,6 +295,10 @@ def _billing_pay(state, p):
     if amount > bal:
         raise ActionError(f"You can pay at most {money(bal)}")
     state["billing"]["balance_cents"] = bal - amount
+    if bal - amount == 0:
+        for stmt in state["billing"]["statements"]:
+            if stmt["status"] == "due":
+                stmt["status"] = "paid"
     n = len(state["billing"]["payments"]) + 1
     conf = f"PAY-{1000 + n}"
     state["billing"]["payments"].append(
@@ -310,7 +314,7 @@ def _usage_select(state, p):
     if month is None:
         raise ActionError("Month not found")
     state["usage"]["selected_month"] = mid
-    return None  # the details panel is the visible change
+    return f"Showing {month['label']}"
 
 
 def _outage_report(state, p):
@@ -430,7 +434,7 @@ def _help_contact(state, p):
     reqs = state["help"]["contact_requests"]
     ref = f"HELP-{2001 + len(reqs)}"
     reqs.append({"topic": topic, "message": message.strip(), "date": TODAY, "reference": ref})
-    return f"Thanks! We'll reply within 1 business day. Reference {ref}."
+    return f"Thanks! We'll call you within 1 business day. Reference {ref}."
 
 
 def _notifications_mark_read(state, p):

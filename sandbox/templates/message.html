@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+
+{%- set m = state.messages.inbox[mid] %}
+{%- set REPLY_TO = {
+  'Customer Support': 'support',
+  'Dana Whitfield (Landlord)': 'landlord',
+  'Acme Billing': 'billing',
+  'Acme Outage Team': 'outages',
+  'Acme Field Services': 'field_services',
+} %}
+{%- set reply_key = REPLY_TO.get(m['from']) %}
+{%- set words = m['from'].replace('(', '').split() %}
+
+{% block title %}{{ m.subject }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/messages.css">
+{% endblock %}
+
+{% block content %}
+<a class="back-link" href="/messages" data-testid="message-back">{{ icon('arrow-left', '1.125rem') }}Inbox</a>
+
+<article class="card message-view" data-testid="message-view" aria-labelledby="message-subject">
+  <header class="message-head">
+    <h1 id="message-subject">{{ m.subject }}</h1>
+    <button type="button" class="btn btn-secondary star-btn{% if m.starred %} is-on{% endif %}" data-testid="message-star" data-act="messages.star" data-payload="{{ {'id': m.id, 'starred': not m.starred}|tojson_attr }}" aria-pressed="{{ 'true' if m.starred else 'false' }}">
+      {{- icon('star-filled' if m.starred else 'star', '1.25rem') }}{{ 'Starred' if m.starred else 'Star' -}}
+    </button>
+  </header>
+
+  <div class="message-meta">
+    {%- if m['from'].startswith('Acme') %}
+    <span class="sender-avatar is-acme">{{ icon('bolt', '1.25rem', 'icon-fill') }}</span>
+    {%- else %}
+    <span class="sender-avatar">{{ (words[0][0] ~ (words[1][0] if words|length > 1 else ''))|upper }}</span>
+    {%- endif %}
+    <div class="grow">
+      <div class="message-from">{{ m['from'] }}</div>
+      <div class="muted small">To {{ state.settings.profile.name }}</div>
+    </div>
+    <div class="message-date">{{ icon('calendar', '1rem') }}<span>{{ fmt_date(m.date, 'long') }}</span></div>
+  </div>
+
+  <div class="message-body"><p>{{ m.body }}</p></div>
+
+  <footer class="card-footer message-actions">
+    <a class="btn btn-primary" href="/messages/compose{% if reply_key %}?to={{ reply_key }}{% endif %}" data-testid="message-reply">
+      <svg class="icon" style="width:1.125rem;height:1.125rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.5 14.5 4 9l5.5-5.5"/><path d="M4 9h10a6 6 0 0 1 6 6v5"/></svg>Reply
+    </a>
+    <span class="muted small">{{ 'Your reply goes to ' ~ CONTACTS[reply_key] ~ '.' if reply_key else 'This sender doesn\'t take replies. Reply to start a new message to our team.' }}</span>
+  </footer>
+</article>
+{% endblock %}

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Billing{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/billing.css">
+{% endblock %}
+
+{% block content %}
+{%- set b = state.billing %}
+{%- set method = ACCOUNT.payment_method %}
+{%- set has_due = b.balance_cents > 0 %}
+{%- set latest = b.statements[0] %}
+
+{{ ui.page_header('Billing', 'Pay your bill, manage Autopay and download statements.') }}
+
+<div class="grid grid-12">
+  <section class="card bill-balance span-7" aria-labelledby="bill-balance-title">
+    <div class="bill-balance-main">
+      <div>
+        <h2 class="eyebrow" id="bill-balance-title">Amount due</h2>
+        <div class="bill-amount money">{{ money(b.balance_cents) }}</div>
+        {%- if has_due %}
+        <div class="bill-due">{{ icon('calendar', '1.125rem') }}<span>Due by <strong>{{ fmt_date(b.due_date, 'long') }}</strong></span></div>
+        {%- else %}
+        <div class="bill-due">{{ icon('check-circle', '1.125rem') }}<span>You're all paid up</span></div>
+        {%- endif %}
+      </div>
+      {%- if has_due %}
+      <button type="button" class="btn btn-primary btn-lg" data-testid="pay-open">{{ icon('credit-card') }}Pay bill</button>
+      {%- else %}
+      <button type="button" class="btn btn-primary btn-lg" data-testid="pay-open" disabled>{{ icon('check') }}Nothing due</button>
+      {%- endif %}
+    </div>
+    <div class="bill-balance-foot">
+      {%- if b.payments %}
+      {%- set last = b.payments[-1] %}
+      Last payment <strong>{{ money(last.amount_cents) }}</strong> on {{ fmt_date(last.date) }} &middot; Confirmation {{ last.confirmation }}
+      {%- else %}
+      {{ latest.label }} statement &middot; Issued {{ fmt_date(latest.issued) }}
+      {%- endif %}
+    </div>
+  </section>
+
+  <section class="card bill-autopay span-5{% if b.autopay %} is-on{% endif %}" aria-labelledby="autopay-title">
+    <div class="bill-autopay-head">
+      <span class="bill-autopay-icon">{{ icon('refresh', '1.375rem') }}</span>
+      <h2 class="grow" id="autopay-title">Autopay</h2>
+      {{ ui.switch('autopay-toggle', b.autopay, 'Autopay', attrs='aria-describedby="autopay-status"', act='billing.autopay') }}
+    </div>
+    <p class="bill-autopay-status" id="autopay-status">
+      {%- if b.autopay %}{{ icon('check-circle', '1.125rem') }}<span>On: we pay from {{ method }} on each due date</span>
+      {%- else %}<span class="bill-off-dot" aria-hidden="true"></span><span>Off</span>{% endif -%}
+    </p>
+    <p class="bill-autopay-note">
+      {%- if b.autopay and has_due %}
+      Next automatic payment: <strong>{{ money(b.balance_cents) }}</strong> on {{ fmt_date(b.due_date) }}.
+      {%- elif b.autopay %}
+      Nothing is due right now. We'll pay your next statement on its due date.
+      {%- else %}
+      Never miss a due date: turn it on and we'll pay your full balance automatically.
+      {%- endif %}
+    </p>
+  </section>
+</div>
+
+<section class="card section" aria-labelledby="statements-title">
+  <div class="card-header">
+    <h2 id="statements-title">Statements</h2>
+    <p>The last 12 months, newest first</p>
+  </div>
+  <table class="table bill-table" data-testid="statements-table" aria-labelledby="statements-title">
+    <colgroup><col class="col-label"><col class="col-issued"><col class="col-amount"><col class="col-status"><col></colgroup>
+    <thead>
+      <tr><th scope="col">Statement</th><th scope="col">Issued</th><th scope="col" class="num">Amount</th><th scope="col">Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {%- for s in b.statements %}
+      {%- set downloaded = s.id in b.downloaded %}
+      {%- set paid = s.status == 'paid' or not has_due %}
+      <tr data-testid="statement-row-{{ s.id }}"{% if downloaded %} class="is-highlighted"{% endif %}>
+        <td><span class="bill-stmt">{{ icon('file', '1.25rem') }}<span>{{ s.label }}</span></span></td>
+        <td>{{ fmt_date(s.issued) }}</td>
+        <td class="num money">{{ money(s.amount_cents) }}</td>
+        <td><span class="bill-badges">
+          {{- ui.badge('Paid', 'success') if paid else ui.badge('Due', 'warning') }}
+          {%- if downloaded %}{{ ui.badge('Downloaded', 'brand', 'check') }}{% endif -%}
+        </span></td>
+        {#- Deliberately unlabeled (UI rule 6). #}
+        <td class="actions"><button type="button" class="icon-btn outline" data-testid="download-{{ s.id }}" data-act="billing.download" data-payload="{{ {'statement_id': s.id}|tojson_attr }}">{{ icon('download') }}</button></td>
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card section" aria-labelledby="payments-title">
+  <div class="card-header">
+    <h2 id="payments-title">Recent payments</h2>
+    <p>Payments you make online show up here right away</p>
+  </div>
+  <ul class="list" data-testid="payments-list">
+    {%- for p in b.payments|reverse %}
+    <li class="list-row">
+      <span class="bill-pay-icon">{{ icon('check', '1.125rem') }}</span>
+      <div class="grow">
+        <div class="list-title money">{{ money(p.amount_cents) }}</div>
+        <div class="list-meta">{{ fmt_date(p.date, 'long') }} &middot; {{ p.method }}</div>
+      </div>
+      <div class="bill-conf">
+        <div class="eyebrow">Confirmation</div>
+        <div class="strong num">{{ p.confirmation }}</div>
+      </div>
+      {{ ui.badge('Received', 'success') }}
+    </li>
+    {%- else %}
+    <li>{{ ui.empty('credit-card', 'No payments yet', 'When you pay a bill here, it shows up in this list with its confirmation number.') }}</li>
+    {%- endfor %}
+  </ul>
+</section>
+
+{%- if has_due %}
+{% call ui.modal('pay-dialog', 'Pay your bill', open=(query.get('pay') == '1')) %}
+<form id="pay-form" novalidate autocomplete="off">
+  <div class="modal-body">
+    <div class="bill-pay-summary">
+      <span class="muted">Amount due by {{ fmt_date(b.due_date) }}</span>
+      <span class="money">{{ money(b.balance_cents) }}</span>
+    </div>
+    <fieldset class="bill-options">
+      <legend class="label">How much would you like to pay?</legend>
+      <label class="bill-option is-selected" data-testid="pay-full">
+        <input type="radio" name="pay-choice" value="full" checked>
+        <span class="grow">Full balance</span>
+        <span class="money">{{ money(b.balance_cents) }}</span>
+      </label>
+      <div class="bill-option bill-option-other">
+        <label class="bill-option-label" data-testid="pay-other">
+          <input type="radio" name="pay-choice" value="other">
+          <span>Other amount</span>
+        </label>
+        <div class="input-group bill-amount-group">
+          <span class="input-prefix" aria-hidden="true">$</span>
+          <input class="input" id="pay-amount" data-testid="pay-amount" type="text" inputmode="decimal" placeholder="0.00" aria-label="Other amount, in dollars" aria-describedby="pay-error">
+        </div>
+      </div>
+      <p class="error" id="pay-error" data-testid="pay-error" hidden>{{ icon('alert', '1rem') }}<span></span></p>
+    </fieldset>
+    <p class="bill-from">{{ icon('credit-card', '1.125rem') }}<span>Paid today from <strong>{{ method }}</strong></span></p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+    <button type="submit" class="btn btn-primary" data-testid="pay-continue">Continue{{ icon('arrow-right', '1.125rem') }}</button>
+  </div>
+</form>
+{% endcall %}
+
+{% call ui.modal('confirm-dialog', 'Confirm your payment') %}
+<div class="modal-body">
+  <p class="bill-confirm-text" data-testid="confirm-text"></p>
+  <dl class="kv bill-confirm-kv">
+    <dt>Amount</dt><dd class="money" id="confirm-amount"></dd>
+    <dt>From</dt><dd>{{ method }}</dd>
+    <dt>Payment date</dt><dd>Today, {{ fmt_date(TODAY) }}</dd>
+    <dt>Balance after payment</dt><dd class="money" id="confirm-remaining"></dd>
+  </dl>
+</div>
+<div class="modal-footer">
+  <button type="button" class="btn btn-secondary" data-testid="pay-back">{{ icon('arrow-left', '1.125rem') }}Back</button>
+  <button type="button" class="btn btn-primary" data-testid="pay-confirm">{{ icon('lock', '1.125rem') }}Confirm payment</button>
+</div>
+{% endcall %}
+{%- endif %}
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="billing-data">{{ {'balance_cents': state.billing.balance_cents, 'method': ACCOUNT.payment_method}|tojson }}</script>
+<script src="/static/billing.js"></script>
+{% endblock %}

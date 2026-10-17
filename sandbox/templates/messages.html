@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Messages{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/messages.css">
+{% endblock %}
+
+{% block content %}
+{%- set inbox = state.messages.inbox.values()|list %}
+{%- set unread = inbox|rejectattr('read')|list|length %}
+{%- set sent = state.messages.sent %}
+
+{{ ui.page_header('Messages', 'Updates from Acme Utilities and the conversations you start.') }}
+
+{{ ui.tabs([('inbox', '/messages', 'Inbox', unread), ('sent', '/messages?tab=sent', 'Sent')], tab, 'Mailboxes') }}
+
+<section class="card msg-card" aria-label="{{ 'Inbox' if tab == 'inbox' else 'Sent messages' }}">
+  <div class="msg-toolbar">
+    <a class="btn btn-primary" href="/messages/compose" data-testid="compose-open">{{ icon('pencil', '1.125rem') }}New message</a>
+    {%- if tab == 'inbox' %}
+    {#- Deliberately unlabeled (UI rule 6). #}
+    <button type="button" class="icon-btn outline" data-testid="mark-all-read" data-act="messages.mark_all_read">{{ icon('check-double', '1.375rem') }}</button>
+    <span class="grow"></span>
+    <span class="msg-count">
+      {%- if unread %}<span class="dot"></span>{% else %}{{ icon('check-circle', '1.125rem', 'msg-count-ok') }}{% endif -%}
+      <strong data-testid="unread-count">{{ unread ~ ' unread' if unread else 'All read' }}</strong>
+      <span aria-hidden="true">&middot;</span> {{ inbox|length }} messages
+    </span>
+    {%- else %}
+    <span class="grow"></span>
+    {%- if sent %}<span class="msg-count"><strong>{{ sent|length }} sent</strong></span>{% endif %}
+    {%- endif %}
+  </div>
+
+  {%- if tab == 'inbox' %}
+  <ul class="msg-list" data-testid="inbox-list">
+    {%- for m in inbox %}
+    <li class="msg-row{% if not m.read %} is-unread{% endif %}" data-testid="msg-row-{{ m.id }}">
+      {#- Deliberately unlabeled (UI rule 6). A sibling of the link, so it never opens the message. #}
+      <button type="button" class="icon-btn msg-star{% if m.starred %} is-on{% endif %}" data-testid="star-{{ m.id }}" data-act="messages.star" data-payload="{{ {'id': m.id, 'starred': not m.starred}|tojson_attr }}" aria-pressed="{{ 'true' if m.starred else 'false' }}">
+        {{- icon('star-filled' if m.starred else 'star', '1.375rem') -}}
+      </button>
+      <a class="msg-link" href="/messages/{{ m.id }}">
+        <span class="dot{% if m.read %} dot-read{% endif %}"></span>
+        <span class="msg-main">
+          <span class="msg-line1">
+            <span class="msg-from truncate">{{ m['from'] }}</span>
+            <span class="msg-date">{{ fmt_date(m.date) }}</span>
+          </span>
+          <span class="msg-line2 truncate"><span class="msg-subject">{{ m.subject }}</span> <span class="msg-preview">&ndash; {{ m.body }}</span></span>
+        </span>
+      </a>
+    </li>
+    {%- endfor %}
+  </ul>
+  {%- else %}
+  <ul class="msg-list" data-testid="sent-list">
+    {%- for s in sent|reverse %}
+    <li class="msg-row sent-row{% if loop.first %} is-latest{% endif %}">
+      <span class="sent-icon">{{ icon('send', '1.125rem') }}</span>
+      <span class="msg-main">
+        <span class="msg-line1">
+          <span class="msg-from truncate">To: {{ CONTACTS.get(s.to, s.to) }}</span>
+          <span class="msg-date">{{ 'Today' if s.date == TODAY else fmt_date(s.date) }}</span>
+        </span>
+        <span class="msg-line2 truncate"><span class="msg-subject">{{ s.subject or '(No subject)' }}</span> <span class="msg-preview">&ndash; {{ s.body }}</span></span>
+      </span>
+    </li>
+    {%- else %}
+    <li class="sent-empty">
+      {{ ui.empty('send', 'No sent messages yet', 'Messages you send to Acme Utilities or your contacts appear here.') }}
+      <a class="btn btn-secondary" href="/messages/compose">{{ icon('pencil', '1.125rem') }}New message</a>
+    </li>
+    {%- endfor %}
+  </ul>
+  {%- endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Energy usage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/usage.css">
+{% endblock %}
+
+{% block content %}
+{%- set u = state.usage %}
+{%- set months = u.months %}
+{%- set total = months|sum(attribute='kwh') %}
+{%- set avg = total / months|length %}
+{%- set sel = (months|selectattr('id', 'equalto', u.selected_month)|first) if u.selected_month else none %}
+{%- set DAYS = {'01': 31, '02': 28, '03': 31, '04': 30, '05': 31, '06': 30, '07': 31, '08': 31, '09': 30, '10': 31, '11': 30, '12': 31} %}
+
+{{ ui.page_header('Energy usage', 'Last 12 months, kWh') }}
+
+<section class="card usage-summary" aria-label="Usage summary">
+  <div class="summary-item">
+    <span class="summary-icon">{{ icon('bolt', '1.375rem') }}</span>
+    <div>
+      <div class="summary-label">12-month total</div>
+      <div class="summary-value">{{ '{:,}'.format(total) }} <span class="unit">kWh</span></div>
+    </div>
+  </div>
+  <div class="summary-item">
+    <span class="summary-icon">{{ icon('chart', '1.375rem') }}</span>
+    <div>
+      <div class="summary-label">Monthly average</div>
+      <div class="summary-value">{{ '{:,}'.format(avg|round|int) }} <span class="unit">kWh</span></div>
+    </div>
+  </div>
+  <div class="summary-item">
+    <span class="summary-icon summary-icon-hint">{{ icon('info', '1.375rem') }}</span>
+    <div>
+      <div class="summary-hint">Select a month to see details</div>
+      <div class="summary-label">Click a bar in the chart below.</div>
+    </div>
+  </div>
+</section>
+
+<div class="usage-layout">
+  <section class="card usage-chart-card" aria-labelledby="chart-title">
+    <div class="card-header">
+      <div>
+        <h2 id="chart-title">Monthly usage</h2>
+        <p>{{ months[0].label }} to {{ months[-1].label }}</p>
+      </div>
+      <ul class="chart-legend" aria-hidden="true">
+        <li><span class="swatch"></span>Usage</li>
+        <li><span class="swatch swatch-selected"></span>Selected month</li>
+      </ul>
+    </div>
+    <div class="chart-body">
+      <canvas class="usage-canvas" id="usage-chart" data-testid="usage-chart" role="img" aria-label="Monthly energy usage bar chart"></canvas>
+    </div>
+  </section>
+
+  <section class="card usage-details" data-testid="usage-details" aria-labelledby="details-title">
+    <div class="card-header"><h2 id="details-title">Month details</h2></div>
+    {%- if sel %}
+    {%- set stmt = state.billing.statements|selectattr('id', 'equalto', sel.id)|first %}
+    {%- set pct = ((sel.kwh - avg) / avg * 100)|abs|round|int %}
+    {%- set above = sel.kwh > avg %}
+    <div class="card-body details-body">
+      <div>
+        <div class="details-month">{{ sel.label }}</div>
+        <div class="details-kwh">{{ '{:,}'.format(sel.kwh) }} <span class="unit">kWh</span></div>
+      </div>
+      {%- if pct == 0 %}
+      <p class="details-compare">{{ icon('check-circle', '1.125rem') }}<span>Right at your monthly average</span></p>
+      {%- else %}
+      <p class="details-compare {{ 'is-above' if above else 'is-below' }}">{{ icon('trend-up' if above else 'trend-down', '1.125rem') }}<span>{{ pct }}% {{ 'above' if above else 'below' }} your monthly average</span></p>
+      {%- endif %}
+      <dl class="kv details-kv">
+        <dt>Bill amount</dt>
+        <dd>{% if stmt %}<span class="money">{{ money(stmt.amount_cents) }}</span>{% else %}Not billed yet{% endif %}</dd>
+        {%- if stmt %}
+        <dt>Status</dt>
+        <dd>{{ ui.badge('Paid', 'success') if stmt.status == 'paid' else ui.badge('Due', 'warning') }}</dd>
+        {%- endif %}
+        <dt>Daily average</dt>
+        <dd>{{ '%.1f'|format(sel.kwh / DAYS[sel.id[5:]]) }} kWh</dd>
+      </dl>
+      <a class="btn btn-secondary btn-sm details-link" href="/billing">{{ icon('receipt', '1.125rem') }}View statements</a>
+    </div>
+    {%- else %}
+    {{ ui.empty('chart', "Select a bar to see that month's details", 'Click any bar in the chart to see its usage, bill and how it compares.') }}
+    {%- endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="usage-data">{{ {'months': state.usage.months, 'selected': state.usage.selected_month}|tojson }}</script>
+<script src="/static/usage.js"></script>
+{% endblock %}

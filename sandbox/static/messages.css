@@ -1,0 +1,106 @@
+/* Messages: inbox / sent lists, message view, compose. Sizes in rem (text size S/M/L). */
+
+:root { --star-fill: #fbbf24; }
+html.hc { --star-fill: #ffd60a; }
+
+/* ---- list toolbar ---------------------------------------------------------- */
+
+.msg-toolbar {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.625rem 1.5rem 0.625rem 1rem;
+  border-bottom: var(--bw) solid var(--border);
+}
+.msg-toolbar .icon-btn { width: 2.75rem; height: 2.75rem; }
+.msg-count { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--text-muted); font-size: 0.875rem; }
+.msg-count strong { color: var(--text); font-size: 0.9375rem; }
+.msg-count-ok { color: var(--success); }
+
+/* ---- rows (fixed 4rem: the fold position of each row is part of the task design) */
+
+.msg-list { margin: 0; padding: 0; list-style: none; }
+.msg-row {
+  display: flex; align-items: stretch;
+  height: 4rem;
+  border-bottom: var(--bw) solid var(--border);
+}
+.msg-list > .msg-row:last-child { border-bottom: 0; border-radius: 0 0 var(--radius) var(--radius); }
+.msg-row:hover { background: var(--surface-2); }
+.msg-row.is-unread { background: var(--unread-soft); box-shadow: inset 0.1875rem 0 0 var(--unread); }
+.msg-row.is-unread:hover { background: var(--surface-3); }
+
+.msg-star { align-self: center; margin: 0 0.125rem 0 0.75rem; }
+.msg-star.is-on .icon path, .star-btn.is-on .icon path { fill: var(--star-fill); }
+.star-btn.is-on { border-color: var(--star); }
+.star-btn.is-on .icon { color: var(--star); }
+
+.msg-link {
+  display: flex; flex: 1 1 auto; align-items: center; gap: 0.75rem; min-width: 0;
+  padding: 0 1.5rem 0 0.375rem;
+  color: inherit; text-decoration: none;
+}
+.msg-link:focus-visible { outline-offset: -0.25rem; border-radius: var(--radius-sm); }
+.msg-main { display: flex; flex: 1 1 auto; flex-direction: column; gap: 0.0625rem; min-width: 0; }
+.msg-line1 { display: flex; align-items: baseline; gap: 1rem; line-height: 1.4; }
+.msg-from { flex: 1 1 auto; font-weight: 500; }
+.msg-date { flex-shrink: 0; color: var(--text-muted); font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
+.msg-line2 { color: var(--text-muted); font-size: 0.875rem; line-height: 1.4; }
+.msg-subject { color: var(--text); }
+.is-unread .msg-from, .is-unread .msg-subject { font-weight: 700; }
+.is-unread .msg-date { color: var(--unread); font-weight: 700; }
+
+.sent-row { align-items: center; gap: 0.875rem; padding: 0 1.5rem 0 1.25rem; }
+.sent-row.is-latest { background: var(--highlight); box-shadow: inset 0.25rem 0 0 var(--highlight-edge); }
+.sent-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.25rem; height: 2.25rem; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-text);
+}
+.sent-empty { display: grid; justify-items: center; padding-bottom: 2.5rem; }
+.sent-empty .empty { padding-bottom: 1.25rem; }
+
+html.hc .msg-row:hover { background: var(--surface); outline: 2px solid var(--accent); outline-offset: -2px; }
+html.hc .msg-row.is-unread { box-shadow: inset 0.375rem 0 0 var(--unread); }
+html.hc .sent-icon { border: 2px solid var(--accent); }
+html.hc .sent-row.is-latest { box-shadow: inset 0.375rem 0 0 var(--highlight-edge); }
+
+/* ---- message view ---------------------------------------------------------- */
+
+.back-link {
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  margin: 0 0 1rem -0.375rem; padding: 0.375rem 0.625rem 0.375rem 0.375rem;
+  border-radius: var(--radius-sm);
+  font-weight: 650; text-decoration: none;
+}
+.back-link:hover { background: var(--surface-3); text-decoration: underline; }
+html.hc .back-link { text-decoration: underline; text-decoration-thickness: 2px; }
+
+.message-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border-bottom: var(--bw) solid var(--border);
+}
+.message-head h1 { font-size: 1.5rem; }
+.star-btn { flex-shrink: 0; }
+.message-meta { display: flex; align-items: center; gap: 0.875rem; padding: 1.25rem 1.5rem 0.5rem; }
+.sender-avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.75rem; height: 2.75rem; border-radius: 50%;
+  background: var(--surface-3); color: var(--text);
+  font-size: 0.9375rem; font-weight: 800; letter-spacing: 0.02em;
+}
+.sender-avatar.is-acme { background: var(--brand); color: var(--brand-mark); }
+html.hc .sender-avatar { border: 2px solid #ffffff; }
+.message-from { font-weight: 700; }
+.message-date { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-muted); font-size: 0.875rem; white-space: nowrap; }
+.message-body { max-width: 46rem; padding: 1rem 1.5rem 2.25rem 5.125rem; font-size: 1.0625rem; line-height: 1.65; white-space: pre-line; }
+.message-actions { display: flex; align-items: center; gap: 1rem; }
+
+/* ---- compose ---------------------------------------------------------------- */
+
+.compose-fields { display: grid; gap: 1.25rem; }
+.compose-fields textarea.input { min-height: 9.75rem; }
+.compose-actions { display: flex; gap: 0.75rem; }
+.field.has-error .picker-button { border-color: var(--danger); }
+.compose-tips h2 { margin-bottom: 0.75rem; font-size: 1rem; }
+.compose-tips ul { display: grid; gap: 0.5rem; margin: 0; padding-left: 1.125rem; color: var(--text-muted); font-size: 0.875rem; }
+.nowrap { white-space: nowrap; }

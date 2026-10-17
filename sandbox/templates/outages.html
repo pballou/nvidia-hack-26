@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Outage map{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/outages.css">
+{% endblock %}
+
+{% block content %}
+{%- set o = state.outages %}
+{{ ui.page_header('Outage map', 'Click your district to report an outage') }}
+
+<div class="outage-layout">
+  {#- One canvas, no DOM element per district (T1-app.md). Drawn by /static/outages.js. #}
+  <div class="card map-card">
+    <canvas id="outage-map" data-testid="outage-map" width="1000" height="650" tabindex="0" role="application"
+      aria-label="Outage map of the Acme Utilities service area. Use the arrow keys to choose a district, then press Enter to report an outage there."></canvas>
+  </div>
+
+  <div class="outage-side">
+    <section class="card" aria-labelledby="active-title">
+      <div class="card-header">
+        <h2 id="active-title">Current outages</h2>
+        {%- if o.active %}{{ ui.badge(o.active|length ~ ' active', 'danger') }}{% endif %}
+      </div>
+      <ul class="list" data-testid="active-list">
+        {%- for a in o.active %}
+        <li class="list-row">
+          <span class="out-icon out-icon-outage">{{ icon('bolt') }}</span>
+          <div class="grow">
+            <div class="out-head"><span class="list-title">{{ DISTRICT_NAMES[a.district] }}</span>{{ ui.badge(a.status, 'warning') }}</div>
+            <div class="list-meta">{{ a.customers }} customers affected &middot; {{ 'since today' if a.since == TODAY else 'since ' ~ fmt_date(a.since) }}</div>
+          </div>
+        </li>
+        {%- else %}
+        <li>{{ ui.empty('check-circle', 'No outages right now', 'Power is on across our service area.') }}</li>
+        {%- endfor %}
+      </ul>
+    </section>
+
+    <section class="card" aria-labelledby="reports-title">
+      <div class="card-header">
+        <h2 id="reports-title">Your reports</h2>
+        {%- if o.reports %}{{ ui.badge(o.reports|length, 'count') }}{% endif %}
+      </div>
+      <ul class="list" data-testid="reports-list">
+        {%- for r in o.reports|reverse %}
+        <li class="list-row{% if loop.first %} is-highlighted{% endif %}">
+          <span class="out-icon out-icon-report">{{ icon('map-pin') }}</span>
+          <div class="grow">
+            <div class="out-head"><span class="list-title">{{ DISTRICT_NAMES[r.district] }}</span>{{ ui.badge('Received', 'info') }}</div>
+            <div class="list-meta">{{ OUTAGE_TYPES[r.type] }}</div>
+            <div class="list-meta">{{ r.reference }} &middot; {{ 'Today' if r.date == TODAY else fmt_date(r.date) }}</div>
+            {%- if r.details %}
+            <div class="list-meta out-details truncate">&ldquo;{{ r.details }}&rdquo;</div>
+            {%- endif %}
+          </div>
+        </li>
+        {%- else %}
+        <li>{{ ui.empty('map-pin', 'No reports yet', 'Click a district on the map to tell us about an outage.') }}</li>
+        {%- endfor %}
+      </ul>
+    </section>
+
+    <div class="alert alert-warning out-safety">
+      {{ icon('alert') }}
+      <p><strong>See a downed power line?</strong> Stay at least 35 feet away and call <strong>1-800-555-0199</strong> right away.</p>
+    </div>
+  </div>
+</div>
+
+{% call ui.modal('report-dialog', 'Report an outage', title_testid='report-title') %}
+<div class="modal-body">
+  <div class="alert alert-warning" id="report-known" hidden>{{ icon('alert') }}<span></span></div>
+  <div class="alert alert-info" id="report-clear" hidden>{{ icon('info') }}<span></span></div>
+  <div class="field">
+    <span class="label" id="report-type-label">What's happening?</span>
+    {{ ui.chips('report-type-', OUTAGE_TYPES.items(), 'no_power', attrs='id="report-type" aria-labelledby="report-type-label"') }}
+  </div>
+  <div class="alert alert-danger" id="report-danger" hidden>{{ icon('alert') }}<span>Stay at least 35 feet away and call 1-800-555-0199 now. Treat every downed line as live.</span></div>
+  {{ ui.field('report-details', 'Details (optional)', testid='report-details', textarea=True, rows=3,
+              placeholder='For example: the whole street went dark') }}
+  <p class="alert alert-danger" id="report-error" hidden>{{ icon('alert') }}<span></span></p>
+</div>
+<div class="modal-footer">
+  <button type="button" class="btn btn-secondary" data-testid="report-cancel" data-modal-close>Cancel</button>
+  <button type="button" class="btn btn-primary" data-testid="report-submit">{{ icon('send') }}Submit report</button>
+</div>
+{% endcall %}
+{% endblock %}
+
+{% block scripts %}
+{%- set o = state.outages %}
+<script type="application/json" id="outage-data">{{ {
+  'districts': o.districts,
+  'active': o.active,
+  'reported': o.reports|map(attribute='district')|unique|list,
+  'home': 'riverside',
+}|tojson }}</script>
+<script src="/static/outages.js"></script>
+{% endblock %}

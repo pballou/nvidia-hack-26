@@ -1,0 +1,67 @@
+/* Usage page: summary row, canvas bar chart, month details panel.
+   The --chart-* colors are read by usage.js when it draws the canvas. */
+
+:root {
+  --chart-bar: #6f93bd;
+  --chart-bar-selected: #0f766e;
+  --chart-ring: #0b2545;
+  --chart-grid: #e6ebf1;
+  --chart-axis: #8b98a9;
+  --chart-tick: var(--text-muted);
+  --chart-label: var(--text);
+}
+html.hc {
+  --chart-bar: #ffffff;
+  --chart-bar-selected: #ffd60a;
+  --chart-ring: #ffd60a;
+  --chart-grid: #6e6e6e;
+  --chart-axis: #ffffff;
+}
+
+/* ---- summary row ---------------------------------------------------------- */
+
+.usage-summary { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(max-content, 1fr) 1.35fr; margin-bottom: 1.5rem; }
+.summary-item { display: flex; align-items: center; gap: 0.875rem; min-width: 0; padding: 1rem 1.5rem; }
+.summary-item + .summary-item { border-left: var(--bw) solid var(--border); }
+.summary-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.75rem; height: 2.75rem; border-radius: 0.75rem;
+  background: var(--accent-soft); color: var(--accent-text);
+}
+.summary-icon-hint { background: var(--info-soft); color: var(--info); }
+html.hc .summary-icon { border: 2px solid currentColor; }
+.summary-label { color: var(--text-muted); font-size: 0.875rem; font-weight: 600; }
+.summary-value { font-size: 1.5rem; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; }
+.summary-hint { font-weight: 700; }
+.unit { margin-left: 0.0625rem; color: var(--text-muted); font-size: 0.9375rem; font-weight: 650; letter-spacing: 0; }
+
+/* ---- chart + details ------------------------------------------------------ */
+
+/* Side by side when both fit (text S/M); the details panel wraps below at text L. */
+.usage-layout { display: flex; flex-wrap: wrap; align-items: stretch; gap: 1.5rem; }
+.usage-chart-card { flex: 999 1 40rem; min-width: 0; }
+.usage-details { flex: 1 1 16rem; min-width: 0; }
+
+.chart-legend { display: flex; gap: 1.25rem; margin: 0; padding: 0; list-style: none; color: var(--text-muted); font-size: 0.875rem; font-weight: 600; }
+.chart-legend li { display: inline-flex; align-items: center; gap: 0.5rem; }
+.swatch { width: 0.875rem; height: 0.875rem; border-radius: 0.1875rem; background: var(--chart-bar); }
+.swatch-selected { background: var(--chart-bar-selected); outline: 2px solid var(--chart-ring); outline-offset: 2px; }
+
+.chart-body { padding: 1.25rem 1.25rem 1rem; }
+.usage-canvas { width: 100%; height: 21rem; padding: 0; border: 0; }
+
+.details-body { display: grid; align-content: start; gap: 1.25rem; }
+.details-month { font-size: 1.25rem; font-weight: 700; }
+.details-kwh { margin-top: 0.125rem; font-size: 2.25rem; font-weight: 800; line-height: 1.15; letter-spacing: -0.02em; }
+.details-kwh .unit { font-size: 1rem; }
+.details-compare {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  padding: 0.625rem 0.75rem; border-radius: var(--radius-sm);
+  background: var(--surface-3); font-weight: 650; line-height: 1.35;
+}
+.details-compare > .icon { margin-top: 0.0625rem; }
+.details-compare.is-above { background: var(--warning-soft); color: var(--warning); }
+.details-compare.is-below { background: var(--success-soft); color: var(--success); }
+html.hc .details-compare { border: 2px solid currentColor; }
+.details-kv { gap: 0.5rem 1rem; padding-top: 1rem; border-top: var(--bw) solid var(--border); font-size: 0.9375rem; }
+.details-link { justify-self: start; }

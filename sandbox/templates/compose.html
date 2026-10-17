@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}New message{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/messages.css">
+{% endblock %}
+
+{% block content %}
+{%- set to = query.get('to') if query.get('to') in CONTACTS else None %}
+
+{{ ui.page_header('New message', 'Write to our team or one of your contacts. We usually reply within 1 business day.') }}
+
+<div class="grid grid-12">
+  <section class="card span-8" aria-label="New message">
+    <form id="compose-form" class="compose-form" novalidate>
+      <div class="card-body compose-fields">
+        <div class="field" id="compose-to-field">
+          <span class="label" id="compose-to-label">To</span>
+          {{ ui.picker('compose-to', CONTACTS.items()|list, to, 'Choose a recipient', 'compose-to-label') }}
+        </div>
+        {{ ui.field('compose-subject-input', 'Subject', testid='compose-subject', placeholder='Optional', attrs='autocomplete="off" maxlength="120"') }}
+        {{ ui.field('compose-body-input', 'Message', testid='compose-body', textarea=True, rows=6, placeholder='How can we help?') }}
+        <div class="alert alert-danger" data-testid="compose-error" role="alert" hidden>{{ icon('alert') }}<span data-error-text></span></div>
+      </div>
+      <div class="card-footer compose-actions">
+        <button type="submit" class="btn btn-primary" data-testid="compose-send">{{ icon('send', '1.125rem') }}Send</button>
+        <a class="btn btn-secondary" href="/messages" data-testid="compose-cancel">Cancel</a>
+      </div>
+    </form>
+  </section>
+
+  <aside class="span-4 stack">
+    <div class="alert alert-warning">
+      {{ icon('alert') }}
+      <div>
+        <div class="strong">Emergency?</div>
+        <p class="small">For a downed power line or a gas smell, don't send a message. Call <strong class="nowrap">1-800-555-0199</strong>, 24/7.</p>
+      </div>
+    </div>
+    <div class="card card-body compose-tips">
+      <h2>Tips for a faster answer</h2>
+      <ul>
+        <li>Mention the statement month or payment date.</li>
+        <li>For meter questions, include today's reading.</li>
+        <li>Your account number is added for you.</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/messages.js"></script>
+{% endblock %}

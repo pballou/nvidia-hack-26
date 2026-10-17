@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Settings{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/settings.css">
+{% endblock %}
+
+{% block content %}
+{%- set s = state.settings %}
+{%- set p = s.profile %}
+{%- set acc = s.accessibility %}
+
+{{ ui.page_header('Settings', 'Manage your profile, how we contact you, and how the portal looks.') }}
+{{ ui.tabs([
+  ('profile', '/settings?tab=profile', 'Profile'),
+  ('notifications', '/settings?tab=notifications', 'Notifications'),
+  ('accessibility', '/settings?tab=accessibility', 'Accessibility'),
+], tab, 'Settings sections') }}
+
+{%- if tab == 'profile' %}
+{%- set parts = p.name.split() %}
+{%- set my_initials = ((parts[0][0] if parts else '') ~ (parts[-1][0] if parts|length > 1 else ''))|upper %}
+<div class="grid grid-12 profile-grid">
+  <section class="card span-7" aria-labelledby="profile-title">
+    <form id="profile-form" novalidate>
+      <div class="card-header">
+        <div>
+          <h2 id="profile-title">Personal details</h2>
+          <p>We use these to contact you about your account.</p>
+        </div>
+      </div>
+      <div class="card-body stack stack-lg">
+        <div class="profile-who">
+          <span class="avatar avatar-xl">{{ my_initials }}</span>
+          <div>
+            <div class="profile-who-name">{{ p.name }}</div>
+            <div class="muted small">Account holder &middot; Account {{ ACCOUNT.number }}</div>
+          </div>
+        </div>
+        <div class="alert alert-danger" id="profile-form-error" role="alert" hidden>{{ icon('alert') }}<span></span></div>
+        <div class="form-grid">
+          <div class="full">{{ ui.field('profile-name', 'Full name', p.name, testid='profile-name', error_testid='profile-name-error', attrs='autocomplete="off" maxlength="80"') }}</div>
+          {{ ui.field('profile-email', 'Email', p.email, testid='profile-email', type='email', error_testid='profile-email-error', attrs='autocomplete="off" maxlength="120"') }}
+          {{ ui.field('profile-phone', 'Mobile phone', p.phone, testid='profile-phone', type='tel', error_testid='profile-phone-error', attrs='autocomplete="off" maxlength="20"') }}
+        </div>
+      </div>
+      <div class="card-footer form-actions">
+        <button type="reset" class="btn btn-secondary">Discard changes</button>
+        <button type="submit" class="btn btn-primary" data-testid="profile-save">{{ icon('check') }}Save changes</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card span-5" aria-labelledby="account-title">
+    <div class="card-header">
+      <div>
+        <h2 id="account-title">Account details</h2>
+        <p>These can't be changed online.</p>
+      </div>
+    </div>
+    <div class="card-body stack">
+      <div class="readonly">
+        <div class="label">Account number</div>
+        <div class="readonly-value"><span class="grow num">{{ ACCOUNT.number }}</span>{{ icon('lock', '1rem') }}</div>
+      </div>
+      <div class="readonly">
+        <div class="label">Service address</div>
+        <div class="readonly-value"><span class="grow">{{ ACCOUNT.service_address }}</span>{{ icon('lock', '1rem') }}</div>
+      </div>
+      <p class="hint">Moving, or need to change the account holder? <a href="/help">Contact us</a> and we'll take care of it.</p>
+    </div>
+  </section>
+</div>
+
+{%- elif tab == 'notifications' %}
+<p class="settings-intro">Choose how we contact you about each kind of update. Changes save as soon as you flip a switch.</p>
+
+<section class="card reach-card" aria-labelledby="reach-title">
+  <div class="reach-head">
+    <h2 class="eyebrow" id="reach-title">Where we reach you</h2>
+    <a class="btn btn-ghost btn-sm reach-edit" href="/settings?tab=profile">{{ icon('pencil', '1rem') }}Edit contact details</a>
+  </div>
+  <div class="reach-row">
+    {%- for ic, label, value in [('mail', 'Email', p.email), ('phone', 'Text messages (SMS)', p.phone), ('bell', 'Push notifications', 'Acme Utilities app')] %}
+    <div class="reach-item">
+      <span class="tile">{{ icon(ic) }}</span>
+      <div>
+        <div class="reach-label">{{ label }}</div>
+        <div class="reach-value">{{ value }}</div>
+      </div>
+    </div>
+    {%- endfor %}
+  </div>
+</section>
+
+<section class="card notif-card section" aria-label="Notification preferences">
+  <table class="table notif-table">
+    <thead>
+      <tr>
+        <th scope="col">Notification</th>
+        {%- for ch, ch_label in CHANNELS %}
+        <th scope="col" class="channel">{{ icon({'email': 'mail', 'sms': 'phone', 'push': 'bell'}[ch], '1rem') }}{{ ch_label }}</th>
+        {%- endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {%- for cat, label, desc in NOTIFICATION_CATEGORIES %}
+      {%- set prefs = s.notifications[cat] %}
+      <tr>
+        <td>
+          <div class="notif-name">{{ label }}{% if not (prefs.email or prefs.sms or prefs.push) %} {{ ui.badge('All off') }}{% endif %}</div>
+          <div class="notif-desc">{{ desc }}</div>
+        </td>
+        {%- for ch, ch_label in CHANNELS %}
+        <td class="channel">{{ ui.switch('notif-' ~ cat ~ '-' ~ ch, prefs[ch], ch_label ~ ' for ' ~ label, act='settings.notification', payload={'category': cat, 'channel': ch}) }}</td>
+        {%- endfor %}
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+  <div class="card-footer notif-note">{{ icon('info', '1.125rem') }}<span>Safety alerts about downed lines near your address are always sent by SMS, even when Outage alerts are off.</span></div>
+</section>
+
+{%- else %}
+{%- set size_names = {'S': 'Small', 'M': 'Medium', 'L': 'Large'} %}
+<div class="a11y-list">
+  <section class="card a11y-card" aria-labelledby="a11y-hc-title">
+    <span class="tile tile-lg">{{ icon('contrast', '1.5rem') }}</span>
+    <div class="grow">
+      <h2 id="a11y-hc-title">High contrast</h2>
+      <p class="a11y-desc">Bold colors and outlines that are easier to see</p>
+    </div>
+    {{ ui.switch('a11y-high-contrast', acc.high_contrast, 'High contrast', act='settings.accessibility', payload={'key': 'high_contrast'}, key='value') }}
+  </section>
+
+  <section class="card a11y-card" aria-labelledby="a11y-size-title">
+    <span class="tile tile-lg">{{ icon('text-size', '1.5rem') }}</span>
+    <div class="grow">
+      <h2 id="a11y-size-title">Text size</h2>
+      <p class="a11y-desc">Make words, buttons and menus larger on every page</p>
+      <p class="size-preview"><span class="size-aa" aria-hidden="true">Aa</span><span>This is <strong>{{ size_names[acc.text_size] }}</strong> text{% if acc.text_size == 'M' %}, the standard size{% endif %}.</span></p>
+    </div>
+    <div class="size-control">
+      {{- ui.segmented('a11y-text-size-', [('S', 'S'), ('M', 'M'), ('L', 'L')], acc.text_size, 'Text size', act='settings.accessibility', payload={'key': 'text_size'}) -}}
+    </div>
+  </section>
+
+  <section class="card a11y-card" aria-labelledby="a11y-rm-title">
+    <span class="tile tile-lg">{{ icon('motion', '1.5rem') }}</span>
+    <div class="grow">
+      <h2 id="a11y-rm-title">Reduce motion</h2>
+      <p class="a11y-desc">Turn off animations and moving effects</p>
+    </div>
+    {{ ui.switch('a11y-reduce-motion', acc.reduce_motion, 'Reduce motion', act='settings.accessibility', payload={'key': 'reduce_motion'}, key='value') }}
+  </section>
+</div>
+{%- endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/settings.js"></script>
+{% endblock %}
