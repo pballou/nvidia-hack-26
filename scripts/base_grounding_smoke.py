@@ -1,7 +1,8 @@
-"""Zero-shot click-grounding smoke test of a base Qwen3-VL model on a random manifest sample.
+"""Zero-shot click-grounding smoke test of a base Qwen VL model (Qwen3-VL, Qwen3.5) on a random manifest sample.
 
 Example:
   python scripts/base_grounding_smoke.py --data /home/ubuntu/data/os_atlas_20k --n 10 --seed 0
+  python scripts/base_grounding_smoke.py --data <dir> --n 500 --model Qwen/Qwen3.5-2B --dtype bfloat16
 """
 
 import argparse
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import torch
 from PIL import Image
-from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
 PROMPT = (
     'This is a screenshot. Where should I click to accomplish this instruction: "{instruction}"?\n'
@@ -24,7 +25,7 @@ NUMS_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)")
 
 
 def parse_point(text):
-    """Qwen3-VL emits points on a 0-1000 relative grid; return (x, y) normalized to [0, 1]."""
+    """Qwen VL models emit points on a 0-1000 relative grid; return (x, y) normalized to [0, 1]."""
     m = POINT_RE.search(text) or NUMS_RE.search(text)
     if not m:
         return None
@@ -37,14 +38,19 @@ def main():
     ap.add_argument("--model", default="Qwen/Qwen3-VL-2B-Instruct")
     ap.add_argument("--n", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--revision", default=None)
+    ap.add_argument("--dtype", default="float16", choices=["float16", "bfloat16"])
+    ap.add_argument("--max-new-tokens", type=int, default=64)
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
     rows = [json.loads(line) for line in open(args.data / "manifest.jsonl")]
     sample = random.Random(args.seed).sample(rows, args.n)
 
-    processor = AutoProcessor.from_pretrained(args.model)
-    model = Qwen3VLForConditionalGeneration.from_pretrained(args.model, dtype=torch.float16, device_map="cuda").eval()
+    processor = AutoProcessor.from_pretrained(args.model, revision=args.revision)
+    model = AutoModelForImageTextToText.from_pretrained(
+        args.model, revision=args.revision, dtype=getattr(torch, args.dtype)
+    ).to("cuda").eval()
 
     out_path = args.out or args.data / f"base_smoke_seed{args.seed}_n{args.n}.jsonl"
     hits = 0
@@ -60,7 +66,7 @@ def main():
             ).to(model.device)
             t = time.time()
             with torch.inference_mode():
-                gen = model.generate(**inputs, max_new_tokens=64, do_sample=False)
+                gen = model.generate(**inputs, max_new_tokens=args.max_new_tokens, do_sample=False)
             text = processor.batch_decode(gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
 
             w, h = r["img_w"], r["img_h"]
