@@ -16,13 +16,20 @@ task succeeded.
 
 | Component | Role |
 | --- | --- |
-| Small open VLM (≤ 3B, TBD) | Grounding model we fine-tune |
+| Small open VLM (≤ 3B): Qwen3.5-2B or Qwen3-VL-2B, picked after baselines | Grounding model we fine-tune |
 | Nemotron 3.5 Lightning (30B-A3B) | Text planner and tool-calling agent |
 | NVIDIA NeMo Gym | Environments, rollouts, and rewards for eval and training |
 | vLLM | Model serving and RL rollout generation |
 | Playwright | Sandbox browser automation |
 | [OS-Atlas data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data) | Training data (reviewed subset) |
 | ScreenSpot-v2 | Held-out benchmark (never trained on) |
+
+## Docs
+
+- [SETUP.md](SETUP.md): tool setup (GitHub, Brev CLI, API keys, Python envs)
+- [docs/plan.md](docs/plan.md): architecture, milestones, workstreams
+- [docs/research-notes.md](docs/research-notes.md): verified facts and sources
+- [AGENTS.md](AGENTS.md): rules for teammates and coding agents
 
 ## Results
 

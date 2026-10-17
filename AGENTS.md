@@ -4,38 +4,92 @@ Guidance for coding agents and teammates working in this repo.
 
 ## Project
 
-A GUI visual-grounding model (screenshot + instruction → click point), fine-tuned
-from a small open VLM, and a browser agent in which Nemotron 3.5 Lightning plans
-tasks and calls the grounding model as a tool. Eval and training run through
-NVIDIA NeMo Gym environments. See README.md for the overview.
+We fine-tune a ≤3B VLM for GUI click grounding (screenshot + instruction → click
+point) and improve it through NVIDIA NeMo Gym. In the demo, Nemotron 3.5 Lightning
+plans browser tasks and calls the grounder as a tool.
+
+- Plan, milestones, workstreams: [docs/plan.md](docs/plan.md).
+- Verified facts and sources: [docs/research-notes.md](docs/research-notes.md).
+  Read it before re-researching anything.
+- Tool setup: [SETUP.md](SETUP.md).
 
 ## Hard constraints
 
-- **Parameter budget:** the hackathon caps total parameters across the models in
-  the submission at 33B. Lightning uses about 30B of that, so the grounding VLM must
-  be ≤ ~3B total parameters, vision encoder included. Check exact counts from the
-  safetensors metadata before adopting any model.
+- **Deadline:** Sunday 2026-10-18, 4:00pm EDT.
+- **Parameter budget:** ≤ 33B total across *all* generative models in the system,
+  including any used for verification, critique, routing, or speculative decoding
+  (embedding and reranking models are excluded).
+  - Counts come from the official number on each model card, and MoE models count
+    total parameters, not active.
+  - Lightning's card says 30B, so the grounding VLM must be ≤ 3B. Don't add external
+    draft models (DSpark/DFlash) or a separate judge LLM.
+- **Code provenance:** all code must be written during the hackathon. Open-source
+  code may be reused only if its project has been public for 2+ weeks. When copying
+  a template (e.g. from NeMo Gym), note its source path and first-commit date.
+- **Open data:** cite every data source. Any synthetic data we generate (e.g.
+  Lightning-rewritten instructions) must be published together with the method
+  used to make it.
 - **Never train on ScreenSpot-v2.** It is the held-out benchmark. Deduplicate
   training images against it (perceptual hash) before training.
-- **Choose checkpoints on a dev split carved from the training data**, not on
-  ScreenSpot-v2.
+- **Choose checkpoints on the `dev` split** (carved from OS-Atlas by screenshot), not
+  on ScreenSpot-v2.
 - **Public repo:** commit only public datasets and the sandbox app. No proprietary
   screenshots, customer data, credentials, or internal-system details. Secrets live
-  in `.env` / NeMo Gym `env.yaml`, both gitignored.
-- **Compute is metered** (Brev credits). Stop GPU instances when idle, and prefer
-  hosted endpoints for development that doesn't need the GPU.
+  in `.env` and NeMo Gym's `env.yaml`, both gitignored.
 
-## Data conventions
+## Architecture decisions
 
-- OS-Atlas annotations: `{img_filename, instruction, bbox}` (desktop and AndroidWorld
-  also have `data_type`), with `bbox` = `[left, top, right, bottom]` normalized to
-  [0, 1]. Some boxes fall outside [0, 1] or have zero area; drop them rather than
-  clipping silently.
-- Use one coordinate convention end to end (data, prompt, model output, reward,
-  eval). Convert at the edges, and visually spot-check a sample after every
-  conversion.
-- Keep large artifacts (datasets, images, checkpoints, rollouts) out of git. Publish
-  them to Hugging Face instead.
+- **NeMo Gym** (PyPI `nemo-gym==0.7.0`) provides our environments, evals and rewards:
+  - `resources_servers/gui_grounding` (reward = point in bbox);
+  - `resources_servers/web_agent` (Lightning plus a Playwright sandbox).
+  Keep them in this repo in Gym's layout. Don't fork Gym.
+- **Training uses TRL** (SFT, then GRPO), with a reward function that POSTs to the Gym
+  resources server's `/verify`.
+  - NeMo RL + Gym can't train small Qwen VLMs: it asserts a Nemotron-only processor.
+  - VeRL + Gym is text-only.
+  - Don't switch frameworks mid-weekend.
+- **Base-model shortlist:** `Qwen/Qwen3.5-2B` and `Qwen/Qwen3-VL-2B-Instruct`. Choose
+  after the M1 baseline sweep in docs/plan.md.
+- **Lightning:** use the hosted build.nvidia.com endpoint during development. For the
+  demo, self-host the NVFP4 checkpoint with vLLM. Lightning is text-only: give it text
+  observations, never images.
+
+## Data and model-interface conventions
+
+- **OS-Atlas** `bbox` is `[left, top, right, bottom]` normalized to [0, 1].
+  **ScreenSpot-v2** `bbox` is `[x, y, w, h]` in pixels. Convert both to the canonical
+  pixel xyxy schema in docs/plan.md. Drop invalid or zero-area boxes, and rows whose
+  instruction text appears twice on the same screenshot.
+- **Qwen3-VL / Qwen3.5 emit points on a relative 0–1000 grid.** Prompts, output
+  parsing and coordinate conversion live only in `common/grounding.py`; everything
+  imports from there. Spot-check visually after any conversion change.
+- **Large artifacts stay out of git:** datasets, images, checkpoints, and full
+  rollouts go to Hugging Face or the Brev box.
+
+## NeMo Gym rules of thumb
+
+- **Exceptions abort the whole run.** An exception in a tool or `verify()` aborts the
+  entire `gym eval run`. Catch it, and return `reward=0, mask_sample=True` with a
+  `failure_reason`.
+- **Declare row fields.** Every row field `verify()` needs (bbox, img_w/h, platform,
+  data_type) must be declared on the VerifyRequest subclass, or it's silently
+  dropped. Put slice fields on the VerifyResponse so they reach the metrics.
+- **Avoid base64 screenshots.** Prefer `file://` image URLs when Gym and vLLM share
+  the box.
+- **`simple_agent` doesn't stop on a `done` tool.** It stops when the model replies
+  without a tool call, or at `max_steps`.
+- **Failure analysis:** after every comparable pair of eval runs, run the
+  **BLADE** skill (`.agents/skills/nemo-gym-blade-analysis`, also under
+  `.claude/skills/`) on the artifacts. Let its failure taxonomy drive the next data,
+  prompt or verifier change. Use `nemo-gym-reward-profiling` to choose GRPO prompts.
+
+## Compute
+
+- **One shared Brev H200** (`permanent-tan-marmot`) at ~$6.90/hr; about 23 GPU-hours
+  for the whole event.
+  - Announce GPU jobs in team chat, and run them in tmux.
+  - Stop the instance when nobody is using it.
+- **Log every GPU run** in `docs/runs.md`: command, config, start/end, result.
 
 ## Working norms
 
