@@ -2,8 +2,11 @@
 
 The browser records 16 kHz mono PCM16 WAV (console/static/wav.js) and POSTs it to
 /api/transcribe. This module validates the WAV and runs the active engine. Engines are
-local only (no cloud speech): "stub" returns a fixed string (tests, and until the real
-engine is wired); part 2 registers the local Parakeet engine.
+local only (no cloud speech):
+- "stub" (the default) returns a fixed string, for tests and machines without the sidecar;
+- "parakeet" is NVIDIA Parakeet TDT 0.6B v3 served by NeMo-Speech.cpp on 127.0.0.1:8096
+  (scripts/run_asr.sh). It counts toward the 33B cap (contracts.md §6):
+  30 + 2 + 0.6 = 32.6B by model card.
 
 An engine is any object with `name` (model id shown in responses), `label` (short UI
 name) and `transcribe(pcm16: bytes, sample_rate: int) -> str`.
@@ -109,7 +112,7 @@ def read_wav(data: bytes) -> tuple[bytes, float]:
             channels, width, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
             frames = w.readframes(n)
     except (wave.Error, EOFError) as exc:
-        raise AudioError(f"Unreadable WAV: {exc}") from exc
+        raise AudioError(f"Unreadable WAV: {exc or 'the file is truncated'}") from exc
     if channels != 1 or width != 2 or rate != SAMPLE_RATE:
         raise AudioError(f"Audio must be 16 kHz mono 16-bit PCM (got {rate} Hz, {channels} channel(s), {8 * width}-bit)")
     duration = len(frames) / 2 / SAMPLE_RATE
@@ -129,3 +132,51 @@ def transcribe(wav_bytes: bytes) -> dict:
     latency_ms = (time.perf_counter() - t0) * 1000
     return {"text": (text or "").strip(), "duration_s": round(duration, 3), "latency_ms": round(latency_ms, 1),
             "model": engine.name}
+
+
+class NemoSpeechEngine:
+    """NVIDIA Parakeet TDT 0.6B v3 (official Q8_0 GGUF) via NeMo-Speech.cpp at CONSOLE_ASR_URL.
+
+    The sidecar runs locally (scripts/run_asr.sh, default http://127.0.0.1:8096): POST
+    /v1/audio/transcriptions with multipart file=<16 kHz mono PCM16 WAV>, response_format=json.
+    """
+
+    name = "nvidia/parakeet-tdt-0.6b-v3"
+    label = "Parakeet TDT 0.6B v3"
+
+    def __init__(self, url: str | None = None):
+        import httpx
+
+        self.url = (url or os.environ.get("CONSOLE_ASR_URL", "http://127.0.0.1:8096")).rstrip("/")
+        self._http = httpx.Client(base_url=self.url, timeout=httpx.Timeout(30.0, connect=1.0), trust_env=False)
+        try:
+            r = self._http.get("/health", timeout=2.0)
+        except httpx.HTTPError as exc:
+            self._http.close()
+            raise EngineUnavailable(f"Parakeet server not reachable at {self.url}: {exc}") from exc
+        if r.status_code != 200:
+            self._http.close()
+            raise EngineUnavailable(f"Parakeet server at {self.url} not ready (HTTP {r.status_code})")
+
+    def transcribe(self, pcm16: bytes, sample_rate: int) -> str:
+        import httpx
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sample_rate)
+            w.writeframes(pcm16)
+        try:
+            r = self._http.post("/v1/audio/transcriptions", data={"response_format": "json"},
+                                files={"file": ("speech.wav", buf.getvalue(), "audio/wav")})
+        except httpx.HTTPError as exc:
+            raise EngineUnavailable(f"Parakeet server failed: {exc}") from exc
+        if 400 <= r.status_code < 500:
+            raise AudioError(f"Parakeet rejected the audio: {r.text[:200]}")
+        if r.status_code != 200:
+            raise EngineUnavailable(f"Parakeet error {r.status_code}: {r.text[:200]}")
+        return r.json().get("text", "")
+
+
+ENGINES["parakeet"] = NemoSpeechEngine

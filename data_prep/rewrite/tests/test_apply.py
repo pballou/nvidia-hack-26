@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from data_prep.rewrite import apply, meta
+from data_prep.rewrite import apply, meta, validate
 from data_prep.rewrite.apply import MissingRewriteError, apply_rewrites, template_variant
 
 APPLY_PY = Path(apply.__file__).resolve()
@@ -39,13 +39,15 @@ def make_row(rid: str, source: str, instruction: str, platform: str = "mobile") 
 
 
 def make_rec(row: dict, keep: bool = True, rewritten: str | None = None, style: str = "functional",
-             drop_reason: str | None = None) -> dict:
+             drop_reason: str | None = None, model: str | None = None) -> dict:
+    """keep=False records default to rule drops (removed); pass a model name for a model drop (raw fallback)."""
     if keep and rewritten is None:
         rewritten = "open " + row["instruction"].lower()
+    model = model or (validate.RULE_MODEL if not keep else "nvidia/nemotron-3.5-lightning-30b-a3b")
     return {"id": row["id"], "source": row["source"], "original": row["instruction"],
             "rewritten": rewritten if keep else None, "style": style, "keep": keep,
             "drop_reason": None if keep else drop_reason, "prompt_version": "v1",
-            "model": "nvidia/nemotron-3.5-lightning-30b-a3b", "ts": "2026-10-17T18:00:00+00:00"}
+            "model": model, "ts": "2026-10-17T18:00:00+00:00"}
 
 
 @pytest.fixture
@@ -258,7 +260,7 @@ def test_main_writes_outputs_deterministically(tmp_path, manifest, rewrites, ids
     assert stats["image_root"] == str(out1.resolve())
     assert stats["rows"] == {"manifest": 10, "train": 9, "dropped": 1, "missing": 0}
     assert stats["by_style"] == {"descriptive": 1, "functional": 2, "natural": 2, "positional": 1, "raw": 3}
-    assert stats["dropped"] == {"by_source": {"os_atlas/androidworld": 1}, "by_reason": {"numeric": 1}}
+    assert {k: v for k, v in stats["dropped"].items() if k != "policy"} == {"by_source": {"os_atlas/androidworld": 1}, "by_reason": {"numeric": 1}}
     assert stats["by_source"]["os_atlas/androidworld"]["manifest"] == 5
     assert stats["by_source"]["os_atlas/androidworld"]["train"] == 4
     assert stats["rewrites"]["records"] == 5
@@ -350,3 +352,25 @@ def test_splits_filter_keeps_only_listed_splits(tmp_path):
         assert {r["split"] for r in out} == {"train"} and len(out) == 6
     stats = json.loads((tmp_path / "apply_stats.json").read_text())
     assert stats["manifest"]["rows"] == 9 and stats["manifest"]["rows_in_splits"] == 6
+
+
+def test_model_drops_keep_the_raw_label_and_rule_drops_are_removed(manifest, ids):
+    by_id = {r["id"]: r for r in manifest}
+    sel = [rid for rid in by_id if meta.is_selected(by_id[rid])]
+    model_drop, llm_error, rule_drop, *rest = sel
+    recs = [make_rec(by_id[model_drop], keep=False, drop_reason="unintelligible", model="NVIDIA-hosted API, x"),
+            make_rec(by_id[llm_error], keep=False, drop_reason="llm_error", model="NVIDIA-hosted API, x"),
+            make_rec(by_id[rule_drop], keep=False, drop_reason="numeric"),
+            *(make_rec(by_id[rid]) for rid in rest)]
+    train = {r["id"]: r for r in apply_rewrites(manifest, recs)}
+    assert rule_drop not in train
+    for rid, reason in ((model_drop, "unintelligible"), (llm_error, "llm_error")):
+        r = train[rid]
+        assert r["instruction"] == r["instruction_original"] == by_id[rid]["instruction"]
+        assert r["instruction_style"] == "raw" and r[apply.RAW_FALLBACK_KEY] == reason
+    template = template_variant(list(train.values()))
+    assert [r["id"] for r in template] == list(train) and all(r["instruction"] == r["instruction_original"]
+                                                              for r in template)
+    stats = apply.build_stats(manifest, recs, list(train.values()), [], [])
+    assert stats["model_drop_raw_fallback"]["rows"] == 2
+    assert stats["model_drop_raw_fallback"]["by_reason"] == {"llm_error": 1, "unintelligible": 1}

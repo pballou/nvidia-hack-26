@@ -4,32 +4,38 @@
 # (hosted or :8000) respond, print the URL.
 # Ctrl-C stops whatever this script started.
 #
-# Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--headed] [--skip-models]
+# Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--asr auto|parakeet|stub]
+#                           [--headed] [--skip-models]
 #   --agent mock      scripted stand-in agent, no models needed (default)
 #   --agent real      T2's agent (agent/core.py): Lightning plans, the VLM grounds
 #   --lightning       which Lightning the console defaults to and this script checks (default local:
 #                     the official BF16 checkpoint served as `lightning` on :8000; hosted is slow)
+#   --asr             voice input engine (default auto: Parakeet if its sidecar answers at
+#                     $CONSOLE_ASR_URL, default 127.0.0.1:8096, else the stub; $CONSOLE_ASR overrides)
 #   --headed          show the Playwright browser window (for the video)
 #   --skip-models     don't check the VLM / Lightning
 # Logs: runs/demo_logs/{sandbox,console}.log
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-AGENT=mock LIGHTNING=local HEADED=0 SKIP_MODELS=0
+AGENT=mock LIGHTNING=local ASR="${CONSOLE_ASR:-auto}" HEADED=0 SKIP_MODELS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent) AGENT="${2:?--agent needs mock|real}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
     --lightning) LIGHTNING="${2:?--lightning needs hosted|local}"; shift 2 ;;
     --lightning=*) LIGHTNING="${1#*=}"; shift ;;
+    --asr) ASR="${2:?--asr needs auto|parakeet|stub}"; shift 2 ;;
+    --asr=*) ASR="${1#*=}"; shift ;;
     --headed) HEADED=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 case "$AGENT" in mock|real) ;; *) echo "--agent must be mock or real" >&2; exit 2 ;; esac
 case "$LIGHTNING" in hosted|local) ;; *) echo "--lightning must be hosted or local" >&2; exit 2 ;; esac
+case "$ASR" in auto|parakeet|stub) ;; *) echo "--asr must be auto, parakeet or stub" >&2; exit 2 ;; esac
 
 PY="${PYTHON:-.venv-gym/bin/python}"
 if [ ! -x "$PY" ]; then
@@ -37,7 +43,8 @@ if [ ! -x "$PY" ]; then
   exit 1
 fi
 
-SANDBOX_URL=http://127.0.0.1:8090
+SANDBOX_PORT="${SANDBOX_PORT:-8090}"; export SANDBOX_PORT   # run_sandbox.sh reads the same variable
+SANDBOX_URL="http://127.0.0.1:$SANDBOX_PORT"
 CONSOLE_URL=http://127.0.0.1:8095
 LOGS=runs/demo_logs
 mkdir -p "$LOGS"
@@ -115,16 +122,30 @@ if [ "$SKIP_MODELS" = 0 ]; then
   fi
 fi
 
-# 3. Console
+# 3. Voice input (local Parakeet sidecar, scripts/run_asr.sh)
+ASR_URL="${CONSOLE_ASR_URL:-http://127.0.0.1:8096}"
+if [ "$ASR" != stub ]; then
+  if up "$ASR_URL/health"; then
+    ASR=parakeet
+    echo "asr      Parakeet sidecar up at $ASR_URL"
+  elif [ "$ASR" = parakeet ]; then
+    echo "warning: Parakeet sidecar not reachable at $ASR_URL (scripts/run_asr.sh); voice input will be unavailable" >&2
+  else
+    ASR=stub
+    echo "note:    no Parakeet sidecar at $ASR_URL; voice input uses the stub (fixed text)"
+  fi
+fi
+
+# 4. Console
 if up "$CONSOLE_URL/api/config"; then
-  echo "console  already running at $CONSOLE_URL (restart it to change --agent/--headed)"
+  echo "console  already running at $CONSOLE_URL (restart it to change --agent/--asr/--headed)"
 else
-  set -- --agent "$AGENT" --lightning "$LIGHTNING" --sandbox-url "$SANDBOX_URL"
+  set -- --agent "$AGENT" --lightning "$LIGHTNING" --asr "$ASR" --sandbox-url "$SANDBOX_URL"
   [ "$HEADED" = 1 ] && set -- "$@" --headed
   scripts/run_console.sh "$@" >"$LOGS/console.log" 2>&1 &
   PIDS="$PIDS $!"
   wait_up "$CONSOLE_URL/api/config" console "$!"
-  echo "console  started (agent: $AGENT, lightning: $LIGHTNING$([ "$HEADED" = 1 ] && echo ', headed'))"
+  echo "console  started (agent: $AGENT, lightning: $LIGHTNING, asr: $ASR$([ "$HEADED" = 1 ] && echo ', headed'))"
 fi
 
 echo

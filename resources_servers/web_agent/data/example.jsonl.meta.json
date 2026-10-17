@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-10-17T20:36:37+00:00",
+  "generated_at": "2026-10-17T21:40:02+00:00",
   "command": "python resources_servers/web_agent/make_tasks.py --tasks sandbox/tasks.json --ids text-size-large,download-september-statement,mark-all-read,turn-on-autopay,high-contrast --sandbox-url http://127.0.0.1:8091 --summary-model base --out resources_servers/web_agent/data/example.jsonl",
   "env_overrides": {},
   "output": "resources_servers/web_agent/data/example.jsonl",
   "rows": 5,
-  "rows_sha256": "98c85c3161645db46aa4bc8c4f3102ea9d22ea35b34c01ef2deb6d5ecf0cc3d6",
+  "rows_sha256": "2edcfd8d33cac9361bf7b46e4fb2cec7c8721bab8c1e3bdea6d7057764c058ad",
   "task_ids": [
     "text-size-large",
     "download-september-statement",
@@ -13,7 +13,7 @@
     "high-contrast"
   ],
   "tasks_source": "sandbox/tasks.json",
-  "tasks_sha256": "78817737525879b2321717b218a321c3d972a55a10a35d375fdaef3186511926",
+  "tasks_sha256": "cffa457a2fa500c9dc5d967cf1ee8640ab6396730f44fb8d7309470fe824a0ff",
   "initial_observation_source": "vlm:base",
   "summary_model": "base",
   "vlm_served_models": {
@@ -21,10 +21,10 @@
     "Qwen/Qwen3.5-2B": "Qwen/Qwen3.5-2B"
   },
   "sandbox": null,
-  "prompt_version": "agent-v3",
-  "system_prompt_sha256": "841a77ddd1342070e3857ef8e776c47fad745c16cdcda17c8beb2c8f050463d5",
-  "tools_sha256": "d6ef32bde1e5bd661b34f0cf14716e7146c7c5c4e5be13b4392cc4606200c143",
-  "summary_prompt_sha256": "ea31050e3ed3b6d1f61c06fd3c5e154b4e366441e779204f93c9848c4185eb56",
+  "prompt_version": "agent-v4",
+  "system_prompt_sha256": "e80d029430a4af80774f9ddacce15c8ea8bf39083e44e7fb285e2d55b518f359",
+  "tools_sha256": "31e17c6ceb18b525d4edc03075a35618d93ee61d07015aa817cc88f6ab906d05",
+  "summary_prompt_sha256": "b00fd271001d69f8bd59b43ace7487aebd75c43df4da3eef18201c654d1132d6",
   "max_pixels": 2073600,
   "config": {
     "sandbox_url": "http://127.0.0.1:8091",
@@ -36,7 +36,7 @@
     "model_family": "qwen3_5",
     "max_steps": 12,
     "thinking": "retry",
-    "prompt_version": "agent-v3",
+    "prompt_version": "agent-v4",
     "sampling": {
       "temperature": 1.0,
       "top_p": 0.95,

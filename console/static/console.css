@@ -205,6 +205,135 @@ textarea[readonly] { background: var(--bg); }
 select { padding: 0.45rem 0.6rem; min-height: 2.6rem; }
 select:disabled { opacity: 0.6; }
 
+/* --- voice input (voice.js) ---------------------------------------------------- */
+
+.request-row { display: flex; align-items: stretch; gap: 0.5rem; }
+.request-row textarea { flex: 1 1 auto; min-width: 0; }
+
+.mic-btn {
+  --level: 0;
+  flex: none;
+  position: relative;
+  width: 6.6rem;
+  min-height: 4.4rem;
+  padding: 0.35rem 0.3rem 0.75rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 750; font-size: 1rem; line-height: 1.15; text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+.mic-btn:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--panel); box-shadow: inset 0 0 0 1px var(--accent); }
+.mic-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--border-strong); color: var(--muted); background: var(--bg); }
+.mic-btn[aria-disabled="true"] { cursor: progress; }
+.mic-icon { display: block; width: 1.75rem; height: 1.75rem; }
+.ico { display: none; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ico-fill { fill: currentColor; stroke: none; }
+.ico-track { opacity: 0.25; }
+.ico-slash { display: none; stroke-width: 2.4; }
+.mic-btn .ico-mic { display: block; }
+.mic-btn[data-state="off"] .ico-slash { display: inline; }
+.mic-btn[data-state="transcribing"] .ico-mic, .mic-btn[data-state="done"] .ico-mic { display: none; }
+.mic-btn[data-state="transcribing"] .ico-spin, .mic-btn[data-state="done"] .ico-check { display: block; }
+.mic-label { overflow-wrap: normal; }
+.mic-btn[data-state="transcribing"] .mic-label { font-size: 0.8rem; }
+
+/* listening: solid red, a level bar from the microphone's RMS and a halo that grows with it */
+.mic-btn[data-state="listening"], .mic-btn[data-state="starting"] {
+  background: var(--bad); border-color: var(--bad); color: #ffffff;
+  box-shadow: 0 0 0 calc(var(--level) * 0.5rem) rgba(179, 38, 30, 0.28);
+}
+.mic-btn[data-state="listening"]:hover:not(:disabled), .mic-btn[data-state="starting"]:hover:not(:disabled) {
+  background: #8f1d17; box-shadow: 0 0 0 calc(var(--level) * 0.5rem) rgba(179, 38, 30, 0.28);
+}
+.mic-btn[data-state="starting"] { opacity: 0.85; }
+.mic-meter {
+  position: absolute; left: 0.5rem; right: 0.5rem; bottom: 0.38rem;
+  height: 0.32rem; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+  visibility: hidden;
+}
+.mic-meter-fill { display: block; height: 100%; width: calc(var(--level) * 100%); border-radius: inherit; background: #ffffff; }
+.mic-btn[data-state="listening"] .mic-meter { visibility: visible; }
+.mic-btn[data-state="done"] { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+.mic-btn[data-state="error"] { border-color: var(--bad); }
+
+html.hc .mic-btn { background: #000000; border-width: 3px; }
+html.hc .mic-btn[data-state="listening"], html.hc .mic-btn[data-state="starting"],
+html.hc .mic-btn[data-state="listening"]:hover:not(:disabled), html.hc .mic-btn[data-state="starting"]:hover:not(:disabled) {
+  background: var(--bad); border-color: var(--bad); color: #000000;
+  box-shadow: 0 0 0 calc(var(--level) * 0.5rem) rgba(255, 138, 138, 0.45);
+}
+html.hc .mic-meter { background: rgba(0, 0, 0, 0.35); }
+html.hc .mic-meter-fill { background: #000000; }
+html.hc .mic-btn[data-state="done"] { background: #000000; }
+html.hc .mic-btn:disabled { color: #ffffff; border-color: #ffffff; }
+
+.voice-line { display: flex; align-items: baseline; gap: 0.6rem; }
+.voice-line:has(.voice-status:empty):has(.voice-timer[hidden]) { display: none; }
+.voice-status { flex: 1; min-width: 0; font-size: 0.95rem; font-weight: 650; overflow-wrap: anywhere; }
+.voice-status:empty { display: none; }
+.voice-status[data-tone="live"] { color: var(--bad); }
+.voice-status[data-tone="live"]::before {
+  content: ""; display: inline-block; width: 0.65rem; height: 0.65rem; margin-right: 0.4rem;
+  border-radius: 50%; background: currentColor; vertical-align: 0.02rem;
+}
+.voice-status[data-tone="ok"] { color: var(--ok); }
+.voice-status[data-tone="warn"] { color: var(--warn); }
+.voice-status[data-tone="error"] {
+  color: var(--bad); background: var(--bad-bg);
+  border: 2px solid var(--bad); border-radius: var(--radius); padding: 0.25rem 0.6rem;
+}
+.voice-timer { margin-left: auto; flex: none; font-size: 0.88rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.voice-countdown {
+  --left: 1;
+  position: relative;
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.3rem 0.4rem 0.4rem 0.7rem;
+  border: 2px solid var(--accent); border-radius: var(--radius);
+  background: var(--accent-weak); color: var(--accent);
+  font-weight: 700; font-size: 1rem; font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+.voice-countdown .countdown-text { flex: 1; min-width: 0; }
+.voice-countdown .btn { color: var(--text); }
+.countdown-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 0.25rem; }
+.countdown-fill { display: block; height: 100%; width: calc(var(--left) * 100%); background: var(--accent); }
+
+.voice-hint[data-tone="off"] { color: var(--warn); background: var(--warn-bg); border-radius: 0.35rem; padding: 0.2rem 0.5rem; }
+html.hc .voice-hint[data-tone="off"] { border: 1px solid var(--warn); }
+.voice-hint kbd { font-size: 0.9em; }
+
+.opt-ptt { display: grid; gap: 0.2rem; }
+.ptt-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.ptt-title { font-weight: 700; font-size: 0.95rem; }
+.ptt-key { font-size: 0.95rem; padding: 0.05rem 0.45rem; min-width: 2rem; text-align: center; }
+#ptt-change[data-capturing="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.ptt-msg { font-size: 0.85rem; font-weight: 600; color: var(--accent); }
+.ptt-msg:empty { display: none; }
+.ptt-note { margin-left: 0; }
+
+.heard {
+  margin: 0 0 0.45rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--accent);
+  border-radius: 0.4rem;
+  background: var(--accent-weak);
+  font-weight: 650; font-size: 0.95rem; overflow-wrap: anywhere;
+}
+html.hc .heard { border-width: 2px 2px 2px 6px; border-color: var(--accent); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .mic-btn[data-state="transcribing"] .ico-spin { animation: mic-spin 0.9s linear infinite; }
+  @keyframes mic-spin { to { transform: rotate(360deg); } }
+  .voice-status[data-tone="live"]::before { animation: pulse 1.1s ease-in-out infinite; }
+}
+
 .note { font-size: 0.85rem; color: var(--muted); min-height: 0; }
 .note:empty { display: none; }
 #request-note { color: var(--warn); background: var(--warn-bg); border-radius: 0.35rem; padding: 0.2rem 0.5rem; }
@@ -561,4 +690,10 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   .thumb[aria-current="true"] { outline: 3px solid Highlight; outline-offset: 1px; }
   .log-scroll::before { display: none; }
   .pending { box-shadow: none; }
+  .mic-btn[data-state="listening"], .mic-btn[data-state="starting"] {
+    forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; box-shadow: none;
+  }
+  .mic-meter { forced-color-adjust: none; background: Canvas; }
+  .mic-meter-fill { background: CanvasText; }
+  .countdown-fill { forced-color-adjust: none; background: Highlight; }
 }

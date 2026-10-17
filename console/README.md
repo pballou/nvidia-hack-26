@@ -45,6 +45,7 @@ Then open http://127.0.0.1:8095.
 | `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, options, agent_run_id, result, verdict, n_events}`. `n_events` counts stream messages (it equals the last `id`). |
 | `GET /api/runs/{run_id}/events` | SSE stream (below) |
 | `POST /api/runs/{run_id}/stop` | `{ok: true}`. Idempotent; waits up to ~10 s for the agent to stop. |
+| `POST /api/transcribe` | Voice input. Body: a 16 kHz mono PCM16 WAV, either raw `audio/wav` or multipart field `audio`, 0.2–60 s → `{text, duration_s, latency_ms, model}`. Errors: 400 bad audio, 413 too large, 503 engine unavailable. |
 | `GET /runs/{agent_run_id}/{file}` | Trace PNG; `file` must match `step_XX.png` or `step_XX_overlay.png`. |
 
 Unknown runs return 404 `{error}`.
@@ -132,6 +133,34 @@ Targets below the fold get explicit mouse-wheel scroll steps (`star-landlord-mes
 It exits 1 if any task fails, and 2 if the sandbox is unreachable. The JSON holds only
 pixel coordinates and text. Re-run it after any sandbox layout change, then re-run
 `test_mock_e2e.py`.
+
+## Voice input
+
+It's local only: no Web Speech API, no MediaRecorder, no cloud.
+
+- **Recording:** click **Speak**, or hold Right Option (`AltRight`, configurable in
+  Options). Space-hold works when focus isn't on a field or control.
+- **Capture:** `voice.js` records raw PCM through an AudioWorklet (`pcm-worklet.js`,
+  with a ScriptProcessor fallback). `wav.js` resamples to 16 kHz if the browser
+  refuses a 16 kHz context, and encodes PCM16 WAV.
+- **Transcription:** the WAV is POSTed to `/api/transcribe`.
+- **After transcription:** the transcript fills the request box and selects the
+  matching task, if any. The log shows `Heard (engine, N ms): …`. The run starts
+  after a 1.5 s countdown, which Esc cancels. Saying "stop" or "cancel" during a run
+  stops it.
+- **Engines** (`asr.py`):
+  - `stub` is the default (fixed text; `CONSOLE_ASR_STUB_TEXT`).
+  - `parakeet` is NVIDIA Parakeet TDT 0.6B v3 through the NeMo-Speech.cpp sidecar at
+    `CONSOLE_ASR_URL` (default `http://127.0.0.1:8096`, `scripts/run_asr.sh`).
+  - Select one with `--asr parakeet` or `CONSOLE_ASR=parakeet`. `demo_up.sh` picks
+    Parakeet automatically when the sidecar answers.
+- **Page API:** `console.js` exposes `window.AcmeConsole` (`ready`, `config()`,
+  `isRunning()`, `setRequest(text)`, `run()`, `stop()`, `matchTask()`) and fires
+  `acme:run-start` / `acme:run-end`, which `voice.js` uses.
+- **Tests:** `test_asr.py` (validation, engines, fake sidecar), `test_voice.py` (the
+  WAV encoder, the endpoint, the fake-mic page flow, and a static scan for forbidden
+  APIs) and `test_voice_ui.py` (push-to-talk and the countdown, with Chromium's fake
+  media flags).
 
 ## The no-DOM rule
 

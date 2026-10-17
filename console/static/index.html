@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="/static/console.css">
   <!-- Loaded in <head> on purpose: it applies the saved theme before first paint. -->
   <script src="/static/console.js"></script>
+  <!-- Voice input: local capture + WAV encoding, sent only to this console's /api/transcribe. -->
+  <script src="/static/wav.js" defer></script>
+  <script src="/static/voice.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#request">Skip to request</a>
@@ -28,9 +31,42 @@
       <h2 id="request-heading" class="visually-hidden">Request</h2>
       <form id="run-form" class="run-form" novalidate>
         <label class="field-label" for="request">What do you want to do?</label>
-        <textarea id="request" name="request" rows="2" maxlength="500" autocomplete="off" spellcheck="true"
-                  placeholder="For example: Turn on high contrast."
-                  aria-describedby="request-note keyboard-hint"></textarea>
+        <div class="request-row">
+          <button id="mic-btn" class="mic-btn" type="button" aria-pressed="false" data-state="off" disabled
+                  aria-describedby="voice-hint">
+            <span class="mic-icon" aria-hidden="true">
+              <svg class="ico ico-mic" viewBox="0 0 24 24" focusable="false">
+                <rect x="8.5" y="2" width="7" height="12.5" rx="3.5" class="ico-fill"></rect>
+                <path d="M5 11a7 7 0 0 0 14 0"></path>
+                <path d="M12 18v3.5"></path>
+                <path d="M8.5 21.5h7"></path>
+                <path class="ico-slash" d="M3.5 3l17 18"></path>
+              </svg>
+              <svg class="ico ico-spin" viewBox="0 0 24 24" focusable="false">
+                <circle cx="12" cy="12" r="8.5" class="ico-track"></circle>
+                <path d="M20.5 12A8.5 8.5 0 0 0 12 3.5"></path>
+              </svg>
+              <svg class="ico ico-check" viewBox="0 0 24 24" focusable="false">
+                <path d="M4.5 12.5l5 5L19.5 7"></path>
+              </svg>
+            </span>
+            <span id="mic-label" class="mic-label">Speak</span>
+            <span class="mic-meter" aria-hidden="true"><span class="mic-meter-fill"></span></span>
+          </button>
+          <textarea id="request" name="request" rows="2" maxlength="500" autocomplete="off" spellcheck="true"
+                    placeholder="For example: Turn on high contrast."
+                    aria-describedby="request-note keyboard-hint"></textarea>
+        </div>
+        <div class="voice-line">
+          <p id="voice-status" class="voice-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <span id="voice-timer" class="voice-timer" aria-hidden="true" hidden></span>
+        </div>
+        <div id="voice-countdown" class="voice-countdown" hidden>
+          <span class="countdown-bar" aria-hidden="true"><span class="countdown-fill"></span></span>
+          <span id="voice-countdown-text" class="countdown-text"></span>
+          <button id="voice-cancel" class="btn btn-small" type="button" aria-label="Cancel the automatic run">Cancel</button>
+        </div>
+        <p id="voice-hint" class="note voice-hint">Checking voice input…</p>
         <p id="request-note" class="note" aria-live="polite"></p>
 
         <div class="task-row">
@@ -73,6 +109,18 @@
                 <label for="lightning-hosted">Hosted API</label>
               </div>
             </fieldset>
+            <div class="opt opt-ptt" id="opt-ptt" role="group" aria-labelledby="ptt-title">
+              <p class="ptt-line">
+                <span id="ptt-title" class="ptt-title">Push-to-talk key:</span>
+                <kbd id="ptt-key" class="ptt-key">Right Option</kbd>
+                <button id="ptt-change" class="btn btn-small" type="button">Change</button>
+                <button id="ptt-reset" class="btn btn-small" type="button" hidden>Reset</button>
+              </p>
+              <p id="ptt-msg" class="ptt-msg" role="status"></p>
+              <p id="ptt-note" class="legend-hint ptt-note">Hold it to talk, release to send. Space works too when focus
+                isn’t in a field or on a button. The Fn key can’t be used: browsers can’t see it.</p>
+              <p id="asr-note" class="legend-hint ptt-note" hidden></p>
+            </div>
           </div>
         </details>
 
@@ -89,6 +137,7 @@
           <h2 id="log-heading">Steps</h2>
           <button id="follow-btn" class="btn btn-small" type="button" hidden>Follow latest step</button>
         </div>
+        <p id="heard" class="heard" hidden></p>
         <div id="log-scroll" class="log-scroll">
           <ol id="step-log" class="step-log" aria-live="polite" aria-labelledby="log-heading"></ol>
           <p id="log-empty" class="log-empty">Steps appear here while the agent works.</p>
@@ -97,7 +146,7 @@
       </section>
       <p id="keyboard-hint" class="kbd-hint">
         <span class="kbd-title">Keyboard:</span> <kbd>Enter</kbd> run · <kbd>Esc</kbd> stop ·
-        <kbd>←</kbd><kbd>→</kbd> screenshots<span class="visually-hidden">. Shift+Enter adds a new line.</span>
+        <kbd>←</kbd><kbd>→</kbd> screenshots<span id="kbd-ptt-wrap" hidden> · hold <kbd id="kbd-ptt">Right Option</kbd> to talk</span><span class="visually-hidden">. Shift+Enter adds a new line.</span>
       </p>
     </section>
 

@@ -70,3 +70,15 @@ Follow the organizers' recommended flow:
 
 **Owner:** Charlie records and uploads. **Recording plan:** do a dry run Saturday night if possible. Record Sunday 8:30–10:00,
 upload unlisted by 10:15, submit the form by 10:30.
+
+## Judging criteria → our evidence (use in the video and write-ups)
+
+| Criterion | What we show | Source |
+| --- | --- | --- |
+| **Completeness:** works end to end; uses open data | Voice → Lightning plans → grounder clicks → task verified from app state, live on the Acme portal. Trained on open OS-Atlas data, published with provenance. | console demo, `docs/results.md`, README data table |
+| **Fine-Tuned track:** measurable improvement over a baseline on eval data | Base vs. SFT (vs. GRPO) on dev and **ScreenSpot-v2-clean**, plus base-vs-tuned **agent task success** in the Gym `web_agent` env | `docs/results.md`, `gym eval compare` reports |
+| **Technical depth** | LoRA SFT + GRPO with **NeMo Gym rewards**; an automated overnight profile→GRPO→dev-gate loop; BLADE failure analysis; contamination found and removed; Lightning data engine with a human audit | `docs/tasks/B-night-loop.md`, `docs/blade/`, METHOD.md |
+| **NVIDIA/Red Hat use, and why** | Nemotron Lightning (planner + data engine), NeMo Gym (envs, rewards, profiling, BLADE), Parakeet (voice), vLLM on H200 + vllm-metal on the Mac, Brev. **Why:** private, local inference; 32.6B total runs on one GPU or a MacBook | README stack table, `docs/bounty-lightning.md` |
+| **Problem fit / usability** | Customer self-service on existing websites, with no integration. Fewer support calls; accessibility. Usable tomorrow by an everyday person, by voice. | `docs/pitch.md` |
+| **Creativity** | Voice + vision-only grounding + a text-only planner. Works on canvas and legacy UIs that DOM agents can't operate. | demo canvas tasks |
+| **Performance** (measured) | Local Lightning **~1.2 s/step vs 25–80 s/call** on the hosted free tier (~20–60×). Fine-tuned answers ~2× shorter (37.6 → 16.7 tokens), so grounding is faster. ASR ~0.1 s per clip. Grounding p50 0.73 s. | `docs/results.md`, `docs/local-mac.md` |

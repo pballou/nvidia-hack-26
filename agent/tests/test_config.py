@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from agent.config import DEFAULT_CONFIG_PATH, REPO_ROOT, AgentConfig, LightningConfig, load_config
+from agent.config import DEFAULT_CONFIG_PATH, REPO_ROOT, AgentConfig, LightningConfig, _read_dotenv, load_config
 from agent.prompts import PROMPT_VERSION
 
 SECRET = "nvapi-test-secret-do-not-print"
@@ -109,6 +109,20 @@ def test_dotted_override_keys():
 def test_tool_choice_default_and_public():
     assert AgentConfig().tool_choice == "required"
     assert AgentConfig().public_dict()["tool_choice"] == "required"
+
+
+def test_read_dotenv_follows_shell_semantics(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text(
+        "# comment line\n"
+        "export NVIDIA_API_KEY=      # build.nvidia.com: hosted Nemotron 3.5 Lightning\n"  # .env.example as copied
+        "export HF_TOKEN=hf_abc   # read-only\n"
+        "QUOTED=\"two words\" # trailing\n"
+        "SINGLE='x#y'\n"
+        "HASHED=#notacomment\n"
+        "EMPTY=\n")
+    assert _read_dotenv(env) == {"HF_TOKEN": "hf_abc", "QUOTED": "two words", "SINGLE": "x#y",
+                                 "HASHED": "#notacomment"}
 
 
 def test_relative_runs_dir_is_under_repo():

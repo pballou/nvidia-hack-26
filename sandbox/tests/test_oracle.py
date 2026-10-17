@@ -402,3 +402,20 @@ def test_wrong_action_rejected(task_id, open_page, get_state):
     passed, why = evaluate(state, task["check"])
     assert not passed, f"{task_id}: wrong action '{WRONG[task_id][0]}' passed the check: {why}"
     d.assert_clean()
+
+
+def test_pay_dialog_from_dashboard_is_one_shot(open_page, get_state):
+    """Dashboard 'Pay bill' -> cancel -> another Billing action must not reopen the pay dialog."""
+    page, sid = open_page(path="/")
+    with page.expect_navigation():
+        page.get_by_test_id("dash-pay").click()
+    assert page.get_by_test_id("pay-dialog").is_visible()
+    assert "pay=" not in page.url, "the one-shot ?pay=1 should be dropped once the dialog opened"
+    page.keyboard.press("Escape")
+    assert not page.get_by_test_id("pay-dialog").is_visible()
+    with page.expect_navigation():
+        page.get_by_test_id("autopay-toggle").click()
+    page.wait_for_load_state("networkidle")
+    assert not page.get_by_test_id("pay-dialog").is_visible(), "pay dialog reopened after an unrelated action"
+    state = get_state(sid)
+    assert state["billing"]["autopay"] is True and state["billing"]["payments"] == []

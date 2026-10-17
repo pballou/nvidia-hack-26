@@ -2,8 +2,8 @@
 
 The target app the GUI assist agent operates in, both in the NeMo Gym `web_agent`
 env and in the demo. It's a realistic utility account portal with verifiable
-per-session state, and with UI that DOM-based agents can't handle: icon-only buttons
-with no accessible name, and `<canvas>` widgets with no DOM element per target.
+per-session state, and with UI that accessibility-tree agents can't handle: icon-only
+buttons with no accessible name, and `<canvas>` widgets with no DOM element per target.
 
 ```bash
 uvicorn sandbox.app:app --host 127.0.0.1 --port 8090      # or scripts/run_sandbox.sh
@@ -91,9 +91,15 @@ Action types (`state.ACTIONS`): `nav.toggle`, `billing.download {statement_id}`,
    download, mark-all-read and message stars have no text, no `aria-label`, no
    `title` and no visually-hidden text. That's the accessibility gap the vision agent
    closes. Other controls are properly labeled.
-   - The gear, the hamburger and mark-all-read give no hint at all. The download
-     buttons and stars sit in rows with named neighbours, so a DOM agent that uses
-     row context could still find them. Word the demo claims accordingly.
+   - These controls have **no accessible name**. That's the claim, and it's tested
+     in `test_a11y_gap.py`.
+   - The raw HTML still carries the test hooks (rule 8) and ordinary wiring: the gear
+     is a link to `/settings`, and labeled routes to the same pages exist (side nav,
+     bell menu).
+   - The download buttons and stars sit in rows with named neighbours.
+   - So a DOM agent reading raw HTML could still find its way. Word the demo claims as
+     "works from pixels; these controls have no accessible name", not "DOM agents
+     fail".
    - **The canvases are mouse-only on purpose** (no tabindex, no key handling), like
      many real chart and map widgets, so keyboard input can't select a bar or a
      district blind.

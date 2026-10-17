@@ -53,25 +53,26 @@ _GROUNDING_PROMPTS = {
 # - the bars on every page squeezed into NAV, or they eat the 40-line budget and the
 #   page's own controls get cut;
 # - one line per list/table row, so per-row icon buttons survive.
-# The examples are deliberately not taken from the sandbox tasks.
+# The examples are deliberately unlike the sandbox pages and tasks (no invoice/download or
+# star rows, no concrete menu items: the VLM copied "Home, Orders" into real descriptions).
 SUMMARY_PROMPT = """\
 Describe this app screenshot for someone who cannot see it, so they can tell a helper what to click.
 Plain text, at most 40 lines, exactly these five sections:
 
 PAGE: the page title and its main headings, on one line.
-NAV: the bars that are on every page, at most two lines, e.g. "top bar: menu icon, \
-bell icon with a red 2 badge, gear icon, avatar" and "side menu: Home, Orders (selected), \
-Reports, Help".
+NAV: the bars that are on every page, exactly two comma-separated lines, like this \
+music app's: "top bar: back arrow, search icon, cart icon with a red 1 badge, avatar" and \
+"side menu: Library, Playlists (selected), Radio, Podcasts".
 MAIN: one line per clickable or editable thing in the rest of the page, top to bottom: \
 buttons, icon-only buttons (describe the icon's shape), links, tabs, inputs, toggles, \
 checkboxes, chart bars. Each list or table row gets its own line naming the row and its \
-buttons. A group of options is one line listing every option. Format: "- <kind>: <its \
+buttons, even when the rows look alike. A group of options is one line listing every option. Format: "- <kind>: <its \
 text or icon shape> (<the label or row it belongs to>) @ <position>", position = top-left, \
 top, top-right, left, center, right, bottom-left, bottom or bottom-right. Examples:
-- toggle: off (Dark mode) @ right
-- options: Low, Medium (selected), High (Volume) @ right
-- row: March 2025 invoice, $80.00, Paid; download arrow icon button @ right
-- row: Dana Smith, "Team lunch"; star icon, not starred @ center
+- toggle: off (Wi-Fi) @ right
+- options: Daily, Weekly (selected), Monthly (Repeat) @ right
+- row: Order #1042, 3 items, Shipped; trash can icon button @ right
+- row: Lee Park, "Team lunch"; pin icon, not pinned @ center
 - input: "Alex Doe" (Full name) @ center
 STATE: what is selected, checked, switched on, or filled in; "none" if nothing.
 OVERLAYS: any open dialog, menu, dropdown, toast or banner and its text; "none" if none.

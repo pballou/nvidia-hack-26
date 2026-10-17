@@ -250,7 +250,7 @@ async def process(pending, metas, client, store, ctx, *, batch_size, concurrency
              **({} if status == "ok" else {"sample_text": comp.text[:1000]})})
         if ok:
             state["empty_streak"] = 0
-        elif kind != "single" or not payload_ok or state["empty_streak"]:
+        elif kind == "batch" or not payload_ok or state["empty_streak"]:  # retries of stubborn rows only extend a streak
             state["empty_streak"] += 1
         records, failed, retry = [], [], []
         for k, row in enumerate(rows, 1):
