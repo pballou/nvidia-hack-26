@@ -4,24 +4,28 @@ Used by the interactive planner (agent/planner.py) and the Gym task rows
 (resources_servers/web_agent/make_tasks.py), so both see exactly the same tools.
 
 Target descriptions are what the grounder VLM is trained on (T3's rewrite styles):
-short, specific, visual and positional, e.g. "the gear icon in the top-right toolbar"
-or "the Download button in the September row".
+short, specific, visual and positional, e.g. "the search icon in the top-right toolbar"
+or "the Edit button in the second row of the Orders table".
+
+Every example here is deliberately unlike the sandbox tasks (agent-v4): an example that
+names an eval target (agent-v3 had "the star next to the message from the landlord")
+leaks the answer and inflates absolute agent numbers.
 """
 
 from __future__ import annotations
 
 import copy
 
-PROMPT_VERSION = "agent-v3"
+PROMPT_VERSION = "agent-v4"
 
 TOOL_NAMES = ("click", "type_text", "press_key", "scroll", "done")
 
 _TARGET_HELP = (
     "A short visual description of ONE element on the current screen, as a sighted person "
     "would point it out: its visible text or icon, its type, and where it is. Examples: "
-    "\"the gear icon in the top-right toolbar\", \"the Download button in the March row\", "
-    "\"the Dark mode toggle\", \"the Large option in the Font size control\", \"the north "
-    "district on the map\". Use the words from the "
+    "\"the search icon in the top-right toolbar\", \"the Edit button in the second row of the "
+    "Orders table\", \"the Wi-Fi toggle\", \"the Weekly option in the Repeat control\", \"the "
+    "Paris pin on the map\". Use the words from the "
     "screen description, written as a phrase like these examples (not in its \"type: text @ location\" "
     "line format); never use coordinates, CSS selectors or element ids."
 )
@@ -128,13 +132,13 @@ How to work:
 - Until the task is done, every reply is exactly one tool call, never plain text. Then read \
 the new observation.
 - Describe click targets the way you would point them out to a sighted helper: visible \
-text or icon, element type, and position, e.g. "the gear icon in the top-right toolbar". \
+text or icon, element type, and position, e.g. "the search icon in the top-right toolbar". \
 Use the words from the screen description, but as a natural phrase: the line \
 "- button: Save @ bottom-right" becomes "the Save button at the bottom right". Never copy \
 the "@" notation.
 - Use exactly the argument names of each tool, e.g. click(target_description=...).
-- Icons often have no text; describe their shape and location ("the bell icon", "the \
-star next to the message from the landlord").
+- Icons often have no text; describe their shape and location ("the magnifier icon", "the \
+trash can icon in the second row").
 - If the screen did not change after a click, the click probably missed: describe the \
 target differently (more specific, add its position) or try another way.
 - If what you need is not visible, open the menu, tab or page where it likely is, or scroll.
