@@ -1,6 +1,6 @@
 # B-night: automatic Gym improvement loop (overnight)
 
-**Owner:** Kyle (stream B). **Runs:** ~8:30pm Sat → **hard stop 3:00am Sun (EDT)**.
+**Owner:** Kyle (stream B). **Runs:** ~8pm Sat → **hard end 02:50 Sun (EDT)**. `training/night_loop.py` defaults are authoritative: `--last-round-start 01:30`, no new GRPO step after 02:40, `--hard-end 02:50`.
 **Read first:** `AGENTS.md`, `docs/research-notes.md` §3–4 (Gym 0.7.0 gotchas, TRL
 notes), and `docs/gpu-box.md`.
 
@@ -68,7 +68,7 @@ Work dir `/home/ubuntu/night/round_<r>/`. Each round:
 
 **Stop rules:** stop on whichever comes first:
 - 3 rounds;
-- **3:00am**: no new GRPO step may start after 2:40am;
+- **the clock**: no round starts after 01:30, no new GRPO step after 02:40, and everything ends by 02:50;
 - no dev improvement;
 - the `STOP` file;
 - GRPO smoke fails gate D2. In that case, run **one rejection-sampled SFT round**
@@ -126,4 +126,4 @@ Work dir `/home/ubuntu/night/round_<r>/`. Each round:
 - [ ] The loop runs at least one full round unattended, with Gym artifacts per round
       (profile, pool, rollouts, compare report, `summary.json`).
 - [ ] `FINAL.json` exists, the best adapter is served on `:8001` as `grounder`, and
-      training processes are stopped by ~3:00am.
+      training processes are stopped by 02:50.
