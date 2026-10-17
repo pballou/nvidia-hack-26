@@ -79,7 +79,7 @@ publishing.
 | --- | --- | --- |
 | M0 Setup | Sat 1pm | Everyone passes the SETUP.md checks; the grounder is served on the box; the Gym hello world works. |
 | M1 Baseline | Sat 3pm | ScreenSpot-v2 runs through `gui_grounding`. Baselines measured for Qwen3.5-2B and Qwen3-VL-2B, each with its native prompt; first BLADE report. **Gate D1: pick the base model.** |
-| M2 Data + SFT | Sat 3pm → 8pm | OS-Atlas slice cleaned, deduped against SSv2, and split (start in parallel with M1); Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
+| M2 Data + SFT | Sat 3pm → 8pm | Training slice built **without OS-Atlas Linux/macOS** (contaminated; see research-notes §5): ~20–30k targets, ~40–45% desktop (Windows plus GroundCUA), ~25% mobile, ~30% web. Cleaned, deduped against SSv2, split by screenshot. Start in parallel with M1. Lightning instructions generated; SFT pilot (~2k samples, ~15 min) by ~5pm; main SFT run done by ~8pm; dev and SSv2 evals; `gym eval compare`. |
 | M3 Gym loop / GRPO | Sat 8pm → midnight | `gym eval profile` on training rows gives a GRPO set (0 < pass rate < 1). A 20-step TRL GRPO smoke test passes, then the main GRPO run. Hard stop at ~1am. **Gate D2: keep GRPO only if dev improves.** |
 | M4 Agent | Sat afternoon → Sat night (parallel) | Sandbox app plus 8–15 tasks, including icon-only and canvas targets where DOM-based agents fail; `web_agent` env with Lightning; base vs. tuned grounder runs; click-overlay traces. |
 | M5 Ship | Sun 7am → 10:30am | Final evals, BLADE report, HF publish (model, data, methodology), README results, demo video recorded, everything submitted by 11:00. |

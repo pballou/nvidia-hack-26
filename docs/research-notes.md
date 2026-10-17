@@ -190,41 +190,88 @@ TRL notes:
 - 1,272 samples on 730 screenshots: mobile 501, desktop 334, web 437; text 718, icon 554.
 - `bbox` is **[x, y, w, h] in pixels**. Convert to xyxy; a hit is inclusive.
 - Files are `screenspot_{mobile,desktop,web}_v2.json` and `screenspotv2_image.zip` (1.33 GB).
-- **Eval only. Never train on it.** ScreenSpot v1 overlaps v2 heavily (586 of its 610
-  images), so it isn't an independent test set.
+- **Eval only. Never train on it.** ScreenSpot v1 shares 586 of SSv2's 730 images,
+  so training on v1 contaminates v2, and v1 isn't an independent test set.
+- **Pin the dataset revision to `5efbb1f1b5`.** The desktop JSON was re-uploaded in
+  Dec 2024 and Jan 2025.
+- **SSv2 is not one clean set.** SSv2 replaced 144 v1 questions with 144 new
+  screenshots: 52 mobile (iOS), 28 desktop, 64 web. New files have 6-character stems
+  like `pc_8g2jf6.png`. **Report three numbers:** all 1,272 rows; the 1,128 rows on
+  v1 images; the 144 new rows.
 - ScreenSpot-Pro (1,581 samples, xyxy pixels, MIT) is an optional harder benchmark.
 
 **OS-Atlas-data** ([HF](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data), Apache-2.0 card; 816 GB): our training pool.
 
 - Rows are `{img_filename, instruction, bbox}`. `bbox` is `[left, top, right, bottom]`
   normalized to [0, 1]. Desktop and AndroidWorld rows also have `data_type`.
-- Small, self-contained subsets:
+- **⚠ Contamination: do not use OS-Atlas Linux or macOS desktop data**
+  (`linux_splited.json`, `macos_splited.json`).
+  - SSv2's 28 new desktop screenshots (20 Ubuntu at 2560×1440, 8 macOS at 2880×1800)
+    were captured on the same machines and desktop setups, 1–3 weeks after the
+    OS-Atlas captures. Same wallpaper, same desktop files.
+  - At least 9 of those 28 rows have a near-duplicate training screenshot.
+  - The test targets themselves are labeled in training. For example, the test row
+    "adjust font color" matches the training element "Font Color" at IoU 0.83.
+  - The same app layouts recur across many training screenshots, so a perceptual-hash
+    dedup **cannot** remove the leak. Exclude both files entirely (about 2.5k images).
+  - Neither OS-Atlas nor any later paper documents this; it's our own finding,
+    verified by two independent checks.
+- **Other sources look low-risk** (sampled, not exhaustive):
+  - AndroidWorld, RICO, Widget Captioning, UIBert and SeeClick web.
+  - Windows desktop (different resolution, Aug 2024 captures).
+  - FineWeb and AMEX were not checked. Still run a pHash dedup against SSv2 for
+    every source.
+- **Never use:** Wave-UI rows with `source == "screenspot"` (they're in every split)
+  or GroundUI-18K (it contains all of ScreenSpot).
+- Usable subsets:
 
-| Subset | Screenshots | Targets | Image download | Instruction style |
+| Subset | Screenshots | Targets | How to get images | Instruction style |
 | --- | --- | --- | --- | --- |
-| Linux desktop | 1.2k | 43k | 3.1 GB | Raw a11y labels, median 1 word |
-| macOS desktop | 1.3k | 18k | 5.5 GB | Raw labels; ~10% numeric |
-| AndroidWorld | 15.9k | 90k | 2.3 GB | Raw labels |
-| UIBert | 5.7k | 17k | 0.5 GB | Natural |
-| Widget Captioning + RICOSCA | 32k | 275k | 6.5 GB (shared) | Natural |
+| ~~Linux / macOS desktop~~ | — | — | **Excluded (contaminated)** | — |
+| Windows desktop | 50k unique | many | Range-extract 3–4k images from the split archive (71 GB) | Raw a11y labels |
+| AndroidWorld | 15.9k | 90k | `mobile_images.zip` (2.3 GB) | Raw labels |
+| UIBert | 5.7k | 17k | `UIBert.zip` (0.5 GB) | Natural |
+| Widget Captioning + RICOSCA | 32k | 275k | Range-extract from `rico_imgs.zip` (6.5 GB) | Natural |
+| FineWeb web | 1.6M+ | millions | Range-extract 3–5k images from `fineweb_3m_s11.zip` | HTML text |
 
-- **Web:** archives are 46 GB+ each. HF supports HTTP range requests (verified: 206),
-  so you can sample members from one zip without downloading all of it.
-- **Quality:**
-  - 0.3–0.7% of boxes are invalid (e.g. x2 = 1.09).
-  - Desktop targets are tiny: median area 0.13–0.23% of the screen, vs ~1% on mobile.
-  - The same text appears twice on one screenshot in 14% of Widget Captioning rows
-    and 5% of Linux rows. Drop those as ambiguous.
-- **Overlap with ScreenSpot-v2:** dedup training images against SSv2 with perceptual
-  hashing before training.
+- **Web and Windows:** these archives are 46–71 GB. HF supports HTTP range requests
+  (verified: 206), so you can pull individual members without downloading the whole
+  archive.
+- **Quality filters** (from our stats and the recipe review). Drop:
+  - degenerate boxes, boxes outside [0, 1], or boxes covering more than 15% of the
+    screen (0.3–0.7% of boxes are invalid);
+  - icon-font glyphs, numeric-only text, `AutomationID:` / URL / "running window"
+    junk;
+  - instructions over 12 words;
+  - any instruction that appears twice on the same screenshot (14% of Widget
+    Captioning rows).
+- **Recipe from the review:**
+  - About 20–30k element queries, packed 3–6 per screenshot.
+  - Mix ~40–45% desktop, ~25% mobile, ~30% web, with 40–50% icon-like targets.
+  - Rewrite 50–70% of the raw a11y/HTML names into 3–6 word functional instructions
+    in ScreenSpot style; keep the rest raw.
+  - Split train/dev by base screenshot (strip `_subN`), by Rico ID across
+    UIBert/WC/RICOSCA, and by page for web.
+  - Use the same `max_pixels` (~1–2.1 MP) in training and eval.
+- **Desktop replacement for Linux/macOS:** OS-Atlas Windows, plus
+  [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) (MIT, desktop, ~1.15M
+  LLM-written instructions; download per-app folders with `allow_patterns`).
 
-**License-clean complements** if needed:
+**Other sources:**
 
-- [GroundCUA](https://huggingface.co/datasets/ServiceNow/GroundCUA) (MIT, desktop, ~1.15M
-  LLM-written instructions).
-- MolmoPoint-GUISyn.
-- RICO-WidgetCaptioning.
-- Avoid UGround (CC-BY-NC-SA, gated) and Wave-UI (overlaps ScreenSpot).
+- `ritzzai/GUI-R1`: `train.parquet` (482 MB) is GUI-R1-3K, a difficulty-filtered RL
+  pool built from OS-Atlas-type data; UI-R1-E-3B reached SSv2 89.5 on 2k of its rows.
+  It could seed GRPO, but **check its sources for Linux/macOS OS-Atlas images first**.
+- MolmoPoint-GUISyn and RICO-WidgetCaptioning are license-clean.
+- Avoid UGround (CC-BY-NC-SA, gated).
+
+**Training-recipe evidence:**
+
+- GuirlVG (RL): LoRA matched full fine-tuning (87.4 vs. 87.5) at 25× lower cost per
+  iteration, and group size 6 beat 8.
+- ZonUI: LoRA r=8 on 16k samples ≈ the full 120k.
+- What matters most for RL is a point-in-box (or dense) reward plus difficulty
+  filtering.
 
 ## 6. Nemotron 3.5 Lightning
 

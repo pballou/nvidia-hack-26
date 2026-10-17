@@ -30,8 +30,16 @@ plans browser tasks and calls the grounder as a tool.
 - **Open data:** cite every data source. Any synthetic data we generate (e.g.
   Lightning-rewritten instructions) must be published together with the method
   used to make it.
-- **Never train on ScreenSpot-v2.** It is the held-out benchmark. Deduplicate
-  training images against it (perceptual hash) before training.
+- **Never train on ScreenSpot-v2 (or v1).** It is the held-out benchmark; pin
+  revision `5efbb1f1b5`. Deduplicate all training images against it (perceptual
+  hash) before training.
+- **Don't use OS-Atlas Linux/macOS desktop data** (`linux_splited.json`,
+  `macos_splited.json`). It was captured on the same machines as SSv2's new desktop
+  screenshots, and the test targets are labeled in it. Dedup can't remove that.
+  Also never use Wave-UI `source=="screenspot"` rows or GroundUI-18K. Details:
+  docs/research-notes.md §5.
+- **Report SSv2 three ways:** all 1,272 rows, the 1,128 rows on v1 images, and the
+  144 new rows.
 - **Choose checkpoints on the `dev` split** (carved from OS-Atlas by screenshot), not
   on ScreenSpot-v2.
 - **Public repo:** commit only public datasets and the sandbox app. No proprietary
