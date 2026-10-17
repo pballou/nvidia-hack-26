@@ -7,6 +7,7 @@ import sys
 
 import httpx
 
+from console import asr
 from console.agent_bridge import AgentUnavailable, get_agent
 from console.app import ConsoleSettings, create_app
 
@@ -17,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="mock = console/mock_agent.py (scripted, no models); real = T2's agent.core")
     ap.add_argument("--lightning", choices=("local", "hosted"), default="local",
                     help="initial Lightning toggle: local = official BF16 on :8000 (fast), hosted = build.nvidia.com API")
+    ap.add_argument("--asr", choices=sorted(asr.ENGINES), default=None,
+                    help="voice input engine (local only); default $CONSOLE_ASR or stub")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8095)
     ap.add_argument("--sandbox-url", default="http://127.0.0.1:8090")
@@ -29,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     settings = ConsoleSettings(agent=args.agent, sandbox_url=args.sandbox_url, runs_dir=args.runs_dir,
                                headed=args.headed, step_delay_s=args.step_delay, host=args.host, port=args.port,
                                default_lightning=args.lightning)
+    if args.asr:
+        asr.configure(args.asr)
     try:
         get_agent(settings)  # fail fast, e.g. --agent real before T2's agent.core exists
     except AgentUnavailable as e:

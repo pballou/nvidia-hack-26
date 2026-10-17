@@ -90,8 +90,8 @@ user request ─► Nemotron 3.5 Lightning (planner, tool calls) ──► click
 | NVIDIA Brev (1× H200) | Training and eval |
 | Playwright | Sandbox browser automation |
 
-Total generative parameters stay within the event's 33B cap: Lightning 30B plus the
-grounder ≤ 3B. The screen-summary role uses the same base weights with the LoRA
+Total parameters stay within the event's 33B cap: Lightning 30B + grounder 2B
+(Qwen3.5-2B + LoRA) + NVIDIA Parakeet 0.6B for voice input = 32.6B (model-card counts). The screen-summary role uses the same base weights with the LoRA
 adapter turned off (one 2B model plus an adapter).
 
 ## How to reproduce
