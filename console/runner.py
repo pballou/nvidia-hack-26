@@ -11,6 +11,15 @@ is lost or duplicated.
 Stream order: status(starting), status(running), step*, result?, verdict?,
 status(done|stopped|error), end. The verdict is the console checking sandbox state
 after the run; the agent never sees it.
+
+console.json (read by the logs page, console/logs.py) goes into the agent's trace dir
+(the parent of the events' screenshot paths, or cfg.run_dir_root/<agent run id>) as soon
+as that dir is known, with status "running", and is rewritten atomically at the end,
+before the final status and `end` messages:
+  {console_run_id, agent, request, task_id, options, sid, start_url, voice, status,
+   result, verdict, started_ts, ended_ts}
+`voice` ({text, model, latency_ms, duration_s} from the voice UI) is only recorded there;
+it is never passed to the agent.
 """
 
 from __future__ import annotations
@@ -19,8 +28,11 @@ import asyncio
 import dataclasses
 import json
 import logging
+import os
+import re
 import secrets
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +46,8 @@ log = logging.getLogger("console.runner")
 
 VERDICT_LABEL = "verified by sandbox state, not seen by the agent"
 MAX_RUNS_KEPT = 200
+CONSOLE_JSON = "console.json"
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class Busy(Exception):
@@ -66,6 +80,11 @@ class Run:
     sid: str
     start_url: str
     status: str = "starting"
+    voice: dict | None = None       # recorded in console.json only; never given to the agent
+    started_ts: float = field(default_factory=time.time)
+    ended_ts: float | None = None
+    cfg: Any = None
+    console_json_dir: Path | None = None  # where console.json was last written
     agent_run_id: str | None = None
     result: dict | None = None
     verdict: dict | None = None
@@ -88,6 +107,15 @@ def as_dict(obj: Any) -> dict:
     raise TypeError(f"expected a dict or a dataclass, got {type(obj).__name__}")
 
 
+def run_dir_root(cfg: Any) -> Path | None:
+    """cfg.run_dir_root (AgentConfig, MockConfig) as an absolute Path, or None (e.g. a test's dict cfg)."""
+    try:
+        root = getattr(cfg, "run_dir_root", None)
+        return Path(root).resolve() if root is not None else None
+    except Exception:
+        return None
+
+
 def start_url_for(sandbox_url: str, path: str | None, sid: str) -> str:
     path = path or "/"
     return f"{sandbox_url}{path}{'&' if '?' in path else '?'}sid={sid}"
@@ -95,9 +123,10 @@ def start_url_for(sandbox_url: str, path: str | None, sid: str) -> str:
 
 class Runner:
     def __init__(self, *, run_task, make_cfg, sandbox_url: str, tasks_by_id: dict[str, dict],
-                 stop_timeout_s: float = 10.0, http_timeout_s: float = 5.0):
+                 stop_timeout_s: float = 10.0, http_timeout_s: float = 5.0, agent_name: str | None = None):
         self.run_task = run_task
         self.make_cfg = make_cfg
+        self.agent_name = agent_name  # "mock" | "real" (console.json's "agent")
         self.sandbox_url = sandbox_url.rstrip("/")
         self.tasks_by_id = tasks_by_id
         self.stop_timeout_s = stop_timeout_s
@@ -106,6 +135,7 @@ class Runner:
         self.runs: dict[str, Run] = {}
         self.active: Run | None = None
         self.trace_dirs: dict[str, Path] = {}  # agent run_id -> its trace dir
+        self.cfg_roots: list[Path] = []        # every cfg.run_dir_root a run used (logs page roots)
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop_main, name="console-agent-loop", daemon=True)
         self._thread.start()
@@ -130,15 +160,28 @@ class Runner:
         with self.lock:
             return self.trace_dirs.get(agent_run_id)
 
+    def live_agent_run_ids(self) -> set[str]:
+        """The agent run id of the run in progress (empty when idle or before the agent's first event)."""
+        with self.lock:
+            run = self.active
+            return {run.agent_run_id} if run is not None and run.agent_run_id and not run.closed else set()
+
+    def run_roots(self) -> list[Path]:
+        """Every cfg.run_dir_root a run has used so far."""
+        with self.lock:
+            return list(self.cfg_roots)
+
     # --- start / stop --------------------------------------------------------------
 
-    def start(self, request: str, task_id: str | None, options: dict) -> Run:
-        """Reset the sandbox session and schedule the agent. Raises Busy or StartFailed. Blocking (call off-loop)."""
+    def start(self, request: str, task_id: str | None, options: dict, voice: dict | None = None) -> Run:
+        """Reset the sandbox session and schedule the agent. Raises Busy or StartFailed. Blocking (call off-loop).
+        `voice` is only recorded in console.json; the agent gets request, start_url and cfg, nothing else."""
         task = self.tasks_by_id[task_id] if task_id else None
         run_id = "c-" + secrets.token_hex(4)
         sid = "console-" + run_id
         run = Run(run_id=run_id, request=request, task_id=task_id, options=dict(options), sid=sid,
-                  start_url=start_url_for(self.sandbox_url, task["start_path"] if task else "/", sid))
+                  start_url=start_url_for(self.sandbox_url, task["start_path"] if task else "/", sid),
+                  voice=dict(voice) if voice else None)
         with self.lock:
             if self.active is not None:
                 raise Busy(self.active.run_id)
@@ -152,6 +195,12 @@ class Runner:
             except Exception as e:
                 raise StartFailed(f"agent config failed: {type(e).__name__}: {e}") from e
             self._reset_sandbox(sid, task_id)
+            run.cfg = cfg
+            root = run_dir_root(cfg)
+            if root is not None:
+                with self.lock:
+                    if root not in self.cfg_roots:
+                        self.cfg_roots.append(root)
         except BaseException:
             with self.lock:
                 self.active = None
@@ -208,6 +257,7 @@ class Runner:
                 if run.agent_run_id and rd.get("trace_dir"):
                     self.trace_dirs.setdefault(run.agent_run_id, Path(rd["trace_dir"]).resolve())
                 self._append(run, "result", rd)
+                self._write_console_json(run, "running")
             if run.stop_requested:  # the agent handled the cancel itself and returned
                 status, message = "stopped", "stopped by the user"
         except asyncio.CancelledError:
@@ -232,6 +282,7 @@ class Runner:
             if run.status == "starting":
                 self._append(run, "status", {"status": "running"})
             self._append(run, "step", d)
+            self._write_console_json(run, "running")
 
     def _finish(self, run: Run, status: str, message: str | None) -> None:
         """Verdict (if a task was given), final status, end. Runs once per run, whichever path gets here first."""
@@ -245,12 +296,59 @@ class Runner:
             if verdict is not None:
                 run.verdict = verdict
                 self._append(run, "verdict", verdict)
+            run.ended_ts = time.time()
+            self._write_console_json(run, status, final=True)  # before `end`: a client that saw `end` can read it
             self._append(run, "status", {"status": status, **({"message": message} if message else {})})
             self._append(run, "end", {})
             run.closed = True
             if self.active is run:
                 self.active = None
         run.finished.set()
+
+    # --- console.json (the logs page reads it; console/logs.py) -------------------------
+
+    def _console_json_dir(self, run: Run) -> Path | None:  # lock held
+        aid = run.agent_run_id
+        if not aid:
+            return None
+        d = self.trace_dirs.get(aid)
+        if d is None and _SAFE_ID_RE.match(aid):
+            root = run_dir_root(run.cfg)
+            if root is not None and (root / aid).is_dir():
+                d = (root / aid).resolve()
+        return d
+
+    def _write_console_json(self, run: Run, status: str, final: bool = False) -> None:  # lock held
+        """Write console.json atomically into the run's trace dir. Mid-run only when that dir is new
+        (so about once per run); nothing after the final write. Never raises: logging must not break a run."""
+        if run.closed:
+            return
+        d = self._console_json_dir(run)
+        if d is None or (not final and d == run.console_json_dir):
+            return
+        doc = {"console_run_id": run.run_id, "agent": self.agent_name, "request": run.request,
+               "task_id": run.task_id, "options": dict(run.options), "sid": run.sid, "start_url": run.start_url,
+               "voice": run.voice, "status": status, "result": run.result, "verdict": run.verdict,
+               "started_ts": round(run.started_ts, 3),
+               "ended_ts": round(run.ended_ts, 3) if run.ended_ts is not None else None}
+        tmp = d / f".{CONSOLE_JSON}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+            os.replace(tmp, d / CONSOLE_JSON)
+        except Exception as e:
+            log.warning("could not write %s for run %s: %s", d / CONSOLE_JSON, run.run_id, e)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return
+        old, run.console_json_dir = run.console_json_dir, d
+        if old is not None and old != d:  # the trace dir turned out to be elsewhere: drop the stale copy
+            try:
+                if not os.path.samefile(old, d):
+                    (old / CONSOLE_JSON).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     # --- sandbox (verifier side; the agent never calls these) ------------------------
 

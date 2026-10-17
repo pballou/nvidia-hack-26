@@ -550,7 +550,12 @@ def test_mic_click_transcribes_and_runs_a_verified_task(mic, fast_console):
     assert m.pg.inner_text("#banner-icon") == "✓"
     assert m.pg.inner_text("#banner-title") == "Verified: the task is done"
     assert m.pg.text_content("#banner-label") == VERDICT_LABEL
-    assert m.run_bodies == [{"request": STUB_TEXT, "task_id": TASK, "options": DEFAULT_OPTIONS}]
+    assert len(m.run_bodies) == 1
+    body = dict(m.run_bodies[0])
+    voice = body.pop("voice")  # what was heard, for the logs page (console.json only; the agent never gets it)
+    assert body == {"request": STUB_TEXT, "task_id": TASK, "options": DEFAULT_OPTIONS}
+    assert voice["text"] == STUB_TEXT and voice["model"] == "stub" and voice["latency_ms"] >= 0, voice
+    assert 1.0 <= voice["duration_s"] <= 3.0, voice
     s = m.state()
     assert s["run"] == "done" and HEARD_STUB.match(s["heard"] or ""), s
     log = m.pg.inner_text(".log")

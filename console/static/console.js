@@ -7,14 +7,20 @@
  *
  * Voice input lives in voice.js and drives the page through window.AcmeConsole (below):
  * ready (resolves after /api/config and /api/tasks were tried), config(), isRunning(),
- * isStarting(), setRequest(text) -> {taskId, request}, run(), stop(). The page fires
+ * isStarting(), setRequest(text, voice?) -> {taskId, request}, run(), stop(). The page fires
  * `acme:run-start` / `acme:run-end` on document (detail: {runId, request, taskId}).
+ * `voice` ({text, model, latency_ms, duration_s} from /api/transcribe) goes into POST /api/run
+ * for the logs page, but only while the request box still holds exactly what that transcript put
+ * there, and only for the first run that uses it. The backend never passes it to the agent.
  */
 'use strict';
 
 (() => {
   const HC_KEY = 'gui-assist.high-contrast';
   const RUN_KEY = 'gui-assist.run';
+  const RUN_ID_RE = /^[A-Za-z0-9._-]{1,80}$/;  // an agent run id the logs page can open
+  const VOICE_TEXT_MAX = 500;
+  const VOICE_MODEL_MAX = 120;
   const REASON_MAX = 200;
   const CHECK_HEAD_MAX = 110;  // longer sandbox-check explanations are cut, with the full text one click away
   const OPTION_NAMES = ['grounder', 'thinking', 'lightning'];
@@ -73,6 +79,7 @@
     pending: null,      // {text, since}
     timer: null,
     runSeq: 0,          // bumps per attached run (unique element ids)
+    voice: null,        // {request, voice}: the last transcript put in the box (see setRequestText)
   };
   const ui = {};
 
@@ -84,7 +91,7 @@
     config: () => S.config,
     isRunning: () => isRunning(),
     isStarting: () => S.starting,
-    setRequest: (text) => setRequestText(text),
+    setRequest: (text, voice) => setRequestText(text, voice),
     run: () => startRun(),
     stop: () => stopRun(),
     matchTask: (text) => matchTask(text),
@@ -429,6 +436,7 @@
   function onTaskChange() {
     const id = ui.taskSelect.value || null;
     const prev = S.taskId ? S.tasksById.get(S.taskId) : null;
+    S.voice = null;  // the box now holds the picked task, not what was heard
     clearFormError();
     ui.requestNote.textContent = '';
     if (id && S.tasksById.has(id)) {
@@ -445,6 +453,7 @@
 
   function onRequestInput() {
     clearFormError();
+    if (S.voice && ui.request.value !== S.voice.request) S.voice = null;  // edited: no longer the transcript
     if (!S.taskId) return;
     const t = S.tasksById.get(S.taskId);
     if (t && ui.request.value !== t.request) {
@@ -467,8 +476,9 @@
     return null;
   }
 
-  /** Put text in the request box (voice input). A sandbox task's text selects that task, so its verdict shows. */
-  function setRequestText(text) {
+  /** Put text in the request box (voice input). A sandbox task's text selects that task, so its verdict shows.
+   *  `voice` (the /api/transcribe reply) is kept with the text it produced, for the next run's POST body. */
+  function setRequestText(text, voice) {
     const clean = oneLine(text).slice(0, 500);
     const t = matchTask(clean);
     clearFormError();
@@ -484,7 +494,26 @@
       ui.request.value = clean;
       ui.taskMeta.textContent = '';
     }
+    const v = cleanVoice(voice);
+    S.voice = v ? { request: ui.request.value, voice: v } : null;
     return { taskId: S.taskId, request: ui.request.value };
+  }
+
+  /** {text, model, latency_ms, duration_s} as POST /api/run accepts it, or null (then no voice is sent). */
+  function cleanVoice(v) {
+    if (!isObj(v)) return null;
+    const text = oneLine(v.text);
+    const model = oneLine(v.model);
+    const latency = Number(v.latency_ms);
+    const duration = Number(v.duration_s);
+    if (!text || text.length > VOICE_TEXT_MAX || !model || model.length > VOICE_MODEL_MAX) return null;
+    if (!isNum(v.latency_ms) || !isNum(v.duration_s) || latency < 0 || duration < 0) return null;
+    return { text, model, latency_ms: latency, duration_s: duration };
+  }
+
+  /** The voice record for a run of `request`: only if the box still holds exactly what the transcript put there. */
+  function voiceFor(request) {
+    return S.voice && S.voice.request.trim() === request ? S.voice.voice : null;
   }
 
   function showFormError(message, activeRunId) {
@@ -529,6 +558,7 @@
     }
     const options = readOptions();
     const taskId = S.taskId;
+    const voice = voiceFor(request);
     S.starting = true;
     if (document.activeElement === ui.runBtn) ui.request.focus();  // Run is disabled until the run ends
     ui.runBtn.disabled = true;
@@ -538,7 +568,7 @@
       res = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ request, task_id: taskId, options }),
+        body: JSON.stringify({ request, task_id: taskId, options, ...(voice ? { voice } : {}) }),
       });
       data = await res.json().catch(() => ({}));
     } catch {
@@ -561,6 +591,7 @@
       }
       return;
     }
+    if (voice && S.voice && S.voice.voice === voice) S.voice = null;  // one transcript, one run
     attach(String(data.run_id), {
       request, taskId, options, startUrl: data.start_url, focusOnEnd: true,
     });
@@ -577,6 +608,7 @@
     }
     if (isRunning()) return;
     const active = !FINAL.has(str(info.status));
+    S.voice = null;
     ui.request.value = str(info.request);
     const taskId = info.task_id && S.tasksById.has(String(info.task_id)) ? String(info.task_id) : null;
     S.taskId = taskId;
@@ -587,7 +619,7 @@
     renderOptionsSummary();
     attach(String(info.run_id || runId), {
       request: str(info.request), taskId: info.task_id || null, options: info.options,
-      focusOnEnd: active || !quietIfDone, quiet: !active,
+      focusOnEnd: active || !quietIfDone, quiet: !active, agentRunId: info.agent_run_id || null,
     });
   }
 
@@ -638,6 +670,7 @@
       done: null,
       result: null,
       verdict: null,
+      agentRunId: info.agentRunId ? str(info.agentRunId) : null,  // the trace's id: /logs?run=<it>
     };
     S.lastSeq = 0;
     S.runSeq += 1;
@@ -672,7 +705,10 @@
     });
     on('status', onStatus);
     on('step', onStep);
-    on('result', (d) => { S.run.result = d; });
+    on('result', (d) => {
+      S.run.result = d;
+      if (!S.run.agentRunId && d.run_id) S.run.agentRunId = str(d.run_id);
+    });
     on('verdict', (d) => { S.run.verdict = d; });
     on('end', () => finishRun());
     es.addEventListener('open', () => {
@@ -822,6 +858,7 @@
     const n = Number.isInteger(ev.step) && ev.step >= 0 ? ev.step : lastStepNumber();
     const s = getStep(n);
     const p = isObj(ev.payload) ? ev.payload : {};
+    if (!run.agentRunId && ev.run_id) run.agentRunId = str(ev.run_id);
     if (isNum(ev.ts)) {
       if (run.startTs === null) run.startTs = ev.ts;
       run.lastTs = ev.ts;
@@ -1288,10 +1325,17 @@
     if (stats.n_thinking_calls) extra.push(plural('n_thinking_calls', 'thinking call', 'thinking calls'));
     ui.bannerExtra.replaceChildren();
     if (extra.length) ui.bannerExtra.append(document.createTextNode(extra.join(' · ')));
+    const links = [];
     const href = safeHttpUrl(run.startUrl);
-    if (href) {
-      if (extra.length) ui.bannerExtra.append(document.createTextNode(' · '));
-      ui.bannerExtra.append(h('a', { href, target: '_blank', rel: 'noopener', text: 'Open this session in the sandbox' }));
+    if (href) links.push(h('a', { href, target: '_blank', rel: 'noopener', text: 'Open this session in the sandbox' }));
+    const traceId = run.agentRunId || (isObj(run.result) && run.result.run_id ? str(run.result.run_id) : '');
+    if (RUN_ID_RE.test(traceId)) {
+      links.push(h('a', { id: 'banner-logs-link', href: `/logs?run=${encodeURIComponent(traceId)}`,
+        text: 'View this run in Logs' }));
+    }
+    for (const a of links) {
+      if (ui.bannerExtra.firstChild) ui.bannerExtra.append(document.createTextNode(' · '));
+      ui.bannerExtra.append(a);
     }
     ui.banner.hidden = false;
   }

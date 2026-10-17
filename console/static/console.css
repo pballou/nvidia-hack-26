@@ -156,6 +156,7 @@ html.hc .btn-primary:hover:not(:disabled) { background: #ffe866; }
 .btn-quiet[aria-pressed="true"]:hover:not(:disabled) { background: #ffd400; color: #000000; border-color: #ffd400; }
 .btn-quiet[aria-pressed="true"]::before { content: "\2713"; font-weight: 800; }
 .btn-quiet:focus-visible { outline-color: #7dd3fc; }
+.header-link { text-decoration: none; }
 html.hc .btn-quiet:focus-visible { outline-color: var(--focus); }
 
 /* --- layout ----------------------------------------------------------------- */

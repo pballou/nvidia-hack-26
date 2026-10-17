@@ -10,6 +10,7 @@ HTTP API (binding for console/static; details in console/README.md):
   POST /api/runs/{run_id}/stop    {ok: true}
   POST /api/transcribe            16 kHz mono PCM16 WAV (raw audio/wav or multipart "audio") -> {text, duration_s, latency_ms, model}
   GET  /runs/{agent_run_id}/{step_XX[_overlay].png}  trace images
+  GET  /logs, /api/logs/runs[/{run_id}[/download]]   the logs page and its API (console/logs.py)
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
+import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,9 +28,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from console import asr
+from console import asr, logs
 from console.agent_bridge import AgentUnavailable, get_agent
-from console.runner import Busy, Runner, StartFailed
+from console.runner import Busy, Runner, StartFailed, run_dir_root
 
 log = logging.getLogger("console")
 
@@ -39,8 +40,11 @@ REPO_ROOT = CONSOLE_DIR.parent
 OPTION_CHOICES = {"grounder": ("base", "grounder"), "thinking": ("off", "retry", "on"), "lightning": ("hosted", "local")}
 DEFAULT_OPTIONS = {"grounder": "base", "thinking": "retry", "lightning": "hosted"}
 MAX_REQUEST_CHARS = 500
-IMAGE_RE = re.compile(r"^step_\d{2,3}(_overlay)?\.png$")
-AGENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+MAX_VOICE_TEXT_CHARS = 500
+MAX_VOICE_MODEL_CHARS = 120
+VOICE_KEYS = ("text", "model", "latency_ms", "duration_s")
+IMAGE_RE = logs.IMAGE_RE                 # one definition: the logs page builds image URLs with the same rules
+AGENT_RUN_ID_RE = logs.IMAGE_RUN_ID_RE
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
@@ -106,7 +110,33 @@ def parse_run_body(body, tasks_by_id: dict, defaults: dict = DEFAULT_OPTIONS) ->
         if value not in OPTION_CHOICES[key]:
             return None, f"options.{key} must be one of {', '.join(OPTION_CHOICES[key])}"
         clean[key] = value
-    return {"request": request, "task_id": task_id, "options": clean}, None
+    voice, problem = parse_voice(body.get("voice"))
+    if problem:
+        return None, problem
+    return {"request": request, "task_id": task_id, "options": clean, "voice": voice}, None
+
+
+def parse_voice(voice) -> tuple[dict | None, str | None]:
+    """Optional `voice` of POST /api/run: {text, model, latency_ms, duration_s} from /api/transcribe.
+    Recorded in console.json for the logs page; never passed to the agent."""
+    if voice is None:
+        return None, None
+    if not isinstance(voice, dict):
+        return None, "voice must be an object"
+    unknown = sorted(set(voice) - set(VOICE_KEYS))
+    if unknown:
+        return None, f"unknown voice field(s): {', '.join(unknown)}"
+    missing = [k for k in VOICE_KEYS if k not in voice]
+    if missing:
+        return None, f"voice needs {', '.join(missing)}"
+    for key, limit in (("text", MAX_VOICE_TEXT_CHARS), ("model", MAX_VOICE_MODEL_CHARS)):
+        if not isinstance(voice[key], str) or len(voice[key]) > limit:
+            return None, f"voice.{key} must be a string of at most {limit} characters"
+    for key in ("latency_ms", "duration_s"):
+        v = voice[key]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+            return None, f"voice.{key} must be a non-negative number"
+    return {k: voice[k] for k in VOICE_KEYS}, None
 
 
 def _last_event_id(request: Request) -> int:
@@ -133,7 +163,12 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
             log.error("%s", e)
     run_task, make_cfg = agent or (None, None)
     runner = Runner(run_task=run_task, make_cfg=make_cfg, sandbox_url=settings.sandbox_url,
-                    tasks_by_id=tasks_by_id, stop_timeout_s=settings.stop_timeout_s)
+                    tasks_by_id=tasks_by_id, stop_timeout_s=settings.stop_timeout_s, agent_name=settings.agent)
+    agent_root = _agent_run_root(make_cfg, settings.default_options())
+
+    def log_roots() -> list[Path]:
+        """Where the logs page looks for <run_id>/events.jsonl: --runs-dir, then the agent's cfg.run_dir_root."""
+        return logs.dedupe_roots([settings.runs_dir, agent_root, *runner.run_roots()])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -143,7 +178,10 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
     app = FastAPI(title="GUI assist console", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.runner = runner
+    app.state.log_roots = log_roots
     app.mount("/static", StaticFiles(directory=settings.static_dir, check_dir=False), name="static")
+    app.include_router(logs.make_router(static_dir=settings.static_dir, roots=log_roots,
+                                        live=runner.live_agent_run_ids))
 
     @app.get("/", include_in_schema=False)
     def index():
@@ -174,7 +212,8 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
         if agent_error:
             return _error(503, agent_error)
         try:
-            run = await run_in_threadpool(runner.start, clean["request"], clean["task_id"], clean["options"])
+            run = await run_in_threadpool(runner.start, clean["request"], clean["task_id"], clean["options"],
+                                          clean["voice"])
         except Busy as e:
             return _error(409, "a run is already in progress; stop it first", active_run_id=e.active_run_id)
         except StartFailed as e:
@@ -255,8 +294,23 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
         if not IMAGE_RE.match(filename) or not AGENT_RUN_ID_RE.match(agent_run_id):
             return _error(404, "not found")
         path = (runner.trace_dir(agent_run_id) or settings.runs_dir / agent_run_id) / filename
+        if not path.is_file():  # an older run (logs page): look in the run roots
+            found = logs.find_run_dir(log_roots(), agent_run_id)
+            path = found / filename if found is not None else path
         if not path.is_file():
             return _error(404, "not found")
         return FileResponse(path, media_type="image/png")
 
     return app
+
+
+def _agent_run_root(make_cfg, options: dict) -> Path | None:
+    """The agent's cfg.run_dir_root for the default options (the real agent writes traces there, not to
+    --runs-dir). None if the agent is unavailable or its config has no run_dir_root."""
+    if make_cfg is None:
+        return None
+    try:
+        return run_dir_root(make_cfg(options))
+    except Exception as e:  # a broken agent config is reported when a run starts; the logs page still works
+        log.warning("logs page: could not read the agent's run_dir_root: %s: %s", type(e).__name__, e)
+        return None

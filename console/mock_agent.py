@@ -12,7 +12,9 @@ console/tools/calibrate_mock.py. A request picks a script by its exact text (cas
 whitespace don't matter). Anything else gets a short generic run that looks at the
 screen and gives up with done(success=false).
 
-Every payload carries "mock": true. Only measured timings are reported (act); the mock
+Every payload carries "mock": true. Plans say model "mock (no Lightning)", observations
+summary.model "mock (no VLM)", and prompt_version is "mock" (the logs page shows these
+names). Only measured timings are reported (act); the mock
 doesn't run Lightning or a VLM, so it reports no plan/summary/ground latency rather than
 inventing one. cfg.step_delay_s paces the steps so the console demo looks live.
 
@@ -48,6 +50,12 @@ FALLBACK_PLAN = "Mock agent: no scripted plan for this request"
 FALLBACK_SUMMARY = ("This is the mock agent. It only replays the scripted sandbox tasks, "
                     "so it did not do anything for this request.")
 NO_SUMMARY = "(mock agent: no screen description for this step)"
+# Model names the mock declares (the same optional fields as agent/: plan.model, plan.prompt_version,
+# observation.summary, grounding.prompt_version). They say plainly that no model ran.
+MOCK_PLANNER = "mock (no Lightning)"
+MOCK_SUMMARIZER = "mock (no VLM)"
+MOCK_PROMPT_VERSION = "mock"
+MOCK_SUMMARY_INFO = {"model": MOCK_SUMMARIZER, "prompt_version": MOCK_PROMPT_VERSION}
 NO_CHANGE_NOTE = (  # same words as agent/observation.py
     "The screen did NOT change after your last action. The click probably missed or the "
     "element is not interactive: describe the target differently or try another way."
@@ -329,7 +337,8 @@ class _Run:
             title = f"(unavailable: {type(e).__name__})"
         obs = {"step": self.step, "url": page.url, "title": title, "screen_changed": changed,
                "last_action_result": last_result, "screen_summary": summary or NO_SUMMARY}
-        await self.emit("observation", {"observation": obs, "text": render_observation(obs)},
+        await self.emit("observation", {"observation": obs, "text": render_observation(obs),
+                                        "summary": dict(MOCK_SUMMARY_INFO)},
                         screenshot_path=self.save(img))
 
     async def finish(self, success: bool, summary: str, reason: str) -> dict:
@@ -370,7 +379,8 @@ class _Run:
             thinking = self.cfg.thinking == "on" or (self.cfg.thinking == "retry" and last_changed is False)
             await self.pace(0.5)
             await self.emit("plan", {"content": step.get("content", ""), "reasoning": step.get("reasoning", ""),
-                                     "thinking": thinking, "tool_calls": [{"name": tool, "arguments": args}]})
+                                     "thinking": thinking, "tool_calls": [{"name": tool, "arguments": args}],
+                                     "model": MOCK_PLANNER, "prompt_version": MOCK_PROMPT_VERSION})
             await self.emit("tool_call", {"name": tool, "arguments": args, "valid": True,
                                           "description": describe(tool, args)})
             if tool == "done":
@@ -387,7 +397,8 @@ class _Run:
                 pt = [round(x / VIEWPORT["width"] * 1000), round(y / VIEWPORT["height"] * 1000)]
                 await self.emit("grounding", {"target": target, "x": x, "y": y, "point_1000": pt,
                                               "raw": json.dumps({"point_2d": pt}),
-                                              "model": f"{self.cfg.grounder_model}, mock"},
+                                              "model": f"{self.cfg.grounder_model}, mock",
+                                              "prompt_version": MOCK_PROMPT_VERSION},
                                 overlay_path=overlay)
                 click = {"x": x, "y": y}
             t = time.perf_counter()
@@ -417,7 +428,8 @@ class _Run:
         args = {"summary": FALLBACK_SUMMARY, "success": False}
         await self.pace(0.5)
         await self.emit("plan", {"content": FALLBACK_PLAN, "reasoning": "", "thinking": False,
-                                 "tool_calls": [{"name": "done", "arguments": args}]})
+                                 "tool_calls": [{"name": "done", "arguments": args}],
+                                 "model": MOCK_PLANNER, "prompt_version": MOCK_PROMPT_VERSION})
         await self.emit("tool_call", {"name": "done", "arguments": args, "valid": True,
                                       "description": describe("done", args)})
         await self.emit("action", {"name": "done", "arguments": args, "ok": True, "screen_changed": None, "done": True})

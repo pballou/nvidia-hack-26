@@ -154,7 +154,7 @@ def test_keyboard_only_sandbox_task(page, ui_console):
     pg, watch = page
     open_console(pg, ui_console)
 
-    # Tab: skip link, high-contrast toggle, request box, then the task picker
+    # Tab: skip link, Logs link, high-contrast toggle, mic, request box, then the task picker
     path = tab_to(pg, lambda f: f["id"] == "task-select", limit=6)
     assert [f["id"] for f in path][-2:] == ["request", "task-select"], path
     pg.keyboard.type("Turn on")  # the native select's type-ahead picks "Turn on high contrast. (medium)"
@@ -241,7 +241,7 @@ def test_keyboard_only_sandbox_task(page, ui_console):
 def test_free_text_run_via_run_button(page, ui_console):
     pg, watch = page
     open_console(pg, ui_console)
-    tab_to(pg, lambda f: f["id"] == "request", limit=4)
+    tab_to(pg, lambda f: f["id"] == "request", limit=5)  # skip link, Logs, high contrast, mic, request
     pg.keyboard.type("Please water my plants")
     assert pg.input_value("#task-select") == ""  # Free text
     tab_to(pg, lambda f: f["id"] == "run-btn")  # through the picker and the option groups

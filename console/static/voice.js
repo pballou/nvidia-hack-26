@@ -514,6 +514,8 @@
     const latency = Number(data.latency_ms);
     const label = oneLine(V.asr && V.asr.label) || oneLine(data.model) || 'ASR';
     showHeard(`Heard (${label}${Number.isFinite(latency) ? `, ${Math.round(latency)} ms` : ''}): ${text}`);
+    // For the logs page: console.js sends this with the run only while the box still holds what it produced.
+    const voice = { text, model: data.model, latency_ms: data.latency_ms, duration_s: data.duration_s };
     const command = text.trim().toLowerCase().replace(/[\s\p{P}]+$/u, '');
     if (C.isRunning()) {
       if (STOP_WORDS.has(command)) {
@@ -523,7 +525,7 @@
         C.stop();
         return;
       }
-      const { request } = C.setRequest(text);
+      const { request } = C.setRequest(text, voice);
       V.heard = { request, used: false };
       setState('done');
       say(`A run is in progress — say "stop" to stop it. “${request}” is in the request box for later.`,
@@ -531,7 +533,7 @@
       return;
     }
     if (C.isStarting()) {
-      const { request } = C.setRequest(text);
+      const { request } = C.setRequest(text, voice);
       V.heard = { request, used: false };
       setState('done');
       say(`A run is starting, so “${request}” won’t run by itself. It’s in the request box.`, { tone: 'warn' });
@@ -543,7 +545,7 @@
       say(`Heard: “${text}”. Nothing is running, so there’s nothing to stop.`);
       return;
     }
-    const { taskId, request } = C.setRequest(text);
+    const { taskId, request } = C.setRequest(text, voice);
     V.heard = { request, used: false };
     setState('done');
     startCountdown(request, taskId);

@@ -240,8 +240,13 @@ def test_push_to_talk_fills_selects_and_runs_a_sandbox_task(voice, fast_console)
     assert v.state()["countdown"] is None
     v.pg.wait_for_selector("#banner:not([hidden])", timeout=60000)
     assert v.pg.get_attribute("#banner", "data-tone") == "pass"
-    assert v.run_bodies == [{"request": TASK_REQUEST, "task_id": TASK,
-                             "options": {"grounder": "base", "thinking": "retry", "lightning": "local"}}]
+    assert len(v.run_bodies) == 1
+    body = dict(v.run_bodies[0])
+    voice = body.pop("voice")  # what was heard, for the logs page (console.json only; the agent never gets it)
+    assert body == {"request": TASK_REQUEST, "task_id": TASK,
+                    "options": {"grounder": "base", "thinking": "retry", "lightning": "local"}}
+    assert voice["text"] == STUB_TEXT and voice["model"] == "stub" and voice["latency_ms"] >= 0, voice
+    assert 0.6 < voice["duration_s"] < 2.0, voice
     s = v.state()
     assert s["heard"].startswith("Heard (stub, ") and s["status"] == ""  # old status cleared for the step log
     log = v.pg.inner_text(".log")
@@ -252,8 +257,8 @@ def test_push_to_talk_fills_selects_and_runs_a_sandbox_task(voice, fast_console)
 def test_mic_button_by_keyboard_and_space_only_off_controls(voice, fast_console):
     v = voice
     open_console(v, fast_console)
-    # Tab order: skip link, high contrast, the mic, the request box (the mic sits left of the box)
-    for _ in range(3):
+    # Tab order: skip link, Logs, high contrast, the mic, the request box (the mic sits left of the box)
+    for _ in range(4):
         v.pg.keyboard.press("Tab")
     assert v.state()["active"] == "mic-btn"
     v.pg.keyboard.press("Tab")

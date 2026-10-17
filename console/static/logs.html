@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GUI assist · Logs</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/console.css">
+  <link rel="stylesheet" href="/static/logs.css">
+  <!-- Loaded in <head> on purpose: it applies the saved theme (shared with the console) before first paint. -->
+  <script src="/static/logs.js"></script>
+</head>
+<body class="logs-page">
+  <a class="skip-link" href="#runs-section">Skip to the runs</a>
+
+  <header class="app-header">
+    <div class="brand">
+      <h1>GUI assist · Logs</h1>
+      <p class="tagline">Every run, event by event: what each model saw, decided and did.</p>
+    </div>
+    <nav class="header-tools" aria-label="Pages">
+      <a class="btn btn-quiet nav-link" href="/">Console</a>
+      <button id="hc-toggle" class="btn btn-quiet" type="button" aria-pressed="false">High contrast</button>
+    </nav>
+  </header>
+
+  <main class="logs-layout">
+    <section id="runs-section" class="panel runs-panel" aria-labelledby="runs-heading" tabindex="-1">
+      <div class="section-head">
+        <h2 id="runs-heading">Runs</h2>
+        <p id="runs-meta" class="section-meta"></p>
+        <p id="refresh-note" class="section-meta refresh-note"></p>
+        <button id="refresh-btn" class="btn btn-small" type="button">Refresh</button>
+      </div>
+      <div id="runs-scroll" class="runs-scroll">
+        <table id="runs-table" class="runs-table" aria-describedby="runs-legend">
+          <caption class="visually-hidden">Agent runs, newest first. Use the up and down arrow keys to move between
+            runs and Enter to open one.</caption>
+          <colgroup>
+            <col class="c-time"><col class="c-request"><col class="c-agent"><col class="c-status">
+            <col class="c-check"><col class="c-check"><col class="c-steps"><col class="c-total">
+            <col class="c-p50"><col class="c-p50"><col class="c-p50"><col class="c-p50"><col class="c-p50">
+            <col class="c-models">
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col" rowspan="2">Started</th>
+              <th scope="col" rowspan="2">Request <span class="th-sub">· task</span></th>
+              <th scope="col" rowspan="2">Agent</th>
+              <th scope="col" rowspan="2">Status</th>
+              <th scope="col" rowspan="2" class="num">Claimed</th>
+              <th scope="col" rowspan="2" class="num">Verified</th>
+              <th scope="col" rowspan="2" class="num">Steps</th>
+              <th scope="col" rowspan="2" class="num">Total</th>
+              <th scope="colgroup" colspan="5" class="group-head">p50 latency per stage</th>
+              <th scope="col" rowspan="2">Models</th>
+            </tr>
+            <tr>
+              <th scope="col" class="num sub">voice</th>
+              <th scope="col" class="num sub">summary</th>
+              <th scope="col" class="num sub">plan</th>
+              <th scope="col" class="num sub">ground</th>
+              <th scope="col" class="num sub">act</th>
+            </tr>
+          </thead>
+          <tbody id="runs-body"></tbody>
+        </table>
+        <p id="runs-empty" class="empty-note">Loading runs…</p>
+      </div>
+      <p id="runs-legend" class="kbd-hint">
+        <span class="kbd-title">Keyboard:</span> <kbd>↑</kbd><kbd>↓</kbd> move between runs · <kbd>Enter</kbd> open ·
+        <kbd>Home</kbd><kbd>End</kbd> first and last<span class="narrow-only"> · <kbd>←</kbd><kbd>→</kbd> scroll
+          sideways</span>.
+        <span class="legend-sep">Claimed = the agent said it succeeded. Verified = the sandbox state, checked by
+          the console after the run. — = not in the trace.</span>
+      </p>
+    </section>
+
+    <p id="run-placeholder" class="panel run-placeholder">Select a run to see its summary and every event.</p>
+
+    <section id="run-section" class="panel run-panel" aria-labelledby="run-heading" tabindex="-1" hidden>
+      <div class="run-head">
+        <div class="run-title">
+          <h2 id="run-heading">Run</h2>
+          <p id="run-badges" class="run-badges"></p>
+        </div>
+        <div class="run-actions">
+          <button id="copy-btn" class="btn btn-small" type="button">Copy JSON</button>
+          <a id="download-link" class="btn btn-small" href="#" download>Download JSON</a>
+          <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
+      </div>
+      <div id="copy-fallback-wrap" class="copy-fallback" hidden>
+        <label for="copy-fallback" class="field-label">The clipboard isn’t available here. The run’s JSON is selected
+          below: press <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>⌘</kbd><kbd>C</kbd> on a Mac) to copy it.</label>
+        <textarea id="copy-fallback" readonly rows="6" spellcheck="false"></textarea>
+        <button id="copy-fallback-close" class="btn btn-small" type="button">Close</button>
+      </div>
+      <p id="run-error" class="form-error" role="alert"></p>
+
+      <div id="run-summary" class="run-summary"></div>
+
+      <section class="events" aria-labelledby="events-heading">
+        <div class="events-head">
+          <h3 id="events-heading">Event log</h3>
+          <p id="events-meta" class="section-meta"></p>
+        </div>
+        <div class="filters" role="search" aria-label="Filter events">
+          <fieldset class="kind-filter">
+            <legend class="filter-label">Kind</legend>
+            <div id="kind-chips" class="kind-chips"></div>
+          </fieldset>
+          <div class="filter-row">
+            <label class="filter-label" for="model-filter">Model</label>
+            <select id="model-filter"></select>
+            <label class="filter-label" for="event-search">Search</label>
+            <input id="event-search" class="search" type="search" autocomplete="off" spellcheck="false"
+                   placeholder="Words in any event, e.g. toggle">
+            <button id="clear-filters" class="btn btn-small" type="button">Show all events</button>
+          </div>
+        </div>
+        <div class="event-cols" aria-hidden="true">
+          <span class="ev-t">t</span><span class="ev-step">step</span><span class="ev-kind">kind</span>
+          <span class="ev-src">source</span><span class="ev-model">model</span><span class="ev-lat">latency</span>
+          <span class="ev-desc">what happened</span>
+        </div>
+        <ol id="event-list" class="event-list" aria-labelledby="events-heading"
+            aria-describedby="events-keys"></ol>
+        <p id="events-empty" class="empty-note" hidden></p>
+        <p id="events-keys" class="kbd-hint">
+          <span class="kbd-title">Keyboard:</span> <kbd>↑</kbd><kbd>↓</kbd> move between events ·
+          <kbd>Enter</kbd> show or hide details · <kbd>Home</kbd><kbd>End</kbd> first and last.
+        </p>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="img-dialog" class="img-dialog" aria-labelledby="img-dialog-title">
+    <div class="img-dialog-head">
+      <h2 id="img-dialog-title" class="img-dialog-title"></h2>
+      <button id="img-dialog-close" class="btn btn-small" type="button">Close</button>
+    </div>
+    <img id="img-dialog-img" class="img-dialog-img" alt="">
+  </dialog>
+
+  <p id="sr-status" class="visually-hidden" role="status" aria-live="polite"></p>
+</body>
+</html>
