@@ -1,7 +1,9 @@
 """Write a self-contained HTML contact sheet for auditing Lightning rewrites (T3 quality gate).
 
-Shows n random kept rewrites (context crop with the target box, thumbnail, original label, rewrite, the metadata Lightning
-saw) plus a few model drops, with per-card verdicts, a live tally against the 90% pass line, and a JSON download.
+Shows n random kept rewrites (context crop with the target box, thumbnail, a zoom strip when the crop shrinks the box,
+original label, rewrite, the metadata Lightning saw) plus a few model drops, with per-card verdicts, a live tally
+against the 90% pass line, and a JSON download/clipboard copy. "source error" marks a dataset box on a different element
+than its label; those cards are left out of the faithful rate, so the gate measures rewrite faithfulness only.
 
 Example:
   python data_prep/rewrite/review_sample.py --out /home/ubuntu/data/rewrite_dry --n 50 --drops 20
@@ -24,16 +26,19 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from data_prep.rewrite import meta
-from data_prep.rewrite.validate import LLM_ERROR
+from data_prep.rewrite.validate import LLM_ERROR, RULE_MODEL
 
 CROP_MIN_SIDE, CROP_FACTOR = 320, 3
 CROP_MAX = (360, 360)
 THUMB_MAX = (220, 260)
+ZOOM_MARGIN, ZOOM_MIN_BOX_H, ZOOM_MAX_SCALE = 16, 24, 2.0
+ZOOM_MAX = (560, 160)
 BOX_COLOR = (230, 0, 0)
 JPEG_QUALITY = 82
 PASS_LINE = 0.9
-KEPT_VERDICTS = ("faithful", "unfaithful", "unsure")
+KEPT_VERDICTS = ("faithful", "unfaithful", "unsure", "source_error")
 DROP_VERDICTS = ("yes", "no")
+VERDICT_TEXT = {"source_error": "source error: box \u2260 label"}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -61,11 +66,16 @@ def resolve_manifest(out_dir: Path, stats: dict, manifest_path=None) -> Path:
     return p
 
 
+def is_model_drop(r: dict) -> bool:
+    """A drop the model decided: not llm_error (no judgment) and not a numeric rule drop (deterministic, never sent)."""
+    return r.get("keep") is False and r.get("drop_reason") != LLM_ERROR and r.get("model") != RULE_MODEL
+
+
 def sample_rows(rewrites: list[dict], n: int, seed: int, drops: int) -> tuple[list[dict], list[dict]]:
-    """Seeded samples over rows sorted by id: kept+rewritten rows, and model drops (llm_error rows are not judgments)."""
+    """Seeded samples over rows sorted by id: kept+rewritten rows, and model drops (is_model_drop)."""
     recs = sorted(rewrites, key=lambda r: r["id"])
     kept = [r for r in recs if r.get("keep") is True and r.get("rewritten")]
-    dropped = [r for r in recs if r.get("keep") is False and r.get("drop_reason") != LLM_ERROR]
+    dropped = [r for r in recs if is_model_drop(r)]
     return (random.Random(seed).sample(kept, min(max(n, 0), len(kept))),
             random.Random(f"drops:{seed}").sample(dropped, min(max(drops, 0), len(dropped))))
 
@@ -79,6 +89,19 @@ def crop_box(bbox, img_w: int, img_h: int, min_side: int = CROP_MIN_SIDE, factor
 
     (l, r), (t, b) = axis(bbox[0], bbox[2], img_w), axis(bbox[1], bbox[3], img_h)
     return l, t, r, b
+
+
+def zoom_box(bbox, img_w: int, img_h: int, margin: int = ZOOM_MARGIN, min_box_h: int = ZOOM_MIN_BOX_H,
+             max_scale: float = ZOOM_MAX_SCALE, max_out=ZOOM_MAX):
+    """(window, scale) of the zoom strip: the box plus margin, upscaled (at most max_scale) until the box is at least
+    min_box_h px tall, and cut to max_out output px from the box's top-left corner so a long label's start stays
+    readable."""
+    x1, y1, x2, y2 = bbox
+    s = min(max_scale, max(1.0, min_box_h / max(y2 - y1, 1e-9)))
+    l, t = max(0, math.floor(x1 - margin)), max(0, math.floor(y1 - margin))
+    r = min(img_w, math.ceil(x2 + margin), l + max(1, math.floor(max_out[0] / s)))
+    b = min(img_h, math.ceil(y2 + margin), t + max(1, math.floor(max_out[1] / s)))
+    return (l, t, r, b), s
 
 
 def fit(im: Image.Image, max_w: int, max_h: int) -> tuple[Image.Image, float]:
@@ -102,13 +125,31 @@ def data_url(im: Image.Image) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def render_images(row: dict | None, images_root: Path) -> tuple[str | None, str | None, str | None]:
-    """(crop data URL, thumbnail data URL, error). Never raises: problems come back as the error string."""
+def img_tag(cls: str, im: Image.Image, alt: str) -> str:
+    """Explicit width/height keep the layout fixed while data URLs decode, so the load-time scroll lands right."""
+    return f'<img class="{cls}" src="{data_url(im)}" width="{im.width}" height="{im.height}" alt="{alt}">'
+
+
+def zoom_strip(im: Image.Image, box, crop_scale: float) -> tuple[Image.Image, float] | None:
+    """(strip, scale) for wide/thin targets, or None when the context crop already shows the box at least as large."""
+    (l, t, r, b), s = zoom_box(box, im.width, im.height)
+    if s <= crop_scale:
+        return None
+    z = im.crop((l, t, r, b))
+    if s != 1:
+        z = z.resize((max(1, round(z.width * s)), max(1, round(z.height * s))), Image.Resampling.LANCZOS)
+    draw_box(z, [(box[0] - l) * s, (box[1] - t) * s, (box[2] - l) * s, (box[3] - t) * s], 2)
+    return z, s
+
+
+def render_images(row: dict | None, images_root: Path) -> tuple[str, str | None]:
+    """(markup: crop + thumbnail, then the zoom strip if any; error). Never raises: problems come back as the error
+    string with empty markup."""
     if row is None:
-        return None, None, "row not in manifest"
+        return "", "row not in manifest"
     path = images_root / row["image_path"]
     if not path.is_file():
-        return None, None, f"image missing: {row['image_path']}"
+        return "", f"image missing: {row['image_path']}"
     try:
         with Image.open(path) as src:
             im = src.convert("RGB")
@@ -118,13 +159,18 @@ def render_images(row: dict | None, images_root: Path) -> tuple[str | None, str 
         box = [min(max(x1 * sx, 0), im.width), min(max(y1 * sy, 0), im.height),
                min(max(x2 * sx, 0), im.width), min(max(y2 * sy, 0), im.height)]
         l, t, r, b = crop_box(box, im.width, im.height)
-        crop, s = fit(im.crop((l, t, r, b)), *CROP_MAX)
-        draw_box(crop, [(box[0] - l) * s, (box[1] - t) * s, (box[2] - l) * s, (box[3] - t) * s], 3)
-        thumb, s = fit(im, *THUMB_MAX)
-        draw_box(thumb, [v * s for v in box], 2)
-        return data_url(crop), data_url(thumb), None
+        crop, cs = fit(im.crop((l, t, r, b)), *CROP_MAX)
+        draw_box(crop, [(box[0] - l) * cs, (box[1] - t) * cs, (box[2] - l) * cs, (box[3] - t) * cs], 3)
+        thumb, ts = fit(im, *THUMB_MAX)
+        draw_box(thumb, [v * ts for v in box], 2)
+        out = f'<div class="imgs">{img_tag("crop", crop, "target crop")}{img_tag("thumb", thumb, "screenshot")}</div>'
+        zoom = zoom_strip(im, box, cs)
+        if zoom:
+            out += (f'<div class="zm"><span class="lbl">zoom {zoom[1]:.1f}x</span>'
+                    f'{img_tag("zoom", zoom[0], "target zoom")}</div>')
+        return out, None
     except Exception as e:  # a corrupt image must not kill the sheet
-        return None, None, f"image error: {type(e).__name__}: {e}"
+        return "", f"image error: {type(e).__name__}: {e}"
 
 
 def load_cache_records(out_dir: Path, recs: list[dict]) -> dict[str, dict]:
@@ -148,20 +194,34 @@ def chip(text, cls="") -> str:
     return f'<span class="chip {cls}">{esc(text)}</span>'
 
 
+def card_hash(rec: dict) -> str:
+    """Per-card fingerprint: a stored verdict applies only to the same id, label, rewrite and drop reason."""
+    key = json.dumps([rec.get("id"), rec.get("original"), rec.get("rewritten"), rec.get("drop_reason")])
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def neighbor_html(n: dict) -> str:
+    """v3 meta: where the TARGET is relative to the neighbor; older meta: where the neighbor is, seen from the target."""
+    if n.get("target_is"):
+        return f'<span class="nb">target is <i>{esc(n["target_is"])}</i> {esc(n.get("label"))}</span>'
+    if n.get("direction"):
+        return f'<span class="nb">{esc(n.get("label"))} <i>is {esc(n["direction"])}</i></span>'
+    return f'<span class="nb">{esc(n.get("label"))}</span>'
+
+
 def meta_html(m: dict | None) -> str:
     if m is None:
         return '<div class="meta muted">no metadata (row not in manifest)</div>'
     parts = [f"{k}: <b>{esc(m[k])}</b>" for k in ("control", "kind", "position", "size") if m.get(k)]
-    nbs = " · ".join(f'<span class="nb"><i>{esc(x["direction"])}</i> {esc(x["label"])}</span>' for x in m["neighbors"])
+    nbs = " · ".join(neighbor_html(x) for x in m.get("neighbors") or ())
     return (f'<div class="meta">Lightning saw: {" · ".join(parts)}</div>'
             f'<div class="meta nbs">neighbors: {nbs or "<i>none</i>"}</div>')
 
 
 def card_html(idx: int, kind: str, rec: dict, row: dict | None, by_image: dict, images_root: Path,
               cached: dict | None) -> str:
-    crop, thumb, err = render_images(row, images_root)
-    imgs = (f'<img class="crop" src="{crop}" alt="target crop"><img class="thumb" src="{thumb}" alt="full screenshot">'
-            if crop else f'<div class="ph">{esc(err)}</div>')
+    imgs, err = render_images(row, images_root)
+    imgs = imgs or f'<div class="imgs"><div class="ph">{esc(err)}</div></div>'
     m = meta.row_meta(row, by_image, style=rec.get("style") or None) if row is not None else None
     chips = [chip(rec.get("style"), "style"), chip(rec.get("source")), chip((row or {}).get("platform") or "?")]
     flags = [chip(w, "warn") for w in (cached or {}).get("warnings") or []]
@@ -172,20 +232,19 @@ def card_html(idx: int, kind: str, rec: dict, row: dict | None, by_image: dict, 
         flags.append(chip("manifest label differs from original", "warn"))
     if kind == "kept":
         main = f'<div class="rw">{esc(rec.get("rewritten"))}</div>'
-        opts = [(v, i + 1) for i, v in enumerate(KEPT_VERDICTS)]
-        question = ""
+        opts, question = KEPT_VERDICTS, ""
     else:
         main = f'<div class="rw drop">DROPPED: {esc(rec.get("drop_reason"))}</div>'
-        opts = [(v, i + 1) for i, v in enumerate(DROP_VERDICTS)]
-        question = '<span class="q">drop correct?</span> '
-    radios = "".join(f'<label><input type="radio" name="v{idx}" value="{v}"> {v} <kbd>{k}</kbd></label>'
-                     for v, k in opts)
+        opts, question = DROP_VERDICTS, '<span class="q">drop correct?</span> '
+    radios = "".join(f'<label class="o-{v}"><input type="radio" name="v{idx}" value="{v}"> '
+                     f'{esc(VERDICT_TEXT.get(v, v))} <kbd>{k}</kbd></label>' for k, v in enumerate(opts, 1))
     data = {"id": rec["id"], "kind": kind, "source": rec.get("source"), "style": rec.get("style"),
-            "original": rec.get("original"), "rewritten": rec.get("rewritten"), "drop-reason": rec.get("drop_reason")}
+            "original": rec.get("original"), "rewritten": rec.get("rewritten"), "drop-reason": rec.get("drop_reason"),
+            "h": card_hash(rec)}
     attrs = " ".join(f'data-{k}="{esc(v)}"' for k, v in data.items())
     return (f'<section class="card {kind}" id="c{idx}" {attrs}>'
             f'<div class="top"><span class="num">#{idx + 1}</span> {" ".join(chips)} <code>{esc(rec["id"])}</code></div>'
-            f'<div class="imgs">{imgs}</div>{main}'
+            f'{imgs}{main}'
             f'<div class="orig"><span class="lbl">original label</span> {esc(rec.get("original"))}</div>'
             f'{meta_html(m)}<div class="flags">{" ".join(flags)}</div>'
             f'<div class="verdict">{question}{radios}<input type="text" class="note" placeholder="note"></div></section>')
@@ -200,8 +259,10 @@ def header_html(stats: dict, rewrites: list[dict], n_kept_pop: int, n_drop_pop: 
             reasons[r.get("drop_reason")] = reasons.get(r.get("drop_reason"), 0) + 1
     reason_txt = ", ".join(f"{esc(k)} {v}" for k, v in sorted(reasons.items(), key=lambda kv: (-kv[1], str(kv[0]))))
     run, quality, gate = stats.get("run") or {}, stats.get("quality") or {}, stats.get("gate") or {}
+    n_rule = sum(1 for r in rewrites if r.get("model") == RULE_MODEL)
     lines = [f"rewrites <b>{len(rewrites)}</b> · kept <b>{kept}</b> · dropped <b>{len(rewrites) - kept}</b>"
-             + (f" ({reason_txt})" if reason_txt else "")]
+             + (f" ({reason_txt})" if reason_txt else "")
+             + (f" · numeric by rule (never sent, not sampled) <b>{n_rule}</b>" if n_rule else "")]
     if run.get("unofficial_model"):
         roots = ", ".join(run.get("unofficial_roots") or [str(run.get("served_model_root") or "unverified")])
         lines.insert(0, f'<span class="chip bad">NOT FOR PUBLICATION: unofficial/community checkpoint ({esc(roots)}); '
@@ -209,9 +270,11 @@ def header_html(stats: dict, rewrites: list[dict], n_kept_pop: int, n_drop_pop: 
     if stats:
         gates = " ".join(chip(f"{k}: {'ok' if v else 'FAIL'}", "ok" if v else "bad")
                          for k, v in sorted(gate.items()) if isinstance(v, bool))
-        lines.append(f"first-try valid <b>{pct(quality.get('first_try_valid_rate'))}</b> · batch JSON ok "
+        sent = f" of {esc(quality['llm_rows'])} sent" if quality.get("llm_rows") is not None else ""
+        lines.append(f"first-try valid <b>{pct(quality.get('first_try_valid_rate'))}</b>{sent} · batch JSON ok "
                      f"<b>{pct(quality.get('batch_json_ok_rate'))}</b> · drop rate (raw, excl. llm_error) "
-                     f"<b>{pct(quality.get('drop_rate_raw'))}</b> · endpoint {esc(run.get('endpoint'))}"
+                     f"<b>{pct(quality.get('drop_rate_raw'))}</b> (model only "
+                     f"<b>{pct(quality.get('drop_rate_model'))}</b>) · endpoint {esc(run.get('endpoint'))}"
                      f"{' · dry run' if run.get('dry_run') else ''} {gates}")
         by_source = (stats.get("rewrites") or {}).get("by_source") or {}
         if by_source:
@@ -220,19 +283,23 @@ def header_html(stats: dict, rewrites: list[dict], n_kept_pop: int, n_drop_pop: 
     else:
         lines.append('<span class="muted">no stats.json in OUT</span>')
     lines.append(f"sheet: {n_kept} of {n_kept_pop} kept rewrites, {n_drop} of {n_drop_pop} model drops "
-                 f"(llm_error not sampled) · seed {seed}")
+                 f"(llm_error and rule drops not sampled) · seed {seed}")
     return (f'<header><h1>T3 rewrite review · prompt <code>{esc(pv)}</code> · {esc(model)}</h1>'
             + "".join(f'<div class="sum">{x}</div>' for x in lines)
-            + f'<div class="tally">faithful <b id="t-f">0</b> / <b id="t-j">0</b> judged (<b id="t-p">n/a</b>) of '
-              f'{n_kept} · pass line {PASS_LINE:.0%} <span id="t-status" class="badge">not started</span> · '
-              f'unfaithful <b id="t-u">0</b> · unsure <b id="t-s">0</b> · drops correct <b id="t-dy">0</b> / '
-              f'<b id="t-dj">0</b> of {n_drop} <button id="dl">Download verdicts JSON</button> '
-              f'<button id="clr">Clear verdicts</button></div>'
-              '<div class="help">Keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev card · <kbd>1</kbd> faithful · '
-              '<kbd>2</kbd> unfaithful · <kbd>3</kbd> unsure (drop cards: <kbd>1</kbd> yes · <kbd>2</kbd> no) · '
+            + f'<div class="tally">faithful <b id="t-f">0</b> / <b id="t-r">0</b> rated (<b id="t-p">n/a</b>) · pass line '
+              f'{PASS_LINE:.0%} <span id="t-status" class="badge">not started</span> · unfaithful <b id="t-u">0</b> · '
+              f'unsure <b id="t-s">0</b> · source error <b id="t-e">0</b> (not rated) · judged <b id="t-j">0</b> of '
+              f'{n_kept} · drops correct <b id="t-dy">0</b> / <b id="t-dj">0</b> of {n_drop} '
+              f'<button id="dl">Download verdicts JSON</button><button id="cp">Copy verdicts</button>'
+              f'<span id="cp-ok" aria-live="polite"></span> <button id="clr">Clear verdicts</button></div>'
+              '<div class="help">Keys act on the highlighted card, or on the first card in view if it is scrolled '
+              'away: <kbd>j</kbd>/<kbd>k</kbd> next/prev card · <kbd>1</kbd> faithful · <kbd>2</kbd> unfaithful · '
+              '<kbd>3</kbd> unsure · <kbd>4</kbd> source error (drop cards: <kbd>1</kbd> yes · <kbd>2</kbd> no) · '
               '<kbd>n</kbd> next unjudged. <b>Faithful</b> = the rewrite clearly refers to the boxed element and '
-              'invents nothing (no color, shape, text or position that the label/metadata does not support).</div>'
-              '</header>')
+              'invents nothing (no color, shape, text or position that the label/metadata does not support). '
+              '<b>Source error</b> = the red box is on a different element than the original label names (a dataset '
+              'error, not the rewrite\'s fault); left out of the faithful rate. <b>Unsure</b> counts as not faithful.'
+              '</div></header>')
 
 
 CSS = """
@@ -249,12 +316,14 @@ h1{font-size:17px;margin:0 0 4px} h2{font-size:16px;margin:16px 16px 0}
 .card.v-faithful,.card.v-yes{background:#eaf6ea}
 .card.v-unfaithful,.card.v-no{background:#fbeaea}
 .card.v-unsure{background:#fff6dc}
+.card.v-source_error{background:#ece8f4}
 .top{font-size:12px;color:#444;margin-bottom:6px} .num{font-weight:700;color:#000}
 code{font-size:12px;color:#555;word-break:break-all}
 .imgs{display:flex;gap:10px;align-items:flex-start}
 .imgs img{border:1px solid #bbb;display:block} .crop{max-width:360px;max-height:360px} .thumb{max-width:220px;max-height:260px}
 .ph{width:360px;height:160px;display:flex;align-items:center;justify-content:center;text-align:center;padding:8px;
  background:#eee;color:#666;border:1px dashed #999}
+.zm{margin-top:6px} .zoom{display:block;max-width:100%;height:auto;border:1px solid #bbb;margin-top:1px}
 .rw{font-size:22px;font-weight:650;margin:8px 0 2px;color:#000;word-wrap:break-word}
 .rw.drop{color:#8a1c1c;font-size:18px}
 .orig{font-size:15px;word-wrap:break-word}
@@ -271,6 +340,7 @@ kbd{font-size:11px;border:1px solid #aaa;border-radius:3px;padding:0 3px;backgro
 .badge{padding:1px 8px;border-radius:9px;background:#e6e6e3;font-weight:600}
 .badge.pass{background:#bfe6bf} .badge.fail{background:#f4bcbc}
 button{font-size:13px;margin-left:6px}
+#cp-ok{font-size:13px;margin-left:6px} #cp-ok.ok{color:#1d6b1d} #cp-ok.bad{color:#8a1c1c}
 """
 
 JS = """
@@ -278,34 +348,46 @@ JS = """
   const B = document.body.dataset, KEY = B.key, PASS = parseFloat(B.pass);
   const cards = [...document.querySelectorAll('.card')];
   const kept = cards.filter(c => c.dataset.kind === 'kept'), drops = cards.filter(c => c.dataset.kind === 'drop');
-  const OPTS = {kept: ['faithful', 'unfaithful', 'unsure'], drop: ['yes', 'no']};
+  const OPTS = {kept: ['faithful', 'unfaithful', 'unsure', 'source_error'], drop: ['yes', 'no']};
+  const CLASSES = [...OPTS.kept, ...OPTS.drop].map(v => 'v-' + v);
   let state = {};
   try { state = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { state = {}; }
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   let cur = 0;
-  const get = c => state[c.dataset.id] || (state[c.dataset.id] = {});
+  // A stored entry applies only while its fingerprint matches the card (id, original, rewrite, drop reason), so a
+  // regenerated sheet never shows a verdict given to another rewrite. Stale entries stay stored until overwritten.
+  const rec = c => { const s = state[c.dataset.id]; return s && s.h === c.dataset.h ? s : null; };
+  const get = c => rec(c) || (state[c.dataset.id] = {h: c.dataset.h});
+  const verdict = c => { const v = (rec(c) || {}).verdict; return OPTS[c.dataset.kind].includes(v) ? v : null; };
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
   const $ = id => document.getElementById(id);
   function paint(c) {
-    const s = state[c.dataset.id] || {};
-    c.classList.remove(...OPTS.kept.map(v => 'v-' + v), ...OPTS.drop.map(v => 'v-' + v));
-    if (s.verdict) c.classList.add('v-' + s.verdict);
-    c.querySelectorAll('input[type=radio]').forEach(r => { r.checked = r.value === s.verdict; });
+    const s = rec(c) || {}, v = verdict(c);
+    c.classList.remove(...CLASSES);
+    if (v) c.classList.add('v-' + v);
+    c.querySelectorAll('input[type=radio]').forEach(r => { r.checked = r.value === v; });
     const n = c.querySelector('.note');
     if (n !== document.activeElement) n.value = s.note || '';
   }
+  // faithful_rate = faithful / (faithful + unfaithful + unsure): source errors are not rated, unsure counts against.
+  function counts() {
+    const k = v => kept.filter(c => verdict(c) === v).length, d = v => drops.filter(c => verdict(c) === v).length;
+    const t = {faithful: k('faithful'), unfaithful: k('unfaithful'), unsure: k('unsure'), source_error: k('source_error')};
+    const rated = t.faithful + t.unfaithful + t.unsure, rate = rated ? t.faithful / rated : null;
+    return Object.assign(t, {unjudged: kept.filter(c => !verdict(c)).length, rated, kept_total: kept.length,
+      faithful_rate: rate, pass_line: PASS, pass: rate === null ? null : rate >= PASS - 1e-9,
+      drops_correct: d('yes'), drops_wrong: d('no'), drops_unjudged: drops.filter(c => !verdict(c)).length,
+      drops_total: drops.length});
+  }
   function tally() {
-    const v = c => (state[c.dataset.id] || {}).verdict;
-    const f = kept.filter(c => v(c) === 'faithful').length, j = kept.filter(v).length;
-    const t = {faithful: f, judged: j, total: kept.length,
-               unfaithful: kept.filter(c => v(c) === 'unfaithful').length, unsure: kept.filter(c => v(c) === 'unsure').length,
-               drops_correct: drops.filter(c => v(c) === 'yes').length, drops_judged: drops.filter(v).length,
-               drops_total: drops.length, faithful_rate: j ? f / j : null, pass_line: PASS};
-    $('t-f').textContent = f; $('t-j').textContent = j; $('t-u').textContent = t.unfaithful; $('t-s').textContent = t.unsure;
-    $('t-p').textContent = j ? (100 * f / j).toFixed(1) + '%' : 'n/a';
-    $('t-dy').textContent = t.drops_correct; $('t-dj').textContent = t.drops_judged;
+    const t = counts(), put = (id, v) => { $(id).textContent = v; };
+    put('t-f', t.faithful); put('t-r', t.rated); put('t-u', t.unfaithful); put('t-s', t.unsure); put('t-e', t.source_error);
+    put('t-j', t.kept_total - t.unjudged); put('t-dy', t.drops_correct); put('t-dj', t.drops_correct + t.drops_wrong);
+    put('t-p', t.rated ? (100 * t.faithful_rate).toFixed(1) + '%' : 'n/a');
     const st = $('t-status');
-    st.className = 'badge' + (j ? (f / j >= PASS ? ' pass' : ' fail') : '');
-    st.textContent = !j ? 'not started' : (f / j >= PASS ? 'PASS' : 'FAIL') + (j < kept.length ? ' so far (' + (kept.length - j) + ' left)' : '');
+    st.className = 'badge' + (t.pass === null ? '' : t.pass ? ' pass' : ' fail');
+    st.textContent = t.pass === null ? 'not started'
+      : (t.pass ? 'PASS' : 'FAIL') + (t.unjudged ? ' so far (' + t.unjudged + ' left)' : '');
     return t;
   }
   function setVerdict(c, val) { get(c).verdict = val; save(); paint(c); tally(); }
@@ -313,8 +395,33 @@ JS = """
     if (!cards.length) return;
     cur = Math.max(0, Math.min(cards.length - 1, i));
     cards.forEach((c, k) => c.classList.toggle('cur', k === cur));
-    if (scroll) cards[cur].scrollIntoView({block: 'nearest'});
+    if (!scroll) return;
+    cards[cur].style.scrollMarginTop = (headerBottom() + 8) + 'px';  // the sticky header's height depends on the width
+    cards[cur].scrollIntoView({block: 'nearest'});
   }
+  function headerBottom() {
+    const h = document.querySelector('header');
+    return h ? Math.max(0, h.getBoundingClientRect().bottom) : 0;
+  }
+  const shown = c => {  // px of the card visible between the sticky header and the bottom of the window
+    const r = c.getBoundingClientRect();
+    return Math.min(r.bottom, innerHeight) - Math.max(r.top, headerBottom());
+  };
+  // Keys act on the card in view: if the cursor card was scrolled away, move the cursor to the first card whose top is
+  // visible below the sticky header (else the first card with a real part on screen).
+  function sync() {
+    if (!cards.length || shown(cards[cur]) >= 40) return;
+    const hb = headerBottom();
+    let i = cards.findIndex(c => { const t = c.getBoundingClientRect().top; return t >= hb && t < innerHeight; });
+    if (i < 0) i = cards.findIndex(c => shown(c) >= 40);
+    if (i >= 0) focus(i, false);
+  }
+  let pending = false;
+  addEventListener('scroll', () => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; sync(); });
+  }, {passive: true});
   cards.forEach((c, i) => {
     c.addEventListener('click', () => focus(i, false));
     c.querySelectorAll('input[type=radio]').forEach(r => r.addEventListener('change', () => setVerdict(c, r.value)));
@@ -324,35 +431,65 @@ JS = """
   });
   document.addEventListener('keydown', e => {
     if (e.target.matches('input[type=text]')) { if (e.key === 'Escape' || e.key === 'Enter') e.target.blur(); return; }
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !cards.length || !'jkn1234'.includes(e.key) || e.key.length !== 1) return;
+    sync();
     const c = cards[cur];
     if (e.key === 'j') focus(cur + 1);
     else if (e.key === 'k') focus(cur - 1);
-    else if (e.key === 'n') { const i = cards.findIndex((x, k) => k > cur && !(state[x.dataset.id] || {}).verdict); if (i >= 0) focus(i); }
-    else if (c && ['1', '2', '3'].includes(e.key)) {
+    else if (e.key === 'n') { const i = cards.findIndex((x, k) => k > cur && !verdict(x)); if (i >= 0) focus(i); }
+    else {
       const val = OPTS[c.dataset.kind][+e.key - 1];
       if (!val) return;
       setVerdict(c, val); focus(cur + 1);
-    } else return;
+    }
     e.preventDefault();
   });
+  function exportDoc() {
+    return {prompt_version: B.pv, seed: Number(B.seed), model: B.model, run_id: B.runId || null,
+            manifest_sha256: B.manifestSha256 || null, sheet_key: KEY, generated: new Date().toISOString(),
+            counts: tally(), cards: cards.map(c => {
+              const d = c.dataset, s = rec(c) || {};
+              return {id: d.id, kind: d.kind, source: d.source || null, style: d.style || null, original: d.original,
+                      rewritten: d.rewritten || null, drop_reason: d.dropReason || null, verdict: verdict(c),
+                      note: s.note || '', h: d.h};
+            })};
+  }
   $('dl').addEventListener('click', () => {
-    const out = {sheet: Object.assign({}, B), tally: tally(), cards: cards.map(c => {
-      const d = c.dataset, s = state[d.id] || {};
-      return {id: d.id, kind: d.kind, source: d.source, style: d.style, original: d.original, rewritten: d.rewritten || null,
-              drop_reason: d.dropReason || null, verdict: s.verdict || null, note: s.note || ''};
-    })};
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], {type: 'application/json'}));
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(exportDoc(), null, 2)], {type: 'application/json'}));
     a.download = 'review_verdicts_' + B.pv + '_seed' + B.seed + '.json';
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  });
+  function copyFallback(text) {  // file:// pages may have no async clipboard
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  function flash(ok) {
+    const el = $('cp-ok');
+    el.textContent = ok ? 'copied' : 'copy failed: use Download';
+    el.className = ok ? 'ok' : 'bad';
+    clearTimeout(flash.t); flash.t = setTimeout(() => { el.textContent = ''; }, 2500);
+  }
+  $('cp').addEventListener('click', () => {
+    const text = JSON.stringify(exportDoc(), null, 2);
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(text).then(() => flash(true), () => flash(copyFallback(text)));
+    else flash(copyFallback(text));
   });
   $('clr').addEventListener('click', () => {
     if (!confirm('Clear all verdicts and notes on this sheet?')) return;
     state = {}; save(); cards.forEach(paint); tally();
   });
-  tally(); focus(0, false);
+  tally();
+  const first = cards.findIndex(c => !verdict(c));
+  focus(first < 0 ? 0 : first, first > 0);
 })();
 """
 
@@ -369,7 +506,7 @@ def build_review(out_dir, manifest_path=None, images_root=None, n=50, seed=0, dr
     images_root = Path(images_root) if images_root else manifest_path.parent
     kept, dropped = sample_rows(rewrites, n, seed, drops)
     n_kept_pop = sum(1 for r in rewrites if r.get("keep") is True and r.get("rewritten"))
-    n_drop_pop = sum(1 for r in rewrites if r.get("keep") is False and r.get("drop_reason") != LLM_ERROR)
+    n_drop_pop = sum(1 for r in rewrites if is_model_drop(r))
     cached = load_cache_records(out_dir, kept + dropped)
     run = stats.get("run") or {}
     first = rewrites[0] if rewrites else {}
