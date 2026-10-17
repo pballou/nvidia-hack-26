@@ -233,10 +233,13 @@ v1 images / 144 new, research-notes §5) is TBD. The `gym eval compare` reports 
 | --- | --- | --- | --- |
 | Gate D2 smoke | 20 steps from the pilot adapter, 200 random train rows (not a profiled pool), G=6, 8 prompts/step, lr 1e-5, reward = `/verify` + 0.1 format, throwaway Gym env on `:11020`/`:12020` | **Pass: 31.9 s/step** median while sharing the GPU with the template SFT; 960 `/verify` calls, 0 failures; verify reward 0.75 → 0.79; vLLM-vs-trainer logp diff ~0.01-0.03, IS ratio ≈ 1; peak 45 GiB | `runs.md` Sat 17:13 |
 | Eval-path check | `gymctl eval` of the pilot adapter (`:8004`, head `:11010`) | 81.32%, identical to the 16:13 pilot eval | `runs.md` Sat 17:10 |
-| Loop rehearsal | — | TBD (no committed record) | — |
+| Loop rehearsal 1 (GRPO path) | 1 round from the template SFT adapter: profile 400 × 8 rows → pool of 111 sometimes-pass rows (28%), 30 GRPO steps | Gate D2 **19.6 s/step** (GPU not shared); verify reward 0.69 → 0.85; dev **86.69%**, +0.83 over the same adapter re-evaluated in the same harness (85.86): clears the +0.5 keep gate, **kept**. Tiny pool, so a rehearsal, not a result | `runs.md` Sat 17:34, `results.md` |
+| Loop rehearsal 2 (forced fallback) | same, 300-row profile, gate D2 forced to fail | Falls back to rejection-sampled SFT on 541 reward=1 replies (279 tasks), 17 steps: dev 85.86 → 85.96 (+0.10) → **reverted**, stop reason recorded | `runs.md` Sat 17:52 |
 | Rounds 1-3 | profile 4,000 × 8 → pool → GRPO → dev | TBD: pool size, steps, s/step, reward first → last, dev prev → new, kept | `round_<r>/summary.json` |
 
-The smoke's 0.75 → 0.79 is 20 steps and shows plumbing, not improvement.
+The smoke's 0.75 → 0.79 is 20 steps and shows plumbing, not improvement. Dev is not perfectly
+deterministic: the same adapter scored 85.66 and 85.86 in two launches (vLLM batching at
+temperature 0, `results.md`), so gains near the +0.5 keep gate are close to the noise.
 
 **Agent (`web_agent`)**, official BF16 Lightning, screen descriptions by `base`:
 
