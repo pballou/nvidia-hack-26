@@ -8,9 +8,9 @@ Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
 
 | Mode | Lightning (planner) | Grounder | When |
 | --- | --- | --- | --- |
-| **Hybrid (primary)** | Mac, `vllm serve` via **vllm-metal** (4-bit MLX) | H200 vLLM, base + LoRA (gpu-box.md §3), via a tunnel on 8001 | If Gate L passes |
+| **Hybrid (primary)** | Mac, `vllm serve` via **vllm-metal**, **official NVIDIA BF16** | H200 vLLM, base + LoRA (gpu-box.md §3), via a tunnel on 8001 | If Gate L passes |
 | Fully local | Mac, vllm-metal | Mac, vllm-metal, **merged** tuned checkpoint for both roles | Only if Gate G also passes |
-| All-H200 (fallback) | H200, NVFP4 + #61603 patch (gpu-box.md §2) | H200 (gpu-box.md §3) | If Gate L fails |
+| All-H200 (fallback) | H200, official BF16 + #61603 patch (gpu-box.md §2) | H200 (gpu-box.md §3) | If Gate L fails |
 
 **Why hybrid:**
 - **Lightning is the easy half to make local:** stock weights, text-only, and the same
@@ -59,8 +59,11 @@ uv pip list 2>/dev/null | grep -E '^(vllm|vllm-metal|mlx|mlx-lm|mlx-vlm|transfor
 
 ## 1. Weights (download once, then serve offline)
 
+**Official NVIDIA BF16 only** (bounty requirement; no mlx-community/GGUF quants for anything we report or demo).
+mlx-lm's `nemotron_h` loader reads NVIDIA's HF checkpoint directly: it drops the `mtp.*` weights and converts the conv1d layout.
+
 ```bash
-hf download mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit     # 17.8 GB
+hf download nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16     # 65.8 GB
 # Gate G only: the merged grounder that stream B exports for publishing
 rsync -avP permanent-tan-marmot:/home/ubuntu/ckpt/<run>/merged/ ~/models/grounder-merged/
 ```
@@ -69,11 +72,12 @@ rsync -avP permanent-tan-marmot:/home/ubuntu/ckpt/<run>/merged/ ~/models/grounde
 
 ```bash
 source ~/.venv-vllm-metal/bin/activate
-HF_HUB_OFFLINE=1 vllm serve mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit \
+HF_HUB_OFFLINE=1 vllm serve nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 \
   --served-model-name lightning --host 127.0.0.1 --port 8000 \
-  --max-model-len 65536 --max-num-seqs 2 --gpu-memory-utilization 0.25 \
+  --max-model-len 65536 --max-num-seqs 2 --gpu-memory-utilization 0.60 \
   --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3
-# 8-bit fallback (33.6 GB): raise --gpu-memory-utilization to 0.40. Never add --speculative-config.
+# BF16 weights are ~63 GB. The default macOS GPU wired limit is ~75% of RAM (~96 GB). If Lightning + grounder
+# don't fit, raise it: sudo sysctl iogpu.wired_limit_mb=115000 (resets on reboot). Never add --speculative-config.
 ```
 
 ## 3a. Hybrid: grounder from the H200
@@ -113,16 +117,20 @@ HF_HUB_OFFLINE=1 vllm serve ~/models/grounder-merged --served-model-name grounde
    - reasoning comes back separate from the content;
    - no engine crashes;
    - median step ≤ ~8 s at a realistic prompt length.
-4. **If it fails only on tool validity,** try the 8-bit model once.
-5. **If it still fails,** use llama-server:
+4. **Validate arguments in the agent anyway.** On the community 4-bit build, 1–2 of 5
+   calls used wrong argument names even with `tool_choice: "required"` (vllm-metal
+   doesn't enforce the schema). T2's planner must check the arguments against the
+   schema and send back a corrective message.
+5. **If BF16 on Mac fails,** use the H200 official BF16 (gpu-box.md §2) through the
+   tunnel. llama-server with a community GGUF is **emergency only and doesn't
+   count for the bounty**:
    ```bash
    hf download ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q8_0.gguf --local-dir ~/models/lightning-gguf
    llama-server -m ~/models/lightning-gguf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q8_0.gguf --alias lightning \
      --host 127.0.0.1 --port 8000 -ngl 99 -fa on -c 65536 -np 1 --jinja --temp 1.0 --top-p 0.95 --no-webui
    ```
    Don't use the model card's `:Q4_K_M` tag (that file doesn't exist), and add no
-   `--spec-type`/`-md`/mtp files. This is still local, but no longer vLLM.
-6. **If both fail,** use the all-H200 path.
+   `--spec-type`/`-md`/mtp files.
 
 **Gate G: local grounder.** Sat ~8pm, ≤ 45 min.
 1. Serve the merged checkpoint (§3b) locally, and the H200 grounder on tunnel port

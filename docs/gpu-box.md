@@ -44,8 +44,8 @@ docker pull "$VLLM_IMAGE"                # ~9 GB
 # patrickballou/gui-assist-* (upload shell only). Never `hf auth login` on this shared box.
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e HF_HOME=/hf -e HF_TOKEN \
   -v /home/ubuntu/hf:/hf --entrypoint python3 "$VLLM_IMAGE" -c \
-  "from huggingface_hub import snapshot_download as d; [print(d(r)) for r in ['nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4','Qwen/Qwen3.5-2B','Qwen/Qwen3-VL-2B-Instruct']]"
-# sizes: Lightning NVFP4 21.6 GB, Qwen3.5-2B 4.6 GB, Qwen3-VL-2B 4.3 GB
+  "from huggingface_hub import snapshot_download as d; [print(d(r)) for r in ['nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16','Qwen/Qwen3.5-2B','Qwen/Qwen3-VL-2B-Instruct']]"
+# sizes: Lightning BF16 65.8 GB (official NVIDIA checkpoint; the team doesn't use NVFP4), Qwen3.5-2B 4.6 GB, Qwen3-VL-2B 4.3 GB
 ```
 
 **Lightning on Hopper needs a patch.** vLLM [#61603](https://github.com/vllm-project/vllm/issues/61603)
@@ -62,36 +62,38 @@ curl -fsSL -o /home/ubuntu/patches/ssd_chunk_scan.py \
 echo "b3851069c1e37c25dd9afaecc348f8f8868b3c50bb0d1fe5e0dde3dfa23b3a01  /home/ubuntu/patches/ssd_chunk_scan.py" | sha256sum -c -
 ```
 
-## 2. Serve Lightning NVFP4 on :8000 (demo and final agent eval only)
+## 2. Serve Lightning on :8000: official BF16 (demo fallback and final agent eval only)
 
-During development, use the hosted endpoint instead (SETUP.md §4). Start Lightning
-first, then the grounder.
+During development, use the hosted endpoint or the Mac-local server instead (SETUP.md
+§4, docs/local-mac.md). Start Lightning first, then the grounder.
+
+**Use only official NVIDIA checkpoints** (bounty requirement). The team uses
+**BF16**. The NVFP4 build is the only other official one, and we've chosen not to
+use it.
 
 ```bash
 source /home/ubuntu/serving.env
 docker run -d --name vllm-lightning --gpus all --ipc=host -p 127.0.0.1:8000:8000 \
   -v /home/ubuntu/hf:/root/.cache/huggingface -v /home/ubuntu/vllm-cache:/root/.cache/vllm \
   -v /home/ubuntu/patches/ssd_chunk_scan.py:${VLLM_PKG:?source /home/ubuntu/serving.env first}/model_executor/layers/mamba/ops/ssd_chunk_scan.py:ro \
-  -e VLLM_HUMMING_MOE_GEMM_TYPE=indexed \
   "$VLLM_IMAGE" \
-  --model nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4 \
-  --served-model-name nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4 lightning \
-  --port 8000 --gpu-memory-utilization 0.45 \
-  --max-model-len 65536 --max-num-seqs 64 --max-num-batched-tokens 16384 \
+  --model nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 \
+  --served-model-name nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 lightning \
+  --port 8000 --gpu-memory-utilization 0.60 \
+  --max-model-len 65536 --max-num-seqs 64 \
   --kv-cache-dtype fp8 --enable-prefix-caching --mamba-cache-mode align --async-scheduling \
-  --moe-backend humming --linear-backend humming \
-  --mamba-backend flashinfer --mamba-ssu-algorithm horizontal \
-  --mamba-ssm-cache-dtype float16 --enable-mamba-cache-stochastic-rounding --mamba-cache-philox-rounds 5 \
+  --mamba-backend flashinfer --mamba-ssm-cache-dtype float16 \
+  --enable-mamba-cache-stochastic-rounding --mamba-cache-philox-rounds 5 \
   --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3
 docker exec vllm-lightning grep -c _drop_racy_wgmma_configs $VLLM_PKG/model_executor/layers/mamba/ops/ssd_chunk_scan.py   # expect >= 2 (patch active)
 until curl -sf localhost:8000/health >/dev/null; do docker ps -q -f name=vllm-lightning | grep -q . || { docker logs --tail 80 vllm-lightning; break; }; sleep 5; done
 ```
 
+- **Memory:** 0.60 × ~140 GiB ≈ 84 GiB, about 61 GiB of weights plus KV and Mamba
+  state. Run the grounder at 0.25–0.30 alongside it.
 - **No speculative decoding of any kind:** no DSpark, no DFlash, no built-in MTP,
   and no `--speculative-config`. They count toward the 33B cap. Don't copy the
   model card's serve commands; they enable DSpark.
-- **If startup fails in the humming or SSU code:** drop
-  `-e VLLM_HUMMING_MOE_GEMM_TYPE=indexed --moe-backend humming --linear-backend humming --mamba-ssu-algorithm horizontal`.
 - **Thinking** is on by default. Turn it off per request with
   `"chat_template_kwargs":{"enable_thinking":false}`. Sampling: temperature 1.0,
   top_p 0.95.
@@ -179,11 +181,11 @@ curl -s localhost:8001/v1/chat/completions -H 'Content-Type: application/json' -
 
 | Situation | Plan |
 | --- | --- |
-| Eval | Grounder server 0.30 (raise to 0.45 for `--num-repeats 8` evals). Add Lightning 0.45 only when self-hosting it. |
+| Eval | Grounder server 0.30 (raise to 0.45 for `--num-repeats 8` evals). Add Lightning BF16 at 0.60 only when self-hosting it here. |
 | Agent dev (stream C) | Use hosted Lightning plus the grounder server whenever it's up: before the SFT pilot (~5pm) and in the gaps between training runs. **Base-vs-tuned agent runs happen Sunday 7am+ (M5),** not during training. |
 | SFT | Stop both servers (`docker stop vllm-vlm vllm-lightning`). |
-| GRPO (TRL colocate) | Stop the grounder server. Use hosted Lightning or stop it too. Set `vllm_gpu_memory_utilization` explicitly (the TRL default is 0.3). |
-| Demo | Lightning 0.45 + grounder 0.30. All training stopped. |
+| GRPO (TRL colocate) | Stop the grounder server. Use hosted or Mac-local Lightning, and stop this one. Set `vllm_gpu_memory_utilization` explicitly (the TRL default is 0.3). |
+| Demo (fallback path) | Lightning BF16 0.60 + grounder 0.25–0.30. All training stopped. |
 
 ## 5. Training venv (`/home/ubuntu/venvs/train`)
 

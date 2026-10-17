@@ -14,7 +14,7 @@ Target: everything finished by 10:30.
 | Submission Description | 1 paragraph: problem → approach → results | Patrick | README pitch |
 | Demo Video URL | Unlisted **YouTube** (accepted by both the form and the checklist), 3–5 min | Charlie (records and uploads) | §Video |
 | GitHub Repo | `https://github.com/pballou/nvidia-hack-26` (public) | — | — |
-| AI Models Used | Nemotron 3.5 Lightning (30B-A3B, NVFP4); our fine-tuned grounder (Qwen3.5-2B or Qwen3-VL-2B + LoRA) | Kyle | — |
+| AI Models Used | Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16 checkpoint); our fine-tuned grounder (Qwen3.5-2B or Qwen3-VL-2B + LoRA) | Kyle | — |
 | Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM, NVIDIA Brev (H200), TRL, Playwright | all | — |
 | ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (write Sunday) |
 | ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (write Sunday) |
@@ -65,7 +65,7 @@ Follow the organizers' recommended flow:
 | 1. Team | 20–30 s | Team name; who did what |
 | 2. Pitch | 30–40 s | Accessibility: "say what you want, the agent does it in any app, from pixels alone", using small local models |
 | 3. Live demo | 45–60 s | Core loop with minimal cuts: user request → Lightning plans → grounder clicks (show the click overlay) → page changes → task done. Show one base-vs-tuned difference. |
-| 4. How we built it | 60–90 s | Architecture diagram; NeMo Gym envs and the base → SFT → GRPO results; BLADE failure analysis; vLLM on the H200; Lightning NVFP4 plus thinking control. Challenges: the ScreenSpot contamination we found and excluded, coordinate conventions, the one-GPU budget. |
+| 4. How we built it | 60–90 s | Architecture diagram; NeMo Gym envs and the base → SFT → GRPO results; BLADE failure analysis; vLLM on the H200; official Lightning BF16 on vLLM (vllm-metal on the Mac) plus thinking control. Challenges: the ScreenSpot contamination we found and excluded, coordinate conventions, the one-GPU budget. |
 | 5. So what | 20–30 s | Works on apps without accessible code; measured improvement; small: "runs locally" only if the Mac-local check passed, otherwise "fits on one GPU (~32B total)" |
 
 **Owner:** Charlie records and uploads. **Recording plan:** do a dry run Saturday night if possible. Record Sunday 8:30–10:00,

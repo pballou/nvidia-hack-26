@@ -232,8 +232,8 @@ it.
   ≤ ~35 s/step, so the run can finish by ~1am. Keep GRPO only if dev accuracy beats
   SFT. Otherwise ship SFT and say so.
 - **Demo hardware:** see "Hosting" above. Hybrid if Gate L passes; fully local only
-  if Gate G also passes; otherwise all on the H200 (Lightning NVFP4 plus the grounder
-  co-resident, all training stopped).
+  if Gate G also passes; otherwise all on the H200 (official Lightning BF16 plus the
+  grounder co-resident, all training stopped).
 
 ## GPU etiquette (one shared H200, ~23 GPU-hours total)
 

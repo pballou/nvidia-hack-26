@@ -90,8 +90,8 @@ a user describes what they want, and the agent does it from pixels alone.
 - **Lightning** is text-only: give it text observations, never images.
   - Development: use the hosted build.nvidia.com endpoint.
   - Final agent eval and demo: self-hosted. Hybrid first: Lightning on Patrick's
-    Mac via vllm-metal, grounder on the H200. See docs/local-mac.md and docs/plan.md
-    "Hosting".
+    Mac via vllm-metal (official BF16), grounder on the H200. See docs/local-mac.md
+    and docs/plan.md "Hosting".
 
 ## Data and model-interface conventions
 
@@ -144,6 +144,12 @@ a user describes what they want, and the agent does it from pixels alone.
 
 ## Compute
 
+- **Lightning checkpoint: official NVIDIA BF16 only,** `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`. The bounty
+  requires an official NVIDIA checkpoint, and NVIDIA publishes only BF16 and NVFP4;
+  the team chose BF16 for precision.
+  - Never use community quants (mlx-community, GGUF, Ollama) for anything we report
+    or demo. The hosted build.nvidia.com endpoint is NVIDIA's own and is fine for
+    development.
 - **Pinned GPU stack:** vLLM image v0.31.0 (by digest), torch 2.13.0+cu130,
   transformers 5.17.0, TRL 1.16.0. Never `pip install -U` these.
   - Self-hosting Lightning on the H200 requires the vLLM #61603 patch

@@ -33,7 +33,7 @@ user request ─► Nemotron 3.5 Lightning (planner, tool calls) ──► click
 | Component | Role |
 | --- | --- |
 | Small open VLM (≤ 3B): Qwen3.5-2B or Qwen3-VL-2B + LoRA, picked after baselines | Grounding model we fine-tune |
-| Nemotron 3.5 Lightning (30B-A3B, NVFP4) | Text planner and tool-calling agent; also rewrites training instructions |
+| Nemotron 3.5 Lightning (30B-A3B, official NVIDIA BF16) | Text planner and tool-calling agent; also rewrites training instructions |
 | NVIDIA NeMo Gym | Environments (`gui_grounding`, `web_agent`), rollouts, rewards, profiling, eval compare, BLADE failure analysis |
 | TRL | SFT and GRPO; the GRPO reward comes from the Gym `/verify` endpoint |
 | vLLM | Serving both models and GRPO rollouts |

@@ -307,14 +307,23 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
 
 ## 6. Nemotron 3.5 Lightning
 
+- **Official checkpoints:** NVIDIA publishes only **BF16** and **NVFP4** (plus
+  Base-BF16 and the DSpark/DFlash drafters).
+  - The bounty requires an official NVIDIA checkpoint, so community quants
+    (mlx-community, ggml-org GGUF, Ollama) don't count.
+  - **The team uses BF16** for precision.
+  - On the community 4-bit build (local plumbing test), 1–2 of 5 tool calls had
+    malformed argument names. Median step latency was 0.8 s, versus 25–80 s on the
+    hosted free tier.
 - **Model:** text-only, hybrid Mamba-2 + MoE, OpenMDW-1.1 license.
   [HF card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16).
 - **Hosted:** model `nvidia/nemotron-3.5-lightning-30b-a3b` at
   `https://integrate.api.nvidia.com/v1`. Use it during development so the GPU stays
   free.
 - **Self-hosted on the H200:**
-  - Use the **NVFP4** checkpoint (~19.7 GB weights). It runs as W4A16 on Hopper.
-    BF16 is ~66 GB.
+  - The team uses official **BF16** (~66 GB weights) at `--gpu-memory-utilization 0.60`.
+    NVFP4 (~19.7 GB, W4A16 on Hopper) is the only other official option, and we
+    don't use it.
   - KV cache is tiny (~0.2 GB per 64K-token sequence in FP8), so it co-resides easily
     with the VLM.
 - **Known Hopper bug:** vLLM [#61603](https://github.com/vllm-project/vllm/issues/61603)
