@@ -1,0 +1,15 @@
+# The web_agent env with self-hosted Lightning: vLLM served-model-name `lightning` on :8000 (vllm-metal on
+# the Mac, or the H200 through `ssh -L 8000:localhost:8000`). No NVIDIA_API_KEY needed. Reported runs use
+# the official NVIDIA BF16 checkpoint only (scripts/agent_eval.sh checks the served root), never a
+# community quantization. No speculative decoding on that server (AGENTS.md).
+#   .venv-gym/bin/gym env start --config resources_servers/web_agent/configs/web_agent_local.yaml
+# An outer config overrides the configs it pulls in, so only the planner endpoint changes.
+config_paths:
+  - resources_servers/web_agent/configs/web_agent.yaml
+
+lightning_policy_model:
+  responses_api_models:
+    vllm_model:
+      base_url: http://127.0.0.1:8000/v1
+      api_key: EMPTY
+      model: lightning

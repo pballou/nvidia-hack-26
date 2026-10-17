@@ -1,0 +1,79 @@
+# NeMo Gym config: the `web_agent` env (stream C, task T2). Lightning plans from text observations,
+# the VLM grounds its click targets into pixels, and verify() scores the sandbox state.
+# Layout adapted from nemo-gym==0.7.0 resources_servers/interactive_browser/configs/interactive_browser.yaml
+# (Gym tag v0.7.0, commit 1f8afc7).
+#
+# This file = hosted Lightning (build.nvidia.com). Self-hosted Lightning on :8000: web_agent_local.yaml.
+# Run from the repo root (Gym resolves configs, server venvs and ./results from the cwd):
+#   set -a; source .env; set +a     # exports NVIDIA_API_KEY for ${oc.env:...} below; Gym never reads .env
+#   .venv-gym/bin/gym env start --config resources_servers/web_agent/configs/web_agent.yaml
+# The base-vs-grounder eval driver is scripts/agent_eval.sh.
+#
+# The planner's model server is `lightning_policy_model`, never `policy_model` or ${policy_*}: env.yaml
+# merges after every config file and points policy_* at the VLM for the gui_grounding env. For the same
+# reason gym's --model/--model-url/--model-api-key flags don't apply here.
+
+web_agent:
+  resources_servers:
+    web_agent:                       # must equal the directory name resources_servers/web_agent
+      entrypoint: app.py
+      domain: agent
+      verified: false
+      description: Accessibility web agent on the Acme Utilities sandbox. Lightning plans from text screen descriptions, the grounding VLM turns target descriptions into pixel clicks, and the reward is the task check on sandbox state.
+      value: Base-vs-tuned grounder comparison inside a real vision-only agent loop.
+      num_workers: 1                 # one Chromium, browser contexts and sessions live in this process
+      # Overrides on top of configs/agent.yaml (read by agent/config.py, which also applies the AGENT_* env
+      # vars). null = take it from there, so configs/agent.yaml + AGENT_* stay the one source for both the
+      # interactive agent and this env. Fixed at `gym env start`; restart to switch (scripts/agent_eval.sh
+      # does, with explicit ++ overrides).
+      grounder_model: ${oc.env:AGENT_GROUNDER_MODEL,null}   # base | grounder (served names on the one VLM)
+      summary_model: ${oc.env:AGENT_SUMMARY_MODEL,null}     # base | grounder
+      model_family: ${oc.env:AGENT_MODEL_FAMILY,null}       # qwen3_vl | qwen3_5 (paired with the VLM URL)
+      vlm_base_url: ${oc.env:AGENT_VLM_BASE_URL,null}
+      sandbox_url: ${oc.env:AGENT_SANDBOX_URL,null}
+      headless: true
+
+web_agent_simple_agent:
+  responses_api_agents:
+    simple_agent:
+      entrypoint: app.py
+      # simple_agent counts MODEL CALLS and ends on a reply without a tool call (the done tool doesn't end
+      # it; its result tells the model to stop). It runs the tool calls of call N before it checks
+      # max_steps, so 12 = the interactive agent's 12 Lightning calls (configs/agent.yaml max_steps), done
+      # on call 12 included. verify scores the done snapshot, so the final text reply never affects the reward.
+      max_steps: 12
+      resources_server:
+        type: resources_servers
+        name: web_agent
+      model_server:
+        type: responses_api_models
+        name: lightning_policy_model
+      datasets:
+      - name: example
+        type: example
+        jsonl_fpath: resources_servers/web_agent/data/example.jsonl
+
+# `gym eval run --agent web_agent_simple_agent` dispatches each row to this relay, which forwards /run
+# unchanged to simple_agent. Its config is extra=forbid: no description, domain or other keys here.
+web_agent_environment_server:
+  environment_servers:
+    legacy_agent:
+      entrypoint: app.py
+      agent_server:
+        type: responses_api_agents
+        name: web_agent_simple_agent
+
+lightning_policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: https://integrate.api.nvidia.com/v1
+      api_key: ${oc.env:NVIDIA_API_KEY}    # must be exported; never committed, never in env.yaml or on the CLI
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
+      return_token_id_information: false   # true adds logprobs/return_tokens_as_token_ids, which hosted rejects
+      uses_reasoning_parser: true          # false + any reasoning in a response trips an assert in vllm_model
+      chat_template_kwargs:
+        # Thinking off by default (per-step "retry" can't be expressed here). scripts/agent_eval.sh THINKING=on
+        # flips it and raises max_output_tokens to sampling.thinking_max_tokens (reasoning counts against it).
+        enable_thinking: false
+      # No speculative decoding anywhere (AGENTS.md): nothing here enables it, and the :8000 server must not.

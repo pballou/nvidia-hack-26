@@ -1,0 +1,66 @@
+{
+    "name": "example",
+    "type": "example",
+    "jsonl_fpath": "resources_servers/web_agent/data/example.jsonl",
+    "num_repeats": 1,
+    "source": null,
+    "gitlab_identifier": null,
+    "huggingface_identifier": null,
+    "license": null,
+    "Number of examples": 5,
+    "Number of tools": {
+        "Total # non-null values": 5,
+        "Average": 5.0,
+        "Min": 5.0,
+        "Max": 5.0,
+        "Standard deviation": 0.0
+    },
+    "Json-dumped number of words (proxy for token count)": {
+        "Total # non-null values": 5,
+        "Average": 755.0,
+        "Min": 753.0,
+        "Max": 757.0,
+        "Standard deviation": 2.0
+    },
+    "Number of turns": {
+        "Total # non-null values": 5,
+        "Average": 1.0,
+        "Min": 1.0,
+        "Max": 1.0,
+        "Standard deviation": 0.0
+    },
+    "Temperature": {
+        "Total # non-null values": 5,
+        "Average": 1.0,
+        "Min": 1.0,
+        "Max": 1.0,
+        "Standard deviation": 0.0
+    },
+    "task_id": {
+        "unique_count": 5,
+        "total_count": 5
+    },
+    "start_path": {
+        "unique_count": 4,
+        "total_count": 5
+    },
+    "tags": {
+        "unique_count": 6,
+        "total_count": 13
+    },
+    "steps_min": {
+        "Total # non-null values": 5,
+        "Average": 1.4,
+        "Min": 1.0,
+        "Max": 3.0,
+        "Standard deviation": 0.894
+    },
+    "initial_observation_source": {
+        "unique_count": 1,
+        "total_count": 5
+    },
+    "prompt_version": {
+        "unique_count": 1,
+        "total_count": 5
+    }
+}

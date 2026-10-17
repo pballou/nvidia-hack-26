@@ -1,0 +1,11 @@
+# Gym builds this server's venv (resources_servers/web_agent/.venv) from this file.
+# Without a repo-root pyproject.toml, Gym drops any line that points two directories up (an
+# editable install of the repo) and pins nemo-gym to the parent's version, so app.py puts the
+# repo root (agent/, common/, sandbox/) on sys.path instead.
+# Versions match .venv-gym (Python 3.13). Gym's head deps also add ray[default] and openai==2.44.0.
+nemo-gym[dev]==0.7.0
+playwright==1.62.0
+openai==2.44.0
+pillow==13.0.0
+pyyaml==6.0.3
+httpx==0.28.1
