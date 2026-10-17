@@ -111,7 +111,7 @@ class AgentConfig:
     grounder_model: str = "base"
     summary_model: str = "base"
     model_family: str = "qwen3_vl"
-    max_steps: int = 12
+    max_steps: int = 25
     thinking: str = "retry"
     viewport: Viewport = field(default_factory=Viewport)
     runs_dir: str = "runs"

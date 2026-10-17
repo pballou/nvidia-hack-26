@@ -25,7 +25,7 @@ def test_yaml_defaults():
     assert re.fullmatch(r"http://127\.0\.0\.1:\d+/v1", cfg.vlm.base_url) and cfg.vlm.api_key == "EMPTY"
     assert (cfg.grounder_model, cfg.summary_model) == ("base", "base")
     assert cfg.model_family in ("qwen3_vl", "qwen3_5")
-    assert (cfg.max_steps, cfg.thinking, cfg.history_full_steps) == (12, "retry", 6)
+    assert (cfg.max_steps, cfg.thinking, cfg.history_full_steps) == (25, "retry", 6)
     assert (cfg.viewport.width, cfg.viewport.height) == (1280, 800)
     assert (cfg.sampling.temperature, cfg.sampling.top_p) == (1.0, 0.95)
     assert cfg.timeouts.lightning_s == 180

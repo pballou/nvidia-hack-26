@@ -3,7 +3,9 @@
 Per step: Lightning proposes one tool call (planner) -> AgentSession executes it
 (grounder click / keys, settle, screenshot, summary) -> the tool result goes back to
 Lightning. Every Lightning call counts as a step (like Gym simple_agent's max_steps);
-`cfg.max_steps` is a hard stop. Events stream to `on_event` and runs/<run_id>/.
+`cfg.max_steps` (25) is a hard stop, and agent/progress.py ends a run earlier when it makes
+no progress: a warning in the tool result first, then done reason "stuck" with a summary of
+what was tried and a question for the user. Events stream to `on_event` and runs/<run_id>/.
 
 Tool calls are validated against agent/prompts.py's schema before anything runs
 (vllm-metal doesn't enforce it). An invalid call executes nothing; its tool result is a
@@ -32,6 +34,8 @@ Done-event stats:
                     later followed by an ok, screen-changing action
   n_thinking_calls  Lightning calls with thinking enabled
   n_api_errors      Lightning calls that failed (after the planner's retries and rate-limit waits)
+  n_stuck_warnings  times Lightning was told it was stuck (agent/progress.py)
+  n_stuck_stops     1 if the run ended as "stuck"
   latency_ms        {stage: [ms, ...]} for plan, ground, act, settle, screenshot, summary
                     (plan excludes rate-limit waits; the plan event's wait_ms has them)
 
@@ -52,6 +56,7 @@ from PIL import Image
 from agent.config import AgentConfig
 from agent.observation import Observation
 from agent.planner import NOT_EXECUTED, LightningPlanner, PlanResult, ToolCall
+from agent.progress import ProgressTracker
 from agent.prompts import PROMPT_SHA, PROMPT_VERSION, TOOL_NAMES
 from agent.session import AgentSession, ToolOutcome, invalid_json_error, normalize_key, validate_args
 from agent.trace import RunResult, StepEvent, TraceWriter
@@ -149,9 +154,12 @@ class _Run:
         self.to_close: list[Any] = []   # browser session, planner, VLM client (whatever we created)
         self.stats: dict[str, Any] = {k: 0 for k in (
             "n_tool_calls", "n_invalid_calls", "n_actions", "n_clicks", "n_failed_actions", "n_no_tool_call",
-            "n_truncated", "n_no_change", "n_recoveries", "n_thinking_calls", "n_api_errors")}
+            "n_truncated", "n_no_change", "n_recoveries", "n_thinking_calls", "n_api_errors",
+            "n_stuck_warnings", "n_stuck_stops")}
         self.latency: dict[str, list[float]] = {}
         self._problem_pending = False
+        self.progress = ProgressTracker()  # agent/progress.py: warn, then stop a run that makes no progress
+        self._stuck_verdict: str | None = None
 
     async def emit(self, step: int, kind: str, payload: dict, *, screenshot_path: str | None = None,
                    overlay_path: str | None = None, timings_ms: dict | None = None) -> None:
@@ -243,9 +251,13 @@ class _Run:
             if outcome is not None and outcome.done:
                 self.reason, self.finished = "done", session.finished
                 return
+            if self._stuck_verdict == "stuck":
+                self.reason = "stuck"
+                return
             ok = outcome is not None and outcome.ok
             no_change = outcome is not None and outcome.screen_changed is False
-            thinking_next = cfg.thinking == "on" or (cfg.thinking == "retry" and (not ok or no_change))
+            warned = self._stuck_verdict == "warn"
+            thinking_next = cfg.thinking == "on" or (cfg.thinking == "retry" and (not ok or no_change or warned))
         self.reason = "max_steps"
 
     async def _run_call(self, step: int, plan: PlanResult, planner: LightningPlanner) -> ToolOutcome | None:
@@ -259,6 +271,7 @@ class _Run:
         call, extras = plan.tool_calls[0], plan.tool_calls[1:]
         extra_results = [(c.id, {"ok": False, "error": NOT_EXECUTED}) for c in extras]
         self.stats["n_tool_calls"] += 1
+        self._stuck_verdict = None
 
         if call.parse_error:
             err = invalid_json_error(call.name, call.parse_error)
@@ -287,6 +300,15 @@ class _Run:
         outcome = await session.execute(call.name, call.arguments)
         t = outcome.timings_ms
         self._time(t)
+        click_xy = (outcome.click["x"], outcome.click["y"]) if outcome.click and outcome.click.get("x") is not None \
+            else None
+        verdict = None if outcome.done else self.progress.record(
+            outcome.name, outcome.args, ok=outcome.ok, screen_changed=outcome.screen_changed, click_xy=click_xy)
+        self._stuck_verdict = verdict
+        if verdict == "warn":
+            self.stats["n_stuck_warnings"] += 1
+        elif verdict == "stuck":
+            self.stats["n_stuck_stops"] = 1
 
         if outcome.click:
             c = outcome.click
@@ -306,12 +328,17 @@ class _Run:
             action["error"] = outcome.error
         if outcome.click and outcome.click.get("x") is not None:
             action["click"] = {"x": round(outcome.click["x"]), "y": round(outcome.click["y"])}
+        if verdict:  # "warn" | "stuck" (agent/progress.py)
+            action["stuck"] = {"verdict": verdict, "reason": self.progress.reason}
         await self.emit(step, "action", action, timings_ms=_pick(t, "act", "settle"))
 
         if outcome.observation is not None and not outcome.done:  # after=None: the screen was unavailable
             await self._observation(step, outcome.observation, outcome.after, _pick(t, "screenshot", "summary"))
 
-        planner.record_step(plan, [(call.id, outcome.tool_payload()), *extra_results], outcome.one_line())
+        payload = outcome.tool_payload()
+        if verdict == "warn":
+            payload["warning"] = self.progress.warning()
+        planner.record_step(plan, [(call.id, payload), *extra_results], outcome.one_line())
 
         if not outcome.ok:
             self.stats["n_failed_actions"] += 1
@@ -369,6 +396,8 @@ class _Run:
             summary = self.finished.get("summary", "")
         elif self.reason == "max_steps":
             summary = f"Stopped: reached the {self.cfg.max_steps}-step limit before finishing."
+        elif self.reason == "stuck":
+            summary = self.progress.summary()
         elif self.reason == "stopped":
             summary = "Stopped by the user."
         else:

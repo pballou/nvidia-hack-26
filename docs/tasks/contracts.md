@@ -79,7 +79,7 @@ vlm: {base_url: http://127.0.0.1:8001/v1, api_key: EMPTY}   # :8001 = Qwen3.5-2B
 grounder_model: base        # base | grounder
 summary_model: base         # base | grounder (grounder when Mac-local fully local)
 model_family: qwen3_5       # gate D1: Qwen/Qwen3.5-2B (qwen3_vl was the other candidate)
-max_steps: 12
+max_steps: 25               # interactive agent (+ a "stuck" stop, agent/progress.py); Gym web_agent stays at 12
 thinking: retry             # off | on | retry (on only after a no-change/failed step)
 viewport: {width: 1280, height: 800}
 runs_dir: runs

@@ -654,8 +654,10 @@ def test_yaml_server_block_is_accepted(monkeypatch):
     assert (server.config.grounder_model, server.config.summary_model) == ("grounder", None)
     agent_cfg = load_config()
     assert (server._cfg.grounder_model, server._cfg.summary_model) == ("grounder", agent_cfg.summary_model)
-    # Gym runs call N's tools before checking max_steps: the same budget as the interactive agent.
-    assert conf.web_agent_simple_agent.responses_api_agents.simple_agent.max_steps == agent_cfg.max_steps
+    # Gym stays at 12 Lightning calls so reported numbers stay comparable; the interactive agent has a
+    # larger cap plus the "stuck" stop (agent/progress.py), which Gym's simple_agent loop doesn't have.
+    assert conf.web_agent_simple_agent.responses_api_agents.simple_agent.max_steps == 12
+    assert agent_cfg.max_steps == 25
 
 
 def test_compute_metrics_by_tag():

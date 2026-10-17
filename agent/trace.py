@@ -24,7 +24,8 @@ Event payloads by kind (all JSON-serializable; done-event stats are documented i
   usage = {prompt_tokens, completion_tokens} when the server reports it.
   action       {name, arguments, ok, error?, screen_changed, click?: {x, y}, done?}
   error        {message, where, recoverable, finish_reason?}
-  done         {success_claimed, summary, steps, reason: done|max_steps|stopped|error, stats}
+  done         {success_claimed, summary, steps, reason: done|max_steps|stuck|stopped|error, stats}
+               (stuck: agent/progress.py ended a run that made no progress; the summary asks the user)
 """
 
 from __future__ import annotations

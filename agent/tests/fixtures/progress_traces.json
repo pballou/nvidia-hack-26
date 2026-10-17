@@ -1,0 +1,563 @@
+[
+ {
+  "run_id": "20261017-160547-aad442",
+  "verified_success": false,
+  "actions": [
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Text size \"M\" is selected"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1089,
+     "y": 438
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "L option in Text size row"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1108,
+     "y": 380
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "XL option in Text size row"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1091,
+     "y": 443
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "M option in Text size row"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1108,
+     "y": 380
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "L option in Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1126,
+     "y": 443
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1024,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "L option at the right of the Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1140,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Text size label"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 462,
+     "y": 465
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L text in the Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1142,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L radio button in the Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1129,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L selection in the Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1139,
+     "y": 442
+    }
+   },
+   {
+    "name": "scroll",
+    "arguments": {
+     "direction": "down",
+     "amount": "page"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": null
+   }
+  ],
+  "expect_stuck": true
+ },
+ {
+  "run_id": "20261017-165131-0b957e",
+  "verified_success": false,
+  "actions": [
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Text size \"M\" is selected"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1089,
+     "y": 438
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "L"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1057,
+     "y": 381
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L option in the Text size row"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1108,
+     "y": 381
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L option in the Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1128,
+     "y": 443
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L option in the Text size row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1128,
+     "y": 443
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the Text size row center"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 896,
+     "y": 446
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L option in the Text size row at the right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1139,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the Text size setting row"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 742,
+     "y": 450
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the row with L at the right side of the Text size options"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1140,
+     "y": 446
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the row with L at the right side of the Text size options"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1140,
+     "y": 446
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the gear icon in the top-right toolbar"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1096,
+     "y": 30
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the Text size row center"
+    },
+    "ok": false,
+    "screen_changed": null,
+    "click": null
+   }
+  ],
+  "expect_stuck": true
+ },
+ {
+  "run_id": "20261017-165931-44957a",
+  "verified_success": true,
+  "actions": [
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Riverside district @ left"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 486,
+     "y": 499
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Report an outage in Riverside dialog box"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 886,
+     "y": 623
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "button: Submit report @ bottom-right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1115,
+     "y": 608
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Submit report button"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 886,
+     "y": 104
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "button: Submit report @ bottom-right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1128,
+     "y": 592
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the Submit report button at the bottom right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 973,
+     "y": 602
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "button: Submit report @ bottom-right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1128,
+     "y": 592
+    }
+   },
+   {
+    "name": "type_text",
+    "arguments": {
+     "text": "Riverside outage reported",
+     "target_description": "the report field at the bottom"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 381,
+     "y": 610
+    }
+   },
+   {
+    "name": "done",
+    "arguments": {
+     "summary": "User successfully reported an outage in the Riverside district. The report was submitted and the screen now shows the Riverside outage card with status badge and customer count.",
+     "success": true
+    },
+    "ok": true,
+    "screen_changed": null,
+    "click": null
+   }
+  ],
+  "expect_stuck": false
+ },
+ {
+  "run_id": "20261017-173242-d61a58",
+  "verified_success": true,
+  "actions": [
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "row: Text size options @ right (M selected)"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1093,
+     "y": 438
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "S"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1068,
+     "y": 381
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "L"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1057,
+     "y": 381
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the M option in the Text size row at right"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1106,
+     "y": 379
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L option in the Text size row at right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1139,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "Text size input @ center"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 640,
+     "y": 458
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L button in the Text size selector at right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1139,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L option in the Text size row at right"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 1139,
+     "y": 442
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the Text size row @ center"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 640,
+     "y": 448
+    }
+   },
+   {
+    "name": "type_text",
+    "arguments": {
+     "text": "Large",
+     "target_description": "Text size input @ center"
+    },
+    "ok": true,
+    "screen_changed": false,
+    "click": {
+     "x": 640,
+     "y": 458
+    }
+   },
+   {
+    "name": "click",
+    "arguments": {
+     "target_description": "the L button @ right of the Text size row"
+    },
+    "ok": true,
+    "screen_changed": true,
+    "click": {
+     "x": 1180,
+     "y": 440
+    }
+   },
+   {
+    "name": "done",
+    "arguments": {
+     "summary": "Changed the text size to Large. The settings screen now shows \"Text size (This is Large text.)\" and a notification banner confirms \"Text size set to Large\".",
+     "success": true
+    },
+    "ok": true,
+    "screen_changed": null,
+    "click": null
+   }
+  ],
+  "expect_stuck": false
+ }
+]

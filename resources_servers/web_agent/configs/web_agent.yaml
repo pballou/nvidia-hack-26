@@ -39,8 +39,10 @@ web_agent_simple_agent:
       entrypoint: app.py
       # simple_agent counts MODEL CALLS and ends on a reply without a tool call (the done tool doesn't end
       # it; its result tells the model to stop). It runs the tool calls of call N before it checks
-      # max_steps, so 12 = the interactive agent's 12 Lightning calls (configs/agent.yaml max_steps), done
-      # on call 12 included. verify scores the done snapshot, so the final text reply never affects the reward.
+      # max_steps, so 12 = 12 Lightning calls, done on call 12 included. verify scores the done snapshot,
+      # so the final text reply never affects the reward. Kept at 12 so reported Gym numbers stay
+      # comparable: since Sat 19:30 the interactive agent uses max_steps 25 + a "stuck" stop
+      # (configs/agent.yaml, agent/progress.py), which Gym's simple_agent loop doesn't have.
       max_steps: 12
       resources_server:
         type: resources_servers
