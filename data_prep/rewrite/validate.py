@@ -294,7 +294,10 @@ def _text_action_verb(s: str, meta: dict) -> str | None:
     if meta.get("control") not in metalib.TEXT_CONTROLS or meta.get("style") != "functional":
         return None
     first = (re.findall(r"[\w'-]+", s.lower()) or [""])[0]
-    return None if first in TEXT_VERBS or first in ("the", "a", "an") else f"text_action_verb:{first}"
+    label_first = (re.findall(r"[\w'-]+", str(meta.get("label") or "").lower()) or [""])[0]
+    if first in TEXT_VERBS or first in ("the", "a", "an") or first == label_first:  # "Plan Team lunch" -> "plan ..."
+        return None
+    return f"text_action_verb:{first}"
 
 
 def _context(meta: dict) -> str:

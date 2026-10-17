@@ -644,3 +644,12 @@ def test_web_rows_without_control_may_say_button_or_link_only():
     assert err("the Submit icon", web) == "invented_control:icon"
     mobile = meta(label="Submit", control=None, neighbors=(), style="descriptive", platform="mobile")
     assert err("the Submit button", mobile) == "invented_control:button"
+
+
+def test_text_action_verb_allows_the_labels_own_first_word():
+    """To-do/notification texts often start with a verb; keeping it is not an invented action."""
+    for label, text in (("Plan Team lunch", "plan Team lunch"), ("Follow up with others", "follow up with others"),
+                        ("Start an Off-road Hike", "start an Off-road Hike")):
+        assert err(text, meta(label=label, control="text", style="functional", neighbors=())) is None
+    assert err("open Team lunch", meta(label="Plan Team lunch", control="text", style="functional", neighbors=())) \
+        == "text_action_verb:open"
