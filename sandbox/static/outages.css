@@ -1,0 +1,32 @@
+/* Outage map page (templates/outages.html). The map itself is drawn by outages.js. */
+
+.outage-layout { display: grid; grid-template-columns: minmax(0, 1fr) 17rem; gap: 1.5rem; align-items: start; }
+.outage-side { display: flex; flex-direction: column; gap: 1.5rem; }
+
+/* The canvas keeps a fixed 1000:650 design aspect. The max-width keeps the whole map on
+   screen at 1280x800 when text size L stacks the layout into one column. */
+.map-card { width: 100%; max-width: calc((100vh - 12.5rem) / 0.65); justify-self: center; }
+.map-card canvas { width: 100%; height: auto; aspect-ratio: 1000 / 650; border-radius: calc(var(--radius) - var(--bw)); }
+.map-card canvas:focus-visible { outline-offset: calc(-1 * var(--focus-w)); }
+
+/* Large text with the side nav open: map full width, side cards below it. */
+html.text-L body.has-nav .outage-layout { grid-template-columns: minmax(0, 1fr); }
+html.text-L body.has-nav .outage-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+html.text-L body.has-nav .out-safety { grid-column: 1 / -1; }
+
+.outage-side .card-header, .outage-side .list-row { padding-left: 1.25rem; padding-right: 1.25rem; }
+.outage-side .list-row { align-items: flex-start; }
+.out-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.625rem; }
+.out-details { font-style: italic; }
+.out-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.25rem; height: 2.25rem; border-radius: 50%;
+}
+.out-icon-outage { background: var(--danger-soft); color: var(--danger); }
+.out-icon-report { background: var(--accent-soft); color: var(--accent-text); }
+.is-highlighted .out-icon-report { background: var(--surface); }
+html.hc .out-icon { border: 2px solid currentColor; }
+.out-safety { font-size: 0.875rem; }
+
+#report-dialog { max-width: 36rem; }
+#report-dialog .alert { font-size: 0.9375rem; }

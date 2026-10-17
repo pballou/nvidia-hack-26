@@ -20,6 +20,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -107,6 +108,14 @@ def render(request: Request, template: str, nav: str, status_code: int = 200, **
         state = copy.deepcopy(live)
     context = {"state": state, "nav": nav, "flash": flash, "query": dict(request.query_params), **ctx}
     return templates.TemplateResponse(request, template, context, status_code=status_code)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request: Request, exc: StarletteHTTPException):
+    """Unknown pages get the app's own 404 page; API and static paths keep JSON."""
+    if exc.status_code == 404 and not request.url.path.startswith(("/api/", "/static/")):
+        return render(request, "not_found.html", "", status_code=404, what="That page")
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
 
 # --- pages -------------------------------------------------------------------

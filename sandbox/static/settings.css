@@ -1,0 +1,73 @@
+/* Settings page (templates/settings.html). All sizes in rem; colors from the app.css theme
+   variables, so text size and high contrast apply here too. */
+
+.settings-intro { margin-bottom: 1.25rem; color: var(--text-muted); }
+
+/* Icon tile used by the contact and accessibility cards. */
+.tile {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.5rem; height: 2.5rem; border-radius: 0.625rem;
+  background: var(--accent-soft); color: var(--accent-text);
+}
+.tile-lg { width: 3rem; height: 3rem; border-radius: 0.75rem; }
+html.hc .tile { border: 2px solid var(--accent); }
+
+/* ---- profile -------------------------------------------------------------- */
+
+.profile-grid { align-items: start; }
+.profile-who { display: flex; align-items: center; gap: 1rem; }
+.avatar-xl { width: 3.5rem; height: 3.5rem; font-size: 1.25rem; }
+.profile-who-name { font-size: 1.125rem; font-weight: 700; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); align-items: start; gap: 1.25rem 1.5rem; }
+.form-grid .full { grid-column: 1 / -1; }
+.form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; }
+
+.readonly { display: grid; gap: 0.375rem; }
+.readonly-value {
+  display: flex; align-items: center; gap: 0.5rem;
+  min-height: 2.75rem; padding: 0.5rem 0.75rem;
+  border: var(--bw) dashed var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface-2); font-weight: 600;
+}
+.readonly-value .icon { color: var(--text-muted); }
+
+/* ---- notifications -------------------------------------------------------- */
+
+.reach-card { padding: 1.25rem 1.5rem; }
+.reach-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.reach-edit { margin: -0.5rem -0.75rem; } /* keeps the title line compact */
+.reach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 3rem; margin-top: 0.75rem; }
+.reach-item { display: flex; align-items: center; gap: 0.75rem; }
+.reach-label { color: var(--text-muted); font-size: 0.8125rem; font-weight: 600; }
+.reach-value { font-weight: 650; }
+
+/* Separate borders so the sticky header cells can take the card's rounded corners. */
+.notif-table { border-collapse: separate; border-spacing: 0; }
+.notif-table thead th { position: sticky; top: var(--topbar-h); z-index: 2; }
+.notif-table thead th:first-child { border-top-left-radius: calc(var(--radius) - var(--bw)); }
+.notif-table thead th:last-child { border-top-right-radius: calc(var(--radius) - var(--bw)); }
+.notif-table th .icon { margin: -0.125rem 0.375rem 0 0; }
+.notif-table .channel { width: 8.5rem; }
+.notif-table td { height: 4.5rem; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.notif-name { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+.notif-desc { color: var(--text-muted); font-size: 0.875rem; }
+.notif-note { display: flex; align-items: center; gap: 0.625rem; color: var(--text-muted); font-size: 0.875rem; }
+.notif-note .icon { color: var(--info); }
+html.hc .notif-table thead th { color: var(--text); }
+
+/* ---- accessibility -------------------------------------------------------- */
+
+.a11y-list { display: grid; gap: 1rem; }
+.a11y-card { display: flex; align-items: center; gap: 1.25rem; padding: 1.25rem 1.5rem; }
+.a11y-card h2 { font-size: 1.0625rem; }
+.a11y-desc { margin-top: 0.125rem; color: var(--text-muted); }
+.size-preview {
+  display: flex; align-items: baseline; gap: 0.75rem;
+  width: fit-content; margin-top: 0.75rem; padding: 0.375rem 0.875rem;
+  border: var(--bw) solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.size-aa { font-size: 1.5rem; font-weight: 800; line-height: 1.2; }
+.size-control .segment { min-width: 3.25rem; }
+.size-control .segment[data-value="S"] { font-size: 0.875rem; }
+.size-control .segment[data-value="L"] { font-size: 1.25rem; }

@@ -1,0 +1,104 @@
+/* Help center (templates/help.html). Sizes in rem; html.hc overrides at the end of each block. */
+
+.help-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+.nowrap { white-space: nowrap; }
+
+/* ---- FAQ accordion (inside a card, so no second border) ------------------- */
+
+.card > .faq { border: 0; border-radius: 0 0 var(--radius) var(--radius); background: transparent; }
+.faq-heading { margin: 0; font-size: 1rem; }
+.faq .accordion-trigger { min-height: 3.75rem; padding: 0.75rem 1.5rem; }
+.faq .accordion-item:last-child .accordion-trigger { border-radius: 0 0 var(--radius) var(--radius); }
+.faq-q { display: flex; align-items: center; gap: 0.875rem; }
+.faq-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.25rem; height: 2.25rem; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-text);
+}
+.faq-icon-danger { background: var(--danger-soft); color: var(--danger); }
+/* The shared accordion rotates every icon in an open trigger; only the chevron should turn. */
+.faq .accordion-trigger[aria-expanded="true"] .faq-icon .icon { transform: none; }
+.faq-chevron { display: inline-flex; color: var(--text-muted); }
+.faq .accordion-trigger[aria-expanded="true"] { color: var(--accent-text); }
+.faq .accordion-trigger[aria-expanded="true"] .faq-chevron { color: var(--accent-text); }
+.faq-panel { display: grid; gap: 0.75rem; padding: 0 1.5rem 1.25rem 4.625rem; color: var(--text); line-height: 1.6; }
+.faq-panel ul { display: grid; gap: 0.375rem; margin: 0; padding-left: 1.25rem; }
+.faq-safety {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: var(--bw) solid var(--danger); border-left-width: 0.25rem; border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+.faq-safety > .icon { margin-top: 0.1875rem; color: var(--danger); }
+html.hc .faq-icon { border: 2px solid currentColor; background: #000000; }
+html.hc .faq .accordion-trigger:hover { background: transparent; outline: 2px solid var(--accent); outline-offset: -2px; }
+html.hc .faq .accordion-trigger[aria-expanded="true"] { background: var(--accent); color: #000000; }
+html.hc .faq .accordion-trigger[aria-expanded="true"] .faq-chevron,
+html.hc .faq .accordion-trigger[aria-expanded="true"] .faq-icon { color: #000000; border-color: #000000; background: var(--accent); }
+html.hc .faq-panel { padding-top: 1rem; }
+html.hc .faq-safety { border-width: 3px; }
+
+/* ---- contact card --------------------------------------------------------- */
+
+.contact-label { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+.contact-label .icon { color: var(--accent-text); }
+.contact-number { margin: 0.125rem 0 0.25rem; font-size: 1.375rem; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.contact-emergency {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem;
+  padding: 1rem 1.25rem;
+  border: var(--bw) solid var(--danger); border-left-width: 0.25rem; border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+.contact-emergency > p { flex: 1 1 14rem; font-size: 0.875rem; }
+.contact-emergency .contact-number { margin-bottom: 0; }
+.contact-emergency .contact-label, .contact-emergency .contact-label .icon { color: var(--danger); }
+.contact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: 1.5rem; }
+.hours-today { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; color: var(--success); font-size: 0.875rem; font-weight: 700; }
+.hours-today .dot { background: currentColor; }
+.hours-today.is-closed { color: var(--text-muted); }
+.hours { display: grid; gap: 0.25rem; margin: 0.625rem 0 0; }
+.hours-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 0.75rem; padding: 0.25rem 0.5rem; margin: 0 -0.5rem; border-radius: var(--radius-sm); }
+.hours-row dt { display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted); }
+.hours-row dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.hours-row.is-today { background: var(--highlight); box-shadow: inset 0.25rem 0 0 var(--highlight-edge); }
+.hours-row.is-today dt { color: var(--text); font-weight: 650; }
+html.hc .contact-emergency { border-width: 3px; }
+
+/* ---- call-back form ------------------------------------------------------- */
+
+.callback-header { justify-content: flex-start; padding-top: 1rem; padding-bottom: 1rem; }
+.callback-header p { margin-top: 0.125rem; }
+.callback-body { display: grid; gap: 1.25rem; }
+/* Topic chips: two per row where they fit, one per row at large text sizes. */
+#callback-topic { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr)); }
+#callback-topic .chip { padding: 0.375rem 0.75rem 0.375rem 0.625rem; font-size: 0.9375rem; line-height: 1.25; text-align: left; }
+.callback-badge {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.75rem; height: 2.75rem; border-radius: 0.75rem;
+  background: var(--accent-soft); color: var(--accent-text);
+}
+.field.has-error .chip { border-color: var(--danger); }
+.callback-phone {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 1rem;
+  min-height: 2.75rem; padding: 0.5rem 0.875rem;
+  border: var(--bw) dashed var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.callback-phone-number { font-weight: 700; font-variant-numeric: tabular-nums; }
+.callback-footer { display: grid; justify-items: center; gap: 0.75rem; }
+.callback-alt { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.125rem 0.25rem; border-radius: var(--radius-sm); }
+html.hc .callback-badge { border: 2px solid var(--accent); background: #000000; }
+html.hc .callback-phone { border-style: solid; }
+html.hc .field.has-error .chip { border-color: var(--danger); border-width: 3px; }
+
+/* ---- call-back requests --------------------------------------------------- */
+
+.callback-requests { overflow: hidden; }
+.callback-row { align-items: flex-start; }
+.callback-row-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.25rem; height: 2.25rem; border-radius: 50%;
+  background: var(--info-soft); color: var(--info);
+}
+.callback-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.625rem; }
+html.hc .callback-row-icon { border: 2px solid currentColor; }

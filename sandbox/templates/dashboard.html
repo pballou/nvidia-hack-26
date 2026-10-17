@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block head %}
+<style>
+  .balance-card { display: flex; flex-direction: column; gap: 1.5rem; padding: 1.75rem; background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+  html.hc .balance-card { border-color: #ffffff; }
+  .balance-card .eyebrow { color: var(--on-brand-muted); }
+  .balance-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .balance-amount { margin-top: 0.25rem; font-size: 2.75rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+  .balance-due { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; color: var(--on-brand-muted); }
+  .balance-due strong { color: var(--on-brand); }
+  .balance-card .badge { background: rgba(255, 255, 255, 0.12); color: var(--on-brand); }
+  .balance-card .badge.is-on { background: var(--brand-mark); color: var(--on-brand-mark); }
+  html.hc .balance-card .badge { background: #000000; }
+  .balance-foot { padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.18); color: var(--on-brand-muted); font-size: 0.875rem; }
+  html.hc .balance-foot { border-top-color: #ffffff; }
+  .paid-up { display: flex; align-items: center; gap: 1rem; }
+  .paid-up .icon { color: var(--brand-mark); }
+  .paid-up-title { font-size: 1.75rem; font-weight: 800; line-height: 1.2; }
+
+  .status-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; border-radius: 50%; }
+  .status-ok { background: var(--success-soft); color: var(--success); }
+  .status-warn { background: var(--warning-soft); color: var(--warning); }
+  .status-info { background: var(--info-soft); color: var(--info); }
+  html.hc .status-icon { border: 2px solid currentColor; }
+  .status-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.625rem; }
+
+  .section-title { margin: 2rem 0 1rem; font-size: 1.125rem; }
+  .quick-action { display: flex; flex-direction: column; gap: 0.25rem; padding: 1.25rem; color: var(--text); text-decoration: none; }
+  .quick-action:hover { border-color: var(--accent); background: var(--surface-2); }
+  html.hc .quick-action:hover { outline: 2px solid var(--accent); }
+  .qa-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; height: 2.75rem; margin-bottom: 0.5rem; border-radius: 0.75rem; background: var(--accent-soft); color: var(--accent-text); }
+  html.hc .qa-icon { border: 2px solid var(--accent); }
+  .qa-label { font-weight: 700; }
+  .qa-desc { color: var(--text-muted); font-size: 0.875rem; }
+
+  .activity-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; border-radius: 50%; background: var(--surface-3); color: var(--text-muted); }
+  html.hc .activity-icon { border: 2px solid #ffffff; background: #000000; color: #ffffff; }
+  .account-kv { grid-template-columns: max-content 1fr; }
+</style>
+{% endblock %}
+
+{% block content %}
+{%- set b = state.billing %}
+{%- set first_name = (state.settings.profile.name.split() or ['there'])[0] %}
+{%- set latest = b.statements[0] %}
+{%- set home_district = 'riverside' %}
+{%- set home_outage = state.outages.active|selectattr('district', 'equalto', home_district)|first %}
+
+{{ ui.page_header('Good afternoon, ' ~ first_name, TODAY_LABEL) }}
+
+<div class="grid grid-12">
+  <section class="card balance-card span-7" data-testid="balance-card" aria-labelledby="balance-title">
+    {%- if b.balance_cents > 0 %}
+    <div class="balance-top">
+      <div>
+        <h2 class="eyebrow" id="balance-title">Amount due</h2>
+        <div class="balance-amount money">{{ money(b.balance_cents) }}</div>
+        <div class="balance-due">{{ icon('calendar', '1.125rem') }}<span>Due by <strong>{{ fmt_date(b.due_date, 'long') }}</strong></span></div>
+      </div>
+      {%- if b.autopay %}
+      <span class="badge is-on">{{ icon('check', '0.875rem') }}Autopay on</span>
+      {%- else %}
+      <span class="badge">Autopay off</span>
+      {%- endif %}
+    </div>
+    <div class="cluster">
+      <a class="btn btn-primary btn-lg" href="/billing?pay=1" data-testid="dash-pay">{{ icon('credit-card') }}Pay bill</a>
+      <a class="btn btn-inverse btn-lg" href="/billing">View statements</a>
+    </div>
+    {%- else %}
+    <div class="paid-up">
+      {{ icon('check-circle', '3rem') }}
+      <div>
+        <h2 class="paid-up-title" id="balance-title">You're all paid up</h2>
+        <p class="balance-due">No payment is due right now.</p>
+      </div>
+    </div>
+    <div class="cluster">
+      <a class="btn btn-inverse btn-lg" href="/billing">View statements</a>
+    </div>
+    {%- endif %}
+    <div class="balance-foot">
+      {%- if b.payments %}
+      {%- set last = b.payments[-1] %}
+      Last payment {{ money(last.amount_cents) }} on {{ fmt_date(last.date) }} &middot; Confirmation {{ last.confirmation }}
+      {%- else %}
+      {{ latest.label }} statement &middot; {{ money(latest.amount_cents) }} &middot; Issued {{ fmt_date(latest.issued) }}
+      {%- endif %}
+    </div>
+  </section>
+
+  <section class="card span-5" aria-labelledby="status-title">
+    <div class="card-header">
+      <h2 id="status-title">Service status</h2>
+      <a class="small strong" href="/outages">Outage map</a>
+    </div>
+    <ul class="list">
+      <li class="list-row">
+        {%- if home_outage %}
+        <span class="status-icon status-warn">{{ icon('alert') }}</span>
+        <div class="grow">
+          <div class="status-head"><span class="list-title">{{ DISTRICT_NAMES[home_district] }}</span>{{ ui.badge(home_outage.status, 'warning') }}</div>
+          <div class="list-meta">Your area &middot; {{ home_outage.customers }} customers affected</div>
+        </div>
+        {%- else %}
+        <span class="status-icon status-ok">{{ icon('check-circle') }}</span>
+        <div class="grow">
+          <div class="status-head"><span class="list-title">{{ DISTRICT_NAMES[home_district] }}</span>{{ ui.badge('Power on', 'success') }}</div>
+          <div class="list-meta">Your area &middot; no outages reported</div>
+        </div>
+        {%- endif %}
+      </li>
+      {%- for o in state.outages.active if o.district != home_district %}
+      <li class="list-row">
+        <span class="status-icon status-warn">{{ icon('bolt') }}</span>
+        <div class="grow">
+          <div class="status-head"><span class="list-title">{{ DISTRICT_NAMES[o.district] }}</span>{{ ui.badge(o.status, 'warning') }}</div>
+          <div class="list-meta">{{ o.customers }} customers affected &middot; {{ 'since today' if o.since == TODAY else 'since ' ~ fmt_date(o.since) }}</div>
+        </div>
+      </li>
+      {%- endfor %}
+      {%- for r in state.outages.reports[-2:]|reverse %}
+      <li class="list-row">
+        <span class="status-icon status-info">{{ icon('map-pin') }}</span>
+        <div class="grow">
+          <div class="status-head"><span class="list-title">Your report: {{ DISTRICT_NAMES[r.district] }}</span>{{ ui.badge('Received', 'info') }}</div>
+          <div class="list-meta">{{ OUTAGE_TYPES[r.type] }} &middot; {{ r.reference }}</div>
+        </div>
+      </li>
+      {%- endfor %}
+      <li class="list-row">
+        <span class="status-icon status-info">{{ icon('calendar') }}</span>
+        <div class="grow">
+          <div class="list-title">Planned tree trimming</div>
+          <div class="list-meta">Near Maple Court &middot; Oct 21, 2026</div>
+        </div>
+      </li>
+    </ul>
+  </section>
+</div>
+
+<h2 class="section-title" id="qa-title">Quick actions</h2>
+<div class="grid grid-4">
+  {%- for testid, href, ic, label, desc in [
+    ('quick-pay', '/billing?pay=1', 'credit-card', 'Pay bill', 'Make a one-time payment'),
+    ('quick-outage', '/outages', 'bolt', 'Report an outage', 'Tell us what is happening'),
+    ('quick-message', '/messages/compose', 'mail', 'Message us', 'Write to our team'),
+    ('quick-help', '/help', 'help', 'Get help', 'FAQs and call-backs'),
+  ] %}
+  <a class="card quick-action" href="{{ href }}" data-testid="{{ testid }}">
+    <span class="qa-icon">{{ icon(ic, '1.5rem') }}</span>
+    <span class="qa-label">{{ label }}</span>
+    <span class="qa-desc">{{ desc }}</span>
+  </a>
+  {%- endfor %}
+</div>
+
+<div class="grid grid-12 section">
+  <section class="card span-7" aria-labelledby="activity-title">
+    <div class="card-header"><h2 id="activity-title">Recent activity</h2></div>
+    <ul class="list" data-testid="activity-list">
+      {%- for a in state.activity[:6] %}
+      {%- set t = a.text|lower %}
+      {%- set ic = 'credit-card' if 'payment' in t else 'receipt' if 'statement' in t else 'bolt' if ('outage' in t or 'power' in t) else 'mail' if 'message' in t else 'refresh' if 'autopay' in t else 'check-circle' %}
+      <li class="list-row">
+        <span class="activity-icon">{{ icon(ic, '1.125rem') }}</span>
+        <span class="grow">{{ a.text }}</span>
+        <span class="muted small">{{ 'Today' if a.date == TODAY else fmt_date(a.date) }}</span>
+      </li>
+      {%- else %}
+      <li>{{ ui.empty('clock', 'No recent activity') }}</li>
+      {%- endfor %}
+    </ul>
+  </section>
+
+  <section class="card span-5" aria-labelledby="account-title">
+    <div class="card-header"><h2 id="account-title">Your account</h2></div>
+    <div class="card-body">
+      <dl class="kv account-kv">
+        <dt>Account holder</dt><dd>{{ state.settings.profile.name }}</dd>
+        <dt>Account number</dt><dd>{{ ACCOUNT.number }}</dd>
+        <dt>Service address</dt><dd>{{ ACCOUNT.service_address }}</dd>
+        <dt>Payment method</dt><dd>{{ ACCOUNT.payment_method }}</dd>
+        <dt>Autopay</dt><dd>{{ 'On' if b.autopay else 'Off' }}</dd>
+      </dl>
+    </div>
+  </section>
+</div>
+{% endblock %}

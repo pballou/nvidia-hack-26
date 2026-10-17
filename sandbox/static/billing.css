@@ -1,0 +1,120 @@
+/* Billing page (templates/billing.html). Sizes in rem; html.hc rules follow each block. */
+
+/* ---- balance card --------------------------------------------------------- */
+
+.bill-balance {
+  display: flex; flex-direction: column; justify-content: space-between; gap: 1.25rem;
+  padding: 1.5rem 1.75rem;
+  background: var(--brand); border-color: var(--brand); color: var(--on-brand);
+}
+.bill-balance .eyebrow { color: var(--on-brand-muted); }
+.bill-balance :focus-visible { outline-color: var(--focus-on-brand); }
+.bill-balance-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; }
+.bill-balance-main > div { min-width: 0; }
+.bill-amount { margin-top: 0.25rem; font-size: 2.75rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+.bill-due { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; color: var(--on-brand-muted); }
+.bill-due strong { color: var(--on-brand); white-space: nowrap; }
+.bill-balance .btn:disabled { opacity: 1; background: rgba(255, 255, 255, 0.12); border-color: transparent; color: var(--on-brand-muted); }
+.bill-balance-foot { padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.18); color: var(--on-brand-muted); font-size: 0.875rem; }
+.bill-balance-foot strong { color: var(--on-brand); }
+html.hc .bill-balance { border-color: #ffffff; }
+html.hc .bill-balance-foot { border-top-color: #ffffff; }
+html.hc .bill-balance .btn:disabled { background: #000000; border-color: #ffffff; color: #ffffff; }
+
+/* ---- autopay card --------------------------------------------------------- */
+
+.bill-autopay { display: flex; flex-direction: column; gap: 0.625rem; padding: 1.5rem; }
+.bill-autopay-head { display: flex; align-items: center; gap: 1rem; }
+.bill-autopay-head h2 { font-size: 1.25rem; }
+.bill-autopay-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.75rem; height: 2.75rem; border-radius: 0.75rem;
+  background: var(--surface-3); color: var(--text-muted);
+}
+.bill-autopay-status { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--text-muted); font-weight: 650; }
+.bill-autopay-status .icon { margin-top: 0.1875rem; }
+.bill-off-dot { flex-shrink: 0; width: 0.75rem; height: 0.75rem; margin: 0.375rem 0.1875rem 0; border: 2px solid currentColor; border-radius: 50%; }
+.bill-autopay-note { margin-top: auto; padding-top: 1rem; border-top: var(--bw) solid var(--border); color: var(--text-muted); font-size: 0.875rem; }
+.bill-autopay-note strong { color: var(--text); }
+.bill-autopay.is-on { border-color: var(--accent); box-shadow: inset 0.25rem 0 0 var(--accent), var(--shadow-sm); }
+.bill-autopay.is-on .bill-autopay-icon { background: var(--accent-soft); color: var(--accent-text); }
+.bill-autopay.is-on .bill-autopay-status { color: var(--accent-text); }
+html.hc .bill-autopay-icon { border: 2px solid #ffffff; background: #000000; color: #ffffff; }
+html.hc .bill-autopay.is-on { border-width: 3px; box-shadow: none; }
+html.hc .bill-autopay.is-on .bill-autopay-icon { border-color: var(--accent); color: var(--accent); }
+
+/* ---- statements table ----------------------------------------------------- */
+
+.bill-table { table-layout: fixed; }
+.bill-table .col-label { width: 30%; }
+.bill-table .col-issued { width: 20%; }
+.bill-table .col-amount { width: 16%; }
+.bill-table .col-status { width: 26%; }
+.bill-table td { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+.bill-table th:last-child, .bill-table td:last-child { padding-left: 0; padding-right: 1.25rem; text-align: right; }
+.bill-table .actions { width: auto; }
+.bill-stmt { display: flex; align-items: center; gap: 0.625rem; font-weight: 650; }
+.bill-stmt .icon { color: var(--text-muted); }
+.bill-badges { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+/* Downloaded: highlighted row (app.css) + a solid badge that stands out on the highlight. */
+.bill-table tr.is-highlighted .bill-stmt .icon { color: var(--accent); }
+.bill-table .badge-brand { background: var(--accent); color: var(--on-accent); }
+html.hc .bill-table .badge-brand { border-color: var(--accent); background: var(--accent); color: #000000; }
+html.hc .bill-table tr.is-highlighted td { border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); }
+
+/* ---- payments list -------------------------------------------------------- */
+
+.bill-pay-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.25rem; height: 2.25rem; border-radius: 50%;
+  background: var(--success-soft); color: var(--success);
+}
+.bill-conf { text-align: right; }
+html.hc .bill-pay-icon { border: 2px solid currentColor; }
+
+/* ---- pay dialog ----------------------------------------------------------- */
+
+.bill-pay-summary {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  padding: 0.875rem 1.125rem;
+  border: var(--bw) solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.bill-pay-summary .money { font-size: 1.25rem; }
+.bill-options { display: grid; gap: 0.75rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.bill-options legend { margin-bottom: 0.75rem; padding: 0; }
+.bill-option {
+  display: flex; align-items: center; gap: 0.875rem;
+  min-height: 3.75rem; padding: 0.5rem 0.75rem 0.5rem 1rem;
+  border: var(--bw) solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface); font-weight: 650; cursor: pointer;
+}
+.bill-option:hover { background: var(--surface-2); }
+.bill-option.is-selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.bill-option-label { display: flex; flex: 1 1 auto; align-items: center; align-self: stretch; gap: 0.875rem; cursor: pointer; }
+.bill-option input[type="radio"] {
+  appearance: none; flex-shrink: 0;
+  width: 1.25rem; height: 1.25rem; margin: 0;
+  border: 2px solid var(--border-strong); border-radius: 50%; background: var(--surface);
+}
+.bill-option input[type="radio"]:checked { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 0.1875rem var(--surface); }
+.bill-option .money { padding-right: 0.25rem; }
+.bill-amount-group { width: 10rem; }
+.bill-amount-group .input { font-weight: 700; font-variant-numeric: tabular-nums; }
+.bill-amount-group.has-error .input, .bill-amount-group.has-error .input-prefix { border-color: var(--danger); }
+.bill-from { display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted); font-size: 0.875rem; }
+.bill-from strong { color: var(--text); }
+html.hc .bill-option.is-selected { border-width: 3px; box-shadow: none; }
+html.hc .bill-option:hover { background: #000000; outline: 2px solid var(--accent); }
+html.hc .bill-option input[type="radio"] { border-color: #ffffff; }
+html.hc .bill-option input[type="radio"]:checked { border-color: var(--accent); }
+
+/* ---- confirm dialog ------------------------------------------------------- */
+
+.bill-confirm-text { font-size: 1.375rem; font-weight: 750; line-height: 1.3; }
+.bill-confirm-kv {
+  padding: 1rem 1.25rem;
+  border: var(--bw) solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.bill-confirm-kv dd { text-align: right; }

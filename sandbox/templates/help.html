@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Help center{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/help.css">
+{% endblock %}
+
+{#- Phone handset (the shared 'phone' icon is a mobile phone). Same attributes as icon(). #}
+{%- macro handset(size='1.25rem') -%}
+<svg class="icon" style="width:{{ size }};height:{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.6 3.5h2.6l1.4 4.1-2 1.5a12 12 0 0 0 6.3 6.3l1.5-2 4.1 1.4v2.6a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/></svg>
+{%- endmacro -%}
+
+{% block content %}
+{%- set EMERGENCY = '1-800-555-0199' %}
+{%- set SERVICE = '1-800-555-0123' %}
+{%- set weekday = TODAY_LABEL.split(',')[0] %}
+{%- set requests = state.help.contact_requests %}
+
+{{ ui.page_header('Help center', 'Find answers to common questions, or ask a specialist to call you.') }}
+
+<div class="grid help-grid">
+  <div class="stack stack-lg">
+    <section class="card" aria-labelledby="faq-title">
+      <div class="card-header">
+        <h2 id="faq-title">Frequently asked questions</h2>
+      </div>
+      <div class="accordion faq">
+        {%- set faqs = [
+          ('receipt', 'How do I read my bill?'),
+          ('refresh', 'How do I set up Autopay?'),
+          ('bolt', 'How do I report a power outage?'),
+          ('text-size', 'How do I make text bigger or use high contrast?'),
+          ('alert', 'What should I do if I see a downed power line?'),
+          ('user', 'How do I update my phone number or email?'),
+        ] %}
+        {%- for ic, q in faqs %}
+        {%- set n = loop.index %}
+        <div class="accordion-item">
+          <h3 class="faq-heading">
+            <button type="button" class="accordion-trigger" id="faq-{{ n }}-q" data-testid="faq-{{ n }}" data-disclosure aria-controls="faq-panel-{{ n }}" aria-expanded="false">
+              <span class="faq-q"><span class="faq-icon{% if ic == 'alert' %} faq-icon-danger{% endif %}">{{ icon(ic, '1.125rem') }}</span><span>{{ q }}</span></span>
+              <span class="faq-chevron">{{ icon('chevron-down') }}</span>
+            </button>
+          </h3>
+          <div class="accordion-panel faq-panel" id="faq-panel-{{ n }}" data-testid="faq-panel-{{ n }}" role="region" aria-labelledby="faq-{{ n }}-q" hidden>
+            {%- if n == 1 %}
+            <p>Each monthly statement has four parts:</p>
+            <ul>
+              <li><strong>Amount due</strong> and the due date, at the top of page 1.</li>
+              <li><strong>Usage</strong>: the kilowatt-hours (kWh) you used, compared with the same month last year.</li>
+              <li><strong>Charges</strong>: delivery, energy supply, and taxes and fees.</li>
+              <li><strong>Payments</strong> we received since your last statement.</li>
+            </ul>
+            <p>Your last 12 statements are on the <a href="/billing">Billing</a> page. Use the download button in a row to save that statement as a PDF.</p>
+            {%- elif n == 2 %}
+            <p>Go to <a href="/billing">Billing</a> and turn on the <strong>Autopay</strong> switch. We'll pay your full statement balance from {{ ACCOUNT.payment_method }} on each due date, and email you a receipt.</p>
+            <p>You can turn Autopay off at any time. Changes made before a due date apply to that bill.</p>
+            {%- elif n == 3 %}
+            <p>Open the <a href="/outages">Outage map</a> and select your district on the map. Tell us what's happening and submit. You'll get a reference number right away, and we'll text you when power is back.</p>
+            <p>Outages our crews are already working on are listed below the map.</p>
+            {%- elif n == 4 %}
+            <p>Go to <a href="/settings?tab=accessibility">Settings &gt; Accessibility</a>:</p>
+            <ul>
+              <li><strong>Text size</strong>: choose Small, Medium or Large. The whole portal rescales.</li>
+              <li><strong>High contrast</strong>: white text on black with yellow highlights.</li>
+              <li><strong>Reduce motion</strong>: turns off movement effects.</li>
+            </ul>
+            <p>Changes apply right away and are saved to your account.</p>
+            {%- elif n == 5 %}
+            <div class="faq-safety">
+              {{ icon('alert') }}
+              <p><strong>Stay at least 35 feet (10 meters) away and assume the line is live.</strong> If anyone is hurt or in danger, call 911. Then call our 24/7 emergency line at <strong class="nowrap">{{ EMERGENCY }}</strong>.</p>
+            </div>
+            <p>Don't touch the line or anything it's touching, such as a fence, car or puddle, and never try to move it. If a line falls on your car, stay inside until crews arrive. Please call rather than reporting a downed line online, so we can send a crew immediately.</p>
+            {%- elif n == 6 %}
+            <p>Go to <a href="/settings?tab=profile">Settings &gt; Profile</a>, edit your name, email or phone number, and save your changes.</p>
+            <p>We use your phone number for call-backs and outage texts, and your email for statements and receipts.</p>
+            {%- endif %}
+          </div>
+        </div>
+        {%- endfor %}
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="contact-title">
+      <div class="card-header">
+        <h2 id="contact-title">Contact us</h2>
+      </div>
+      <div class="card-body stack stack-lg">
+        <div class="contact-emergency">
+          <div>
+            <div class="contact-label">{{ icon('alert', '1.125rem') }}Emergency line, 24/7</div>
+            <div class="contact-number">{{ EMERGENCY }}</div>
+          </div>
+          <p>Downed power lines, sparking equipment or a gas smell. If anyone is in danger, call 911 first.</p>
+        </div>
+        <div class="contact-grid">
+          <div>
+            <div class="contact-label">{{ handset('1.125rem') }}Customer service</div>
+            <div class="contact-number">{{ SERVICE }}</div>
+            <p class="small muted">Billing, account and service questions. Online services are available around the clock.</p>
+          </div>
+          <div>
+            {%- set hours_rows = [
+              ('Monday–Friday', '7 AM–8 PM', weekday not in ('Saturday', 'Sunday')),
+              ('Saturday', '8 AM–5 PM', weekday == 'Saturday'),
+              ('Sunday', 'Closed', weekday == 'Sunday'),
+            ] %}
+            {%- set today_hours = (hours_rows|selectattr(2)|first)[1] %}
+            <div class="contact-label">{{ icon('clock', '1.125rem') }}Hours</div>
+            <p class="hours-today{% if today_hours == 'Closed' %} is-closed{% endif %}"><span class="dot"></span>{{ 'Closed today' if today_hours == 'Closed' else 'Open today, ' ~ today_hours }}</p>
+            <dl class="hours">
+              {%- for days, hours, is_today in hours_rows %}
+              <div class="hours-row{% if is_today %} is-today{% endif %}">
+                <dt>{{ days }}</dt>
+                <dd>{{ hours }}</dd>
+              </div>
+              {%- endfor %}
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="stack stack-lg">
+    <section class="card" aria-labelledby="callback-title">
+      <div class="card-header callback-header">
+        <span class="callback-badge">{{ handset('1.375rem') }}</span>
+        <div class="grow">
+          <h2 id="callback-title">Request a call back</h2>
+          <p>We'll call you within 1 business day.</p>
+        </div>
+      </div>
+      <form id="callback-form" novalidate>
+        <div class="card-body callback-body">
+          <div class="field">
+            <span class="label" id="callback-topic-label">What's it about?</span>
+            {{ ui.chips('callback-topic-', HELP_TOPICS.items(), None, attrs='id="callback-topic" aria-labelledby="callback-topic-label" aria-describedby="callback-topic-error"') }}
+            <p class="error" id="callback-topic-error" hidden>{{ icon('alert', '1rem') }}<span></span></p>
+          </div>
+
+          <div class="field">
+            <span class="label" id="callback-phone-label">We'll call you at</span>
+            <div class="callback-phone" role="group" aria-labelledby="callback-phone-label">
+              <span class="callback-phone-number">{{ state.settings.profile.phone }}</span>
+              <a class="small strong" href="/settings?tab=profile">Change number</a>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="callback-message">What should we call about?</label>
+            <textarea class="input" id="callback-message" data-testid="callback-message" rows="4" maxlength="500" aria-describedby="callback-message-hint callback-message-error" placeholder="For example: I have a question about my bill."></textarea>
+            <p class="hint" id="callback-message-hint">Up to 500 characters.</p>
+            <p class="error" id="callback-message-error" hidden>{{ icon('alert', '1rem') }}<span></span></p>
+          </div>
+        </div>
+        <div class="card-footer callback-footer">
+          <button type="submit" class="btn btn-primary btn-block" data-testid="callback-submit">{{ handset() }}Request call back</button>
+          <a class="callback-alt strong" href="/messages/compose">{{ icon('mail', '1.125rem') }}Send us a message instead</a>
+        </div>
+      </form>
+    </section>
+
+    {%- if requests %}
+    <section class="card callback-requests" aria-labelledby="requests-title">
+      <div class="card-header">
+        <h2 id="requests-title">Your call-back requests</h2>
+        <span class="muted small">{{ requests|length }} {{ 'request' if requests|length == 1 else 'requests' }}</span>
+      </div>
+      <ul class="list" data-testid="callback-list">
+        {%- for r in requests|reverse %}
+        <li class="list-row callback-row{% if loop.first %} is-highlighted{% endif %}">
+          <span class="callback-row-icon">{{ handset('1.125rem') }}</span>
+          <div class="grow">
+            <div class="callback-row-head"><span class="list-title">{{ HELP_TOPICS[r.topic] }}</span>{{ ui.badge('Call requested', 'info') }}</div>
+            <div class="list-meta">{{ r.reference }} &middot; {{ 'Today' if r.date == TODAY else fmt_date(r.date) }}</div>
+            <div class="list-meta truncate">&ldquo;{{ r.message }}&rdquo;</div>
+          </div>
+        </li>
+        {%- endfor %}
+      </ul>
+    </section>
+    {%- endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/help.js"></script>
+{% endblock %}

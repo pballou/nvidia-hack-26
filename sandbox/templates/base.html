@@ -1,0 +1,132 @@
+{#-
+  Page layout. Child templates: {% extends "base.html" %} and fill
+    title    (page name in <title>)
+    head     (page <style>)
+    content  (inside main > .container)
+    scripts  (page <script>, runs after /static/app.js so window.Acme exists)
+  topbar / sidenav / body_class / footer can be overridden (signed_out.html does).
+  Child blocks can also read the variables set below: a11y, collapsed, initials,
+  notifs, notif_unread, msg_unread. Import icons/macros in the child template itself.
+-#}
+{%- from "_icons.html" import icon -%}
+{%- set a11y = state.settings.accessibility -%}
+{%- set collapsed = state.ui.nav_collapsed -%}
+{%- set name_parts = state.settings.profile.name.split() -%}
+{%- set initials = ((name_parts[0][0] if name_parts else '') ~ (name_parts[-1][0] if name_parts|length > 1 else ''))|upper -%}
+{%- set notifs = state.notifications['items'] -%}
+{%- set notif_unread = notifs|rejectattr('read')|list|length -%}
+{%- set msg_unread = state.messages.inbox.values()|rejectattr('read')|list|length -%}
+{%- set NAV_ICONS = {'dashboard': 'home', 'billing': 'receipt', 'usage': 'chart', 'outages': 'map', 'messages': 'mail', 'settings': 'settings', 'help': 'help'} -%}
+<!doctype html>
+<html lang="en" class="text-{{ a11y.text_size }}{% if a11y.high_contrast %} hc{% endif %}{% if a11y.reduce_motion %} rm{% endif %}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Customer portal{% endblock %} | Acme Utilities</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/app.css">
+  {%- block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{{ 'nav-collapsed' if collapsed else 'has-nav' }}{% endblock %}">
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  {%- block topbar %}
+  <header class="topbar">
+    <div class="topbar-left">
+      {#- Deliberately unlabeled (UI rule 6). #}
+      <button type="button" class="icon-btn" data-testid="topbar-menu" data-act="nav.toggle" aria-controls="sidenav" aria-expanded="{{ 'false' if collapsed else 'true' }}">{{ icon('menu', '1.5rem') }}</button>
+      <a class="logo" href="/" data-testid="topbar-logo">
+        <span class="logo-mark">{{ icon('bolt', '1.25rem', 'icon-fill') }}</span>
+        <span class="logo-text">Acme Utilities</span>
+      </a>
+      <span class="logo-sub">Customer portal</span>
+    </div>
+    <div class="topbar-right">
+      <div class="dropdown">
+        <button type="button" class="icon-btn" data-testid="topbar-bell" data-dropdown="bell-menu" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
+          {{- icon('bell', '1.5rem') -}}
+          {%- if notif_unread %}<span class="count-badge">{{ notif_unread }}</span>{% endif -%}
+        </button>
+        <div class="dropdown-menu menu-wide" id="bell-menu" data-testid="bell-menu" hidden>
+          <div class="menu-header">
+            <strong>Notifications</strong>
+            <button type="button" class="btn btn-ghost btn-sm" data-testid="bell-mark-read" data-act="notifications.mark_read"{% if not notif_unread %} disabled{% endif %}>{{ icon('check-double', '1rem') }}Mark all as read</button>
+          </div>
+          <ul class="menu-list">
+            {%- for n in notifs %}
+            <li><a class="menu-item notif-item{% if not n.read %} is-unread{% endif %}" href="{{ n.href }}"><span class="dot{% if n.read %} dot-read{% endif %}"></span><span class="grow">{{ n.text }}</span></a></li>
+            {%- else %}
+            <li class="menu-empty">You're all caught up.</li>
+            {%- endfor %}
+          </ul>
+          <div class="menu-divider"></div>
+          <a class="menu-item" href="/settings?tab=notifications" data-testid="bell-settings-link">{{ icon('settings') }}Notification settings</a>
+        </div>
+      </div>
+      {#- Deliberately unlabeled (UI rule 6). #}
+      <a class="icon-btn" href="/settings" data-testid="topbar-settings">{{ icon('gear', '1.5rem') }}</a>
+      <a class="icon-btn" href="/help" data-testid="topbar-help" aria-label="Help">{{ icon('help', '1.5rem') }}</a>
+      <div class="dropdown">
+        <button type="button" class="avatar-btn" data-testid="topbar-avatar" data-dropdown="avatar-menu" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+          <span class="avatar">{{ initials }}</span>{{ icon('chevron-down', '1rem') }}
+        </button>
+        <div class="dropdown-menu" id="avatar-menu" data-testid="avatar-menu" hidden>
+          <div class="menu-account">
+            <span class="avatar avatar-lg">{{ initials }}</span>
+            <div>
+              <div class="menu-account-name">{{ state.settings.profile.name }}</div>
+              <div class="muted small">Account {{ ACCOUNT.number }}</div>
+            </div>
+          </div>
+          <div class="menu-divider"></div>
+          <a class="menu-item" href="/settings?tab=profile" data-testid="menu-profile">{{ icon('user') }}Profile</a>
+          <button type="button" class="menu-item" data-testid="menu-signout" data-act="session.sign_out" data-act-redirect="/">{{ icon('logout') }}Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+  {%- endblock %}
+
+  {%- block sidenav %}
+  {%- if not collapsed %}
+  <nav class="sidenav" id="sidenav" data-testid="sidenav" aria-label="Main">
+    <ul class="nav-list">
+      {%- for id, href, label in NAV %}
+      <li><a class="nav-item{% if nav == id %} is-active{% endif %}" href="{{ href }}" data-testid="nav-{{ id }}"{% if nav == id %} aria-current="page"{% endif %}>
+        {{- icon(NAV_ICONS[id]) }}<span class="grow">{{ label }}</span>
+        {%- if id == 'messages' and msg_unread %}<span class="badge badge-count">{{ msg_unread }}</span>{% endif -%}
+      </a></li>
+      {%- endfor %}
+    </ul>
+    <div class="sidenav-footer">
+      <div class="sidenav-label">Service address</div>
+      <div>{{ ACCOUNT.service_address }}</div>
+      <div class="muted">Account {{ ACCOUNT.number }}</div>
+    </div>
+  </nav>
+  {%- endif %}
+  {%- endblock %}
+
+  <main id="main" class="main" tabindex="-1">
+    <div class="container">
+      {%- block content %}{% endblock %}
+      {%- block footer %}
+      <footer class="site-footer">
+        <span>&copy; 2026 Acme Utilities</span>
+        <span>Downed power line or gas smell? Call <strong>1-800-555-0199</strong>, 24/7.</span>
+      </footer>
+      {%- endblock %}
+    </div>
+  </main>
+
+  <div class="toast" id="toast" data-testid="toast" role="status" aria-live="polite"{% if not flash %} hidden{% endif %}>
+    <span class="toast-icon toast-icon-ok">{{ icon('check-circle') }}</span>
+    <span class="toast-icon toast-icon-error">{{ icon('alert') }}</span>
+    <span class="toast-text">{{ flash or '' }}</span>
+    <button type="button" class="icon-btn toast-close" data-testid="toast-close" aria-label="Dismiss">{{ icon('x', '1.125rem') }}</button>
+  </div>
+
+  <script src="/static/app.js"></script>
+  {%- block scripts %}{% endblock %}
+</body>
+</html>
