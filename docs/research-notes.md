@@ -236,20 +236,24 @@ transformers 5.17.0 (vllm caps it below 5.18), TRL 1.16.0.
     rows is the clean fix.
   - Neither OS-Atlas nor any later paper documents this; it's our own finding,
     verified by two independent checks.
-- **Checked and not found: burned-in annotation boxes/text on Linux screenshots.**
-  A concern was raised that some Linux captures might have OS-Atlas's own
-  annotation overlay (box or `role: label` text) burned into the pixels, which
-  would teach the grounder to read printed labels it won't see in real use. We
-  looked for this twice and found no evidence:
-  - A pixel-level scan of 346 `linux` rows with `data_type == "label"` found no
-    saturated-color drawn border at the stored bbox edge.
-  - A scan of 50 Linux screenshots (25 with a `role: label` target, 25 random) for
-    saturated annotation-tool-style colors, with the 4 highest-scoring images
-    visually checked: all 4 were legitimate UI content (product thumbnails, a
-    shape gallery, icons, a reddish wallpaper gradient), not overlays.
-  - If a concrete example turns up later, `data_prep/sample_os_atlas.py
-    --exclude-ids <file>` (one `group` value per line) drops flagged screenshots
-    from both train and dev, mirroring `benchmarks/screenspot_v2/excluded_rows.json`.
+- **⚠ Confirmed: burned-in OS-Atlas annotation overlay on a narrow slice of
+  Linux screenshots.** A ~2024-09-11 16:43–16:45 capture window shows OS-Atlas's
+  own capture tool open (VS Code), with its accessibility-role labels rendered
+  directly into the file-explorer tree as red text (e.g. "push-button:
+  Firefox...", "tree-item: output_20240911...", "page-tab: record.py"). Training
+  on these would teach the grounder to read printed labels it won't see in real
+  use.
+  - **Two earlier manual checks missed this**: a pixel border check on 346
+    `data_type == "label"` rows, and a 50-image saturated-color scan (both too
+    small, or unlucky, to hit the ~2.6% of Linux images affected).
+  - **`data_prep/rewrite/overlay_scan.py` (T3) finds it reliably**: pure-red
+    pixel fraction > 0.2% at full resolution, scoped to `os_atlas/linux` (other
+    sources' hits were checked by eye and are legitimate red UI, not overlays).
+    On the 20k slice: **13 images, 98 rows**, all from that one capture window.
+  - **Action:** `data_prep/sample_os_atlas.py --exclude-ids <file>` (one `group`
+    value per line, built from `overlay_scan.py`'s `flagged` list) drops them from
+    both train and dev; log the dropped count and report it in the README and the
+    BLADE report, next to the Linux/macOS contamination finding above.
 - **Other sources look low-risk** (sampled, not exhaustive):
   - AndroidWorld, RICO, Widget Captioning, UIBert and SeeClick web.
   - Windows desktop (different resolution, Aug 2024 captures).
