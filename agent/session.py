@@ -95,19 +95,51 @@ class ToolOutcome:
 
 
 def validate_args(name: str, args: Any) -> tuple[dict | None, str | None]:
-    """Check tool arguments against agent/prompts.py's schema. Returns (clean_args, error)."""
+    """Check tool arguments against agent/prompts.py's schema. Returns (clean_args, error).
+
+    Errors are corrective messages for the model: vllm-metal doesn't enforce the schema, so
+    Lightning sometimes invents tool or argument names; tell it exactly what to send instead.
+    Keys are never renamed silently (that would hide the mistake from the validity metric).
+    """
     if name not in TOOL_NAMES:
-        return None, f"unknown tool {name!r}; available tools: {', '.join(TOOL_NAMES)}"
+        return None, (f"unknown tool {name!r}. The only tools are: "
+                      f"{'; '.join(tool_signature(n) for n in TOOL_NAMES)}. Call one of them.")
+    clean, err = _check_args(name, args)
+    if err:
+        return None, f"{err}. Expected {tool_signature(name)}. Call {name} again with exactly these argument names."
+    return clean, None
+
+
+def invalid_json_error(name: str, detail: str) -> str:
+    """Corrective message for tool-call arguments that are not a JSON object."""
+    expected = f" Expected {tool_signature(name)}." if name in TOOL_NAMES else ""
+    return f"invalid JSON arguments: {detail}.{expected} Call the tool again with a valid JSON object."
+
+
+def tool_signature(name: str) -> str:
+    """'click(target_description: string)'; optional args get a '?' and enums list their values."""
+    schema = tool_parameters(name)
+    parts = []
+    for key, spec in schema["properties"].items():
+        kind = "|".join(f'"{v}"' for v in spec["enum"]) if "enum" in spec else spec.get("type", "any")
+        parts.append(f"{key}{'' if key in schema.get('required', []) else '?'}: {kind}")
+    return f"{name}({', '.join(parts)})"
+
+
+def _check_args(name: str, args: Any) -> tuple[dict | None, str | None]:
     if not isinstance(args, dict):
         return None, f"arguments for {name} must be a JSON object"
     schema = tool_parameters(name)
     props, required = schema["properties"], schema.get("required", [])
-    missing = [k for k in required if k not in args or args[k] is None]
-    if missing:
-        return None, f"{name} is missing required argument(s): {', '.join(missing)}"
     unknown = [k for k in args if k not in props]
-    if unknown:
-        return None, f"{name} got unknown argument(s): {', '.join(unknown)}; allowed: {', '.join(props)}"
+    missing = [k for k in required if k not in args or args[k] is None]
+    if unknown or missing:
+        problems = []
+        if unknown:
+            problems.append(f"unknown argument(s) {', '.join(unknown)}")
+        if missing:
+            problems.append(f"missing required argument(s) {', '.join(missing)}")
+        return None, f"{name} got {' and '.join(problems)}"
     clean: dict = {}
     for key, value in args.items():
         spec = props[key]
@@ -119,6 +151,8 @@ def validate_args(name: str, args: Any) -> tuple[dict | None, str | None]:
             if "enum" in spec and value not in spec["enum"]:
                 return None, f"{name}.{key} must be one of {spec['enum']}, got {value!r}"
             if key != "text" and not value.strip():
+                if key not in required:  # schema-valid: an empty optional string means "not given"
+                    continue
                 return None, f"{name}.{key} must not be empty"
         elif spec.get("type") == "boolean":
             if isinstance(value, str) and value.lower() in ("true", "false"):
@@ -138,15 +172,34 @@ _KEY_ALIASES = {
 }
 
 
+_MODIFIERS = {"ctrl": "Control", "control": "Control", "cmd": "Meta", "command": "Meta", "meta": "Meta",
+              "super": "Meta", "win": "Meta", "alt": "Alt", "option": "Alt", "opt": "Alt", "shift": "Shift"}
+# Select all / copy / paste / cut / undo / redo: the model writes Ctrl or Cmd for the same intent, but
+# Chromium on macOS binds them to Meta (Control+A moves to the line start there). Playwright's
+# ControlOrMeta is Meta on macOS and Control elsewhere.
+_EDIT_SHORTCUT_KEYS = frozenset("acvxyz")
+
+
 def normalize_key(key: str) -> str:
-    """'enter' -> 'Enter', 'ctrl+a' -> 'Control+a'; anything else passes through to Playwright."""
+    """'enter' -> 'Enter', 'ctrl+a' / 'cmd+a' -> 'ControlOrMeta+a', 'ctrl+enter' -> 'Control+Enter'.
+
+    Anything else passes through to Playwright (unknown names raise there).
+    """
     k = key.strip()
     if "+" in k and len(k) > 1:
-        mods = {"ctrl": "Control", "control": "Control", "cmd": "Meta", "meta": "Meta", "alt": "Alt",
-                "option": "Alt", "shift": "Shift"}
         parts = [p.strip() for p in k.split("+")]
-        return "+".join([mods.get(p.lower(), p) for p in parts[:-1]] + [_KEY_ALIASES.get(parts[-1].lower(), parts[-1])])
+        mods = [_MODIFIERS.get(p.lower(), p) for p in parts[:-1]]
+        last = _KEY_ALIASES.get(parts[-1].lower(), parts[-1])
+        if last.lower() in _EDIT_SHORTCUT_KEYS:
+            mods = ["ControlOrMeta" if m in ("Control", "Meta") else m for m in mods]
+        return "+".join(mods + [last])
     return _KEY_ALIASES.get(k.lower(), k)
+
+
+def _brief(e: BaseException) -> str:
+    """'TimeoutError: Timeout 15000ms exceeded.' (first line only: Playwright appends a call log)."""
+    lines = str(e).strip().splitlines()
+    return f"{type(e).__name__}: {lines[0][:200]}" if lines else type(e).__name__
 
 
 def _ms(t0: float) -> float:
@@ -215,16 +268,17 @@ class AgentSession:
             return ToolOutcome(name=name, args=clean, ok=True, observation=obs, done=True)
         try:
             return await self._act(name, clean)
-        except Exception as e:  # browser died, navigation crashed, ...
-            return await self._failed(name, clean, f"{name} failed: {type(e).__name__}: {e}")
+        except Exception as e:  # browser died, navigation crashed, ...: describe the screen as it is now
+            return await self._failed(name, clean, _brief(e), observe=True)
 
     async def _act(self, name: str, args: dict) -> ToolOutcome:
         timings: dict[str, float] = {}
-        before = self.last_screenshot
-        if before is None:
-            t0 = time.perf_counter()
-            before = await self.browser.screenshot()
-            timings["screenshot"] = _ms(t0)
+        # The live screen, not the last observation's screenshot: the page may have moved on while
+        # Lightning planned (a toast faded, content loaded), so the click point and the change check
+        # both use the screen as it is now.
+        t0 = time.perf_counter()
+        before = await self.browser.screenshot()
+        timings["screenshot"] = _ms(t0)
         click = None
         target = args.get("target_description")
         if name == "click" or (name == "type_text" and target):
@@ -238,6 +292,8 @@ class AgentSession:
                 return await self._failed(name, args, f"could not locate {target!r}: {click['error']}",
                                           click=click, before=before, timings=timings, observe=False)
 
+        baseline = before  # what the result is compared with for screen_changed
+        shot_ms = 0.0
         t0 = time.perf_counter()
         if name == "click":
             await self.browser.click(click["x"], click["y"])
@@ -248,6 +304,11 @@ class AgentSession:
                 await self.browser.click(click["x"], click["y"])
                 self.n_clicks += 1
                 await self.browser.select_all()
+                # Judge the typing, not the click: when the click misses the field, select-all
+                # highlights the whole page, which alone would count as a change.
+                t1 = time.perf_counter()
+                baseline = await self.browser.screenshot()
+                shot_ms = _ms(t1)
             await self.browser.type(args["text"])
             result = f'typed "{args["text"][:80]}"' + (f' into "{target}"' if target else "")
         elif name == "press_key":
@@ -257,25 +318,52 @@ class AgentSession:
         else:  # scroll
             await self.browser.scroll(args["direction"], args["amount"])
             result = f"scrolled {args['direction']} ({args['amount']})"
-        timings["act"] = _ms(t0)
+        timings["act"] = _ms(t0) - shot_ms
+        timings["screenshot"] += shot_ms
         self.n_actions += 1
 
-        t0 = time.perf_counter()
-        await self.browser.settle()
-        timings["settle"] = _ms(t0)
-        t0 = time.perf_counter()
-        after = await self.browser.screenshot()
-        timings["screenshot"] = timings.get("screenshot", 0.0) + _ms(t0)
-        changed = self.browser.screen_changed(before, after)
-        obs, after, obs_t = await self.observe(result, changed, img=after)
+        try:
+            t0 = time.perf_counter()
+            await self.browser.settle()
+            timings["settle"] = _ms(t0)
+            t0 = time.perf_counter()
+            after = await self.browser.screenshot()
+            timings["screenshot"] += _ms(t0)
+            changed = self.browser.screen_changed(baseline, after)
+            if name == "type_text" and click and args["text"] and not changed:
+                result += ", but the text did not appear (the click probably missed the field)"
+            obs, after, obs_t = await self.observe(result, changed, img=after)
+        except Exception as e:  # the action ran; only capturing its result failed
+            return await self._uncaptured(name, args, result, e, click=click, before=before, timings=timings)
         timings.update({k: v for k, v in obs_t.items() if k != "screenshot"})
         return ToolOutcome(name=name, args=args, ok=True, observation=obs, click=click, screen_changed=changed,
                            before=before, after=after, timings_ms=timings)
 
+    async def _uncaptured(self, name: str, args: dict, result: str, exc: Exception, *, click: dict | None,
+                          before: Image.Image, timings: dict) -> ToolOutcome:
+        """The action ran, but settling or the screenshot after it raised (e.g. mid-navigation).
+
+        Not reported as failed: the model would repeat an action that already happened (and
+        flip a toggle back). The screen is described afresh if it can be captured now.
+        """
+        self.last_screenshot = None
+        note = f"{result}; the screen could not be captured right after it ({_brief(exc)})"
+        try:
+            obs, _, t = await self.observe(note, None)
+            timings["screenshot"] += t.pop("screenshot", 0.0)
+            timings.update(t)
+        except Exception as e:
+            obs = build_observation(step=self.step, url="", title="", screen_changed=None, last_action_result=note,
+                                    screen_summary=f"(screen unavailable: {_brief(e)})")
+            self.last_observation = obs
+        return ToolOutcome(name=name, args=args, ok=True, observation=obs, click=click, screen_changed=None,
+                           before=before, after=self.last_screenshot, timings_ms=timings)
+
     async def _failed(self, name: str, args: dict, error: str, *, click: dict | None = None,
                       before: Image.Image | None = None, timings: dict | None = None,
                       observe: bool = False) -> ToolOutcome:
-        """ok=False outcome. The screen is unchanged by a failed call, so the last description is reused."""
+        """ok=False outcome. Nothing ran, so the last description is reused unless `observe` (a
+        browser error, after which the screen may have changed anyway) asks for a fresh one."""
         self.n_failed += 1
         timings = dict(timings or {})
         prev = self.last_observation
@@ -284,9 +372,11 @@ class AgentSession:
                 obs, img, t = await self.observe(f"{name} failed: {error}", None)
                 timings.update(t)
             except Exception as e:
+                self.last_screenshot = None  # stale now
                 obs = build_observation(step=self.step, url="", title="", screen_changed=None,
                                         last_action_result=f"{name} failed: {error}",
-                                        screen_summary=f"(screen unavailable: {type(e).__name__})")
+                                        screen_summary=f"(screen unavailable: {_brief(e)})")
+                self.last_observation = obs
         else:
             obs = build_observation(step=self.step, url=prev.url, title=prev.title, screen_changed=None,
                                     last_action_result=f"{name} failed: {error}", screen_summary=prev.screen_summary)

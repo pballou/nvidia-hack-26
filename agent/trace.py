@@ -6,14 +6,18 @@ Trace layout (gitignored):
   runs/<run_id>/step_XX_overlay.png the screenshot the grounder saw for step XX's click,
                                     with a crosshair at the click, the target text and the step
 
-Event payloads by kind (all JSON-serializable; see agent/README.md):
-  start        {request, start_url, config}
+Event payloads by kind (all JSON-serializable; done-event stats are documented in agent/core.py):
+  start        {request, start_url, config}  (config.lightning.root: the checkpoint the endpoint
+               reports serving, or null + server_error)
   observation  {observation: {step, url, title, screen_changed, last_action_result, screen_summary}, text}
-  plan         {content, reasoning, thinking, tool_calls: [{name, arguments}], usage?}
-  tool_call    {name, arguments, valid, error?, description}
+               (no screenshot_path when the screen could not be captured)
+  plan         {content, reasoning, thinking, tool_calls: [{name, arguments}], usage?, finish_reason?, wait_ms?}
+  tool_call    {name, arguments, valid, error?, description, from_content?}
+               (valid=false: rejected by schema validation; nothing is executed, so no
+               grounding/action/observation event follows for that step)
   grounding    {target, x, y, point_1000, raw, model, error?}
   action       {name, arguments, ok, error?, screen_changed, click?: {x, y}, done?}
-  error        {message, where, recoverable}
+  error        {message, where, recoverable, finish_reason?}
   done         {success_claimed, summary, steps, reason: done|max_steps|stopped|error, stats}
 """
 

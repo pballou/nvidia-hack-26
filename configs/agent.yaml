@@ -20,8 +20,9 @@ runs_dir: runs
 lightning_presets:
   hosted: {base_url: https://integrate.api.nvidia.com/v1, model: nvidia/nemotron-3.5-lightning-30b-a3b, api_key_env: NVIDIA_API_KEY}
   local: {base_url: http://127.0.0.1:8000/v1, model: lightning, api_key_env: null}
-# Lightning model card values. No speculative decoding anywhere (AGENTS.md).
-sampling: {temperature: 1.0, top_p: 0.95, max_tokens: 1024}
+# Lightning model card values. No speculative decoding anywhere (AGENTS.md). Reasoning tokens count
+# against max_tokens, so thinking calls (thinking: on, or a retry) get the larger thinking_max_tokens.
+sampling: {temperature: 1.0, top_p: 0.95, max_tokens: 1024, thinking_max_tokens: 4096}
 timeouts: {lightning_s: 180, vlm_s: 45, navigation_s: 15}
 history_full_steps: 6       # last N step exchanges kept verbatim; older ones become one-liners
 browser: {headless: true, locale: en-US, timezone_id: America/New_York, settle_ms: 350, network_idle_ms: 2500}

@@ -12,6 +12,9 @@ Env vars (all optional):
 
 Secrets never live in the yaml: `lightning.api_key_env` names the env var that holds
 the key (NVIDIA_API_KEY for hosted). If it isn't exported, the repo's .env is read.
+
+An explicit config path (argument or AGENT_CONFIG) must exist; only the implicit default
+may be missing, and then the dataclass defaults apply.
 """
 
 from __future__ import annotations
@@ -23,6 +26,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from agent.prompts import PROMPT_VERSION
+from common.grounding import FAMILIES
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "agent.yaml"
@@ -77,6 +83,8 @@ class Sampling:
     temperature: float = 1.0
     top_p: float = 0.95
     max_tokens: int = 1024
+    # vLLM counts reasoning tokens against max_tokens, so thinking calls get their own cap.
+    thinking_max_tokens: int = 4096
 
 
 @dataclass(frozen=True)
@@ -111,26 +119,42 @@ class AgentConfig:
     sampling: Sampling = field(default_factory=Sampling)
     timeouts: Timeouts = field(default_factory=Timeouts)
     history_full_steps: int = 6
+    # Interactive planner only: "required" (done() is always available to end the loop).
+    # The Gym rows keep "auto", since simple_agent stops only on a reply without a tool call.
+    tool_choice: str = "required"
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     # Test-only DOM oracle instead of the VLM (agent/testing/oracle_grounder.py). It
     # refuses to run outside pytest or the --use-oracle-grounder debug flag.
     use_oracle_grounder: bool = False
 
     def __post_init__(self):
+        if isinstance(self.thinking, bool):  # YAML 1.1 reads a bare `thinking: off` as False
+            object.__setattr__(self, "thinking", "on" if self.thinking else "off")
         if self.grounder_model not in SERVED_NAMES:
             raise ValueError(f"grounder_model must be one of {SERVED_NAMES}, got {self.grounder_model!r}")
         if self.summary_model not in SERVED_NAMES:
             raise ValueError(f"summary_model must be one of {SERVED_NAMES}, got {self.summary_model!r}")
         if self.thinking not in THINKING_MODES:
             raise ValueError(f"thinking must be one of {THINKING_MODES}, got {self.thinking!r}")
+        if self.model_family not in FAMILIES:
+            raise ValueError(f"model_family must be one of {FAMILIES}, got {self.model_family!r}")
         if self.max_steps < 1:
             raise ValueError("max_steps must be >= 1")
+        if self.tool_choice not in ("auto", "required"):
+            raise ValueError(f"tool_choice must be 'auto' or 'required', got {self.tool_choice!r}")
 
     def with_options(self, **changes: Any) -> "AgentConfig":
         """Copy with changes, e.g. with_options(grounder_model="grounder", thinking="off", lightning="local").
 
         `lightning` may be a preset name ("hosted" | "local"), a dict, or a LightningConfig.
+        Nested fields take a dict or a dotted key: browser={"headless": False} == **{"browser.headless": False}.
         """
+        for key in [k for k in changes if "." in k]:
+            top, sub = key.split(".", 1)
+            nested = changes.setdefault(top, {})
+            if not isinstance(nested, dict):
+                raise ValueError(f"can't combine {key!r} with a non-dict {top!r}")
+            nested[sub] = changes.pop(key)
         if "lightning" in changes:
             changes["lightning"] = self._resolve_lightning(changes["lightning"])
         for key in ("vlm", "viewport", "sampling", "timeouts", "browser"):
@@ -153,7 +177,8 @@ class AgentConfig:
         return p if p.is_absolute() else REPO_ROOT / p
 
     def public_dict(self) -> dict:
-        """JSON-safe summary for traces and events (no secrets)."""
+        """JSON-safe summary for traces and events (no secrets). Which checkpoint the Lightning
+        endpoint actually serves is not config: agent/core.py adds it to the start event."""
         return {
             "sandbox_url": self.sandbox_url,
             "lightning": {"base_url": self.lightning.base_url, "model": self.lightning.model},
@@ -163,6 +188,11 @@ class AgentConfig:
             "model_family": self.model_family,
             "max_steps": self.max_steps,
             "thinking": self.thinking,
+            "prompt_version": PROMPT_VERSION,
+            "sampling": dataclasses.asdict(self.sampling),
+            "history_full_steps": self.history_full_steps,
+            "tool_choice": self.tool_choice,
+            "timeouts": dataclasses.asdict(self.timeouts),
             "viewport": dataclasses.asdict(self.viewport),
             "use_oracle_grounder": self.use_oracle_grounder,
         }
@@ -182,7 +212,11 @@ def _read_dotenv(path: Path = REPO_ROOT / ".env") -> dict[str, str]:
         if line.startswith("export "):
             line = line[len("export "):]
         key, _, value = line.partition("=")
-        value = value.split(" #", 1)[0].strip().strip("'\"")
+        value = value.strip()
+        if value[:1] in ("'", '"') and value[0] in value[1:]:
+            value = value[1:value.index(value[0], 1)]
+        else:  # unquoted: like the shell, stop at whitespace (drops inline comments)
+            value = value.split(None, 1)[0] if value else ""
         if value:
             out[key.strip()] = value
     return out
@@ -241,7 +275,10 @@ def load_config(path: str | Path | None = None, overrides: dict[str, Any] | None
                 env: dict[str, str] | None = None) -> AgentConfig:
     """Build AgentConfig from yaml + env vars + explicit overrides (see module docstring)."""
     env = dict(os.environ if env is None else env)
-    path = Path(path or env.get("AGENT_CONFIG") or DEFAULT_CONFIG_PATH)
+    explicit = path or env.get("AGENT_CONFIG")
+    path = Path(explicit or DEFAULT_CONFIG_PATH)
+    if explicit and not path.exists():  # a typo must not silently fall back to other endpoints
+        raise FileNotFoundError(f"agent config {path} does not exist")
     raw = yaml.safe_load(path.read_text()) if path.exists() else {}
     cfg = _from_dict(raw)
 

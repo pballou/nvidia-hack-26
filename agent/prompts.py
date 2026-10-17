@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import copy
 
-PROMPT_VERSION = "agent-v1"
+PROMPT_VERSION = "agent-v2"
 
 TOOL_NAMES = ("click", "type_text", "press_key", "scroll", "done")
 
@@ -21,7 +21,8 @@ _TARGET_HELP = (
     "would point it out: its visible text or icon, its type, and where it is. Examples: "
     "\"the gear icon in the top-right toolbar\", \"the Download button in the September row\", "
     "\"the High contrast toggle\", \"the Riverside district on the map\". Use the words from the "
-    "screen description; never use coordinates, CSS selectors or element ids."
+    "screen description, written as a phrase like these examples (not in its \"type: text @ location\" "
+    "line format); never use coordinates, CSS selectors or element ids."
 )
 
 # Chat-completions tool format ({"type": "function", "function": {...}}).
@@ -123,18 +124,22 @@ of the visible screen written by a vision model. You act only through the tools;
 model finds the element you describe and clicks it.
 
 How to work:
-- Take exactly one action per turn, then read the new observation.
+- Every reply is exactly one tool call, never plain text. Then read the new observation.
 - Describe click targets the way you would point them out to a sighted helper: visible \
 text or icon, element type, and position, e.g. "the gear icon in the top-right toolbar". \
-Use the words from the screen description.
+Use the words from the screen description, but as a natural phrase: the line \
+"- button: Save @ bottom-right" becomes "the Save button at the bottom right". Never copy \
+the "@" notation.
+- Use exactly the argument names of each tool, e.g. click(target_description=...).
 - Icons often have no text; describe their shape and location ("the bell icon", "the \
 star next to the message from the landlord").
 - If the screen did not change after a click, the click probably missed: describe the \
 target differently (more specific, add its position) or try another way.
 - If what you need is not visible, open the menu, tab or page where it likely is, or scroll.
 - Do only what the user asked. Don't change other settings or submit things they didn't ask for.
-- When the observation shows the request is done, call done(summary, success=true). If it \
-is impossible, call done with success=false and say why. After done, call no more tools."""
+- When the observation shows the request is done, call done(summary, success=true); don't \
+just say so in text. If it is impossible, call done with success=false and say why. After \
+done, call no more tools."""
 
 
 def initial_user_message(request: str, observation_text: str) -> str:
