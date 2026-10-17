@@ -21,8 +21,10 @@ a user describes what they want, and the agent does it from pixels alone.
 - **Deadline:** everything, including the demo video, is due **Sunday 2026-10-18,
   11:00am EDT**.
   - SFT is done by Saturday evening.
-  - GRPO runs in the overnight loop (`training/night_loop.py` defaults): no round starts
-    after 01:30, no new GRPO step after 02:40, hard end 02:50 Sunday EDT.
+  - GRPO runs in the overnight loop (`training/night_loop.py`). Tonight's run uses extended
+    limits (decided Sat 19:20): `--last-round-start 04:15 --no-new-step 05:25 --hard-end 05:40`
+    (EDT), max 3 rounds. The instance is stopped as soon as `FINAL.json` exists, and by 6:00 at
+    the latest.
   - Sunday morning is only evals, the demo and publishing.
 - **Parameter budget:** ≤ 33B total across *all* generative models in the system,
   including any used for verification, critique, routing, or speculative decoding

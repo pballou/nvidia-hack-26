@@ -1,6 +1,6 @@
 # B-night: automatic Gym improvement loop (overnight)
 
-**Owner:** Kyle (stream B). **Runs:** ~8pm Sat → **hard end 02:50 Sun (EDT)**. `training/night_loop.py` defaults are authoritative: `--last-round-start 01:30`, no new GRPO step after 02:40, `--hard-end 02:50`.
+**Owner:** Kyle (stream B). **Runs:** ~8pm Sat → done whenever 3 rounds (or a stop rule) finish. **Tonight's flags (decided Sat 19:20, so a slow round isn't cut short):** `--last-round-start 04:15 --no-new-step 05:25 --hard-end 05:40`. The code defaults are 01:30 / 02:40 / 02:50. The orchestrator stops the instance as soon as `FINAL.json` exists, and by 6:00 at the latest.
 **Read first:** `AGENTS.md`, `docs/research-notes.md` §3–4 (Gym 0.7.0 gotchas, TRL
 notes), and `docs/gpu-box.md`.
 
@@ -68,7 +68,7 @@ Work dir `/home/ubuntu/night/round_<r>/`. Each round:
 
 **Stop rules:** stop on whichever comes first:
 - 3 rounds;
-- **the clock**: no round starts after 01:30, no new GRPO step after 02:40, and everything ends by 02:50;
+- **the clock** (tonight's flags): no round starts after 04:15, no new GRPO step after 05:25, and everything ends by 05:40;
 - no dev improvement;
 - the `STOP` file;
 - GRPO smoke fails gate D2. In that case, run **one rejection-sampled SFT round**
@@ -80,8 +80,9 @@ Work dir `/home/ubuntu/night/round_<r>/`. Each round:
   and the demo use it.
 - Write `/home/ubuntu/night/FINAL.json` (`best_round`, `adapter path`, dev table).
 - Stop the training processes. Leave only the `:8001` server.
-- **Don't stop the instance.** The orchestrator runs `brev stop` at ~3:15am once
-  `FINAL.json` exists.
+- **Don't stop the instance.** The orchestrator copies the summaries and the best adapter to
+  Patrick's Mac and runs `brev stop` as soon as `FINAL.json` exists (6:00 at the latest).
+  It runs `brev start` at ~7:00 Sunday and re-serves `:8001` with `scripts/serve_vlm.sh`.
 
 ## `knobs.json` (the only thing BLADE may change)
 
@@ -126,4 +127,4 @@ Work dir `/home/ubuntu/night/round_<r>/`. Each round:
 - [ ] The loop runs at least one full round unattended, with Gym artifacts per round
       (profile, pool, rollouts, compare report, `summary.json`).
 - [ ] `FINAL.json` exists, the best adapter is served on `:8001` as `grounder`, and
-      training processes are stopped by 02:50.
+      training processes are stopped by the hard end (05:40 tonight).
