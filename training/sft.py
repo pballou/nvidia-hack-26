@@ -13,6 +13,9 @@
   and the processor is capped at the same MAX_PIXELS, so nothing is resized twice.
 - Before training, the rendered prompt is checked against the serving-side generation
   prompt (the same chat-template call vLLM makes), so train and serve can't drift.
+- Rejection-sampled SFT (the night loop's GRPO fallback): rows carry a `target` reply
+  (a reward=1 rollout), `--init-adapter` continues the current LoRA, and `--image-root`
+  points image_path at the manifest directory when the train file lives elsewhere.
 """
 
 import argparse
@@ -26,6 +29,7 @@ from pathlib import Path
 
 import torch
 from datasets import Dataset, Image, List
+from peft import PeftModel
 from transformers import AutoModelForImageTextToText, AutoProcessor, TrainerCallback
 from trl import SFTConfig, SFTTrainer
 from trl.data_utils import apply_chat_template, prepare_multimodal_messages
@@ -49,6 +53,9 @@ def load_rows(manifest: Path, limit: int | None, seed: int) -> list[dict]:
 
 
 def target_text(row: dict) -> str:
+    if "target" in row:  # rejection-sampled SFT: the model's own reward=1 reply (training/night_loop.py)
+        assert grounding.parse_point(row["target"]) is not None, row["target"]
+        return row["target"]
     x1, y1, x2, y2 = row["bbox"]
     x, y = grounding.to_grid(((x1 + x2) / 2, (y1 + y2) / 2), row["img_w"], row["img_h"])
     pt = [min(1000, max(0, round(x))), min(1000, max(0, round(y)))]
@@ -116,13 +123,16 @@ def main():
     ap.add_argument("--save-steps", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-linear-attn", action="store_true", help="Qwen3.5 fallback LoRA targets")
+    ap.add_argument("--init-adapter", type=Path, help="continue training this LoRA adapter instead of a fresh one")
+    ap.add_argument("--image-root", type=Path, help="directory image_path is relative to (default: the train file's)")
     args = ap.parse_args()
+    image_root = args.image_root or args.train.parent
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "args.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()}, indent=2))
 
     rows = load_rows(args.train, args.limit, args.seed)
     t0 = time.perf_counter()
-    cached = preresize({r["image_path"] for r in rows}, args.train.parent, args.cache, args.max_pixels)
+    cached = preresize({r["image_path"] for r in rows}, image_root, args.cache, args.max_pixels)
     print(f"{len(rows)} rows, {len(cached)} screenshots pre-resized in {time.perf_counter() - t0:.0f}s", flush=True)
     ds = build_dataset(rows, cached, args.model)
 
@@ -155,13 +165,17 @@ def main():
         seed=args.seed,
     )
     model = AutoModelForImageTextToText.from_pretrained(model_id, dtype=torch.bfloat16)
+    peft_config = lora_config(args.model, linear_attn=not args.no_linear_attn)
+    if args.init_adapter:
+        model = PeftModel.from_pretrained(model, str(args.init_adapter), is_trainable=True)
+        peft_config = None
     timer = StepTimer()
     trainer = SFTTrainer(
         model=model,
         args=config,
         train_dataset=ds,
         processing_class=processor,
-        peft_config=lora_config(args.model, linear_attn=not args.no_linear_attn),
+        peft_config=peft_config,
         callbacks=[timer],
     )
     torch.cuda.reset_peak_memory_stats()
