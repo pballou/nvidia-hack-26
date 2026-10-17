@@ -16,6 +16,7 @@ Lightning, the real sandbox, and grounder choices made on the dev split.
 | Qwen3.5-2B base | 76.4% | **86.3%** (icon 78.1, text 92.5) | Kyle, `gui_grounding` Gym env |
 | Pilot SFT (2k rows raw labels, 5 min) | **81.3%** (+5.0) | — | Every source improved; Linux +11.9, FineWeb +2.2. Answer length 37.6 → 16.7 tokens. |
 | **SFT template** (all 18,652 raw-label train rows, 1 epoch, LoRA r16) | **85.66%** (+9.3) | **89.07%** (+2.8; mobile 92.2 / desktop 89.5 / web 85.1; text 92.3 / **icon 84.8, +6.7**) | Kyle 17:31. The Lightning variant is next (ablation). |
+| Night-loop rehearsal, GRPO round 1 (pool 111 sometimes-pass rows, 30 steps, from SFT template) | **86.69%** (+0.83 vs 85.86 in the same harness) | — | Kyle 17:36–17:50, `/home/ubuntu/night_rehearsal`. Tiny rehearsal, but it clears the +0.5 keep gate. The template adapter re-evaluated at 85.86 vs 85.66 earlier: ~0.2 pt run-to-run noise on dev. A second rehearsal forced a D2 failure to test the rejection-sampled SFT fallback; it works. |
 | Gate D2 GRPO smoke (20 steps) | — | — | **Pass: 31.9 s/step**, 960 `/verify` calls with 0 failures, reward 0.75 → 0.79 |
 | Gate D1 comparison (OS-Atlas sample n=500, pre-cleanup) | Qwen3-VL-2B 80.6 vs Qwen3.5-2B 79.8 | — | `eval_results/qwen3vl_vs_qwen35_osatlas500.csv`. Qwen3.5 +7.0 on desktop. |
 
@@ -76,6 +77,14 @@ First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
   grounder (tonight, once :8001 serves `grounder`).
 
 ## Lightning data engine (T3) audit
+
+- **Delivered 18:19 to the box:** `train_lightning.jsonl` and `train_template.jsonl`, 18,299 rows
+  each, identical row sets and order (sha256 in `/home/ubuntu/data/os_atlas_20k/train_files.READY.json`).
+  9,384 rewrite targets: 8,620 kept rewritten, 411 model drops kept with raw labels, 353 removed by
+  the numeric rule. Rewrites by endpoint: hosted 8,028, local official BF16 (Mac) 1,003. Record:
+  `data_prep/rewrite/runs/os_atlas_final_v4/` (5b9bf25).
+- **Ablation caveat:** the existing `sft-template` adapter trained on 18,652 rows (353 more than
+  these files).
 
 - **Prompt v4, hosted Lightning, 50 kept + 16 dropped rows (Patrick, 2026-10-17):**
   - Rewrite faithfulness **42/43 = 97.7%** of the cards he could verify (6 unsure,
