@@ -1,0 +1,158 @@
+[
+  {
+    "id": "text-size-large",
+    "request": "Make the text bigger, I can't read this.",
+    "start_path": "/settings?tab=accessibility",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "settings.accessibility.text_size", "op": "eq", "value": "L"}
+    ]},
+    "steps_min": 1,
+    "tags": ["easy", "settings"]
+  },
+  {
+    "id": "download-september-statement",
+    "request": "Download my September statement.",
+    "start_path": "/billing",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "billing.downloaded", "op": "eq", "value": ["2026-09"]}
+    ]},
+    "steps_min": 1,
+    "tags": ["easy", "billing", "icon_only"]
+  },
+  {
+    "id": "mark-all-read",
+    "request": "Mark all my messages as read.",
+    "start_path": "/messages",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "messages.inbox.msg-outage-hillcrest.read", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-statement-sep.read", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-autopay-promo.read", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-tree-trimming.read", "op": "eq", "value": true}
+    ]},
+    "steps_min": 1,
+    "tags": ["easy", "messages", "icon_only"]
+  },
+  {
+    "id": "turn-on-autopay",
+    "request": "I keep forgetting to pay. Turn on autopay.",
+    "start_path": "/billing",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "billing.autopay", "op": "eq", "value": true},
+      {"path": "billing.payments.0", "op": "exists", "value": false}
+    ]},
+    "steps_min": 1,
+    "tags": ["easy", "billing"]
+  },
+  {
+    "id": "high-contrast",
+    "request": "Turn on high contrast.",
+    "start_path": "/",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "settings.accessibility.high_contrast", "op": "eq", "value": true},
+      {"path": "settings.accessibility.reduce_motion", "op": "eq", "value": false},
+      {"path": "settings.accessibility.text_size", "op": "eq", "value": "M"}
+    ]},
+    "steps_min": 3,
+    "tags": ["medium", "settings", "icon_only"]
+  },
+  {
+    "id": "sms-billing-off",
+    "request": "Turn off SMS for billing alerts.",
+    "start_path": "/settings",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "settings.notifications.billing.sms", "op": "eq", "value": false},
+      {"path": "settings.notifications.billing.email", "op": "eq", "value": true},
+      {"path": "settings.notifications.billing.push", "op": "eq", "value": false},
+      {"path": "settings.notifications.payments.sms", "op": "eq", "value": false},
+      {"path": "settings.notifications.outages.sms", "op": "eq", "value": true}
+    ]},
+    "steps_min": 2,
+    "tags": ["medium", "settings"]
+  },
+  {
+    "id": "max-usage-month",
+    "request": "Which month did I use the most power? Open it.",
+    "start_path": "/",
+    "initial_state_overrides": {"ui.nav_collapsed": true},
+    "check": {"all": [
+      {"path": "usage.selected_month", "op": "eq", "value": "2026-07"}
+    ]},
+    "steps_min": 3,
+    "tags": ["medium", "usage", "canvas", "icon_only"]
+  },
+  {
+    "id": "report-outage-riverside",
+    "request": "Report an outage in the Riverside district.",
+    "start_path": "/outages",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "outages.reports.0.district", "op": "eq", "value": "riverside"},
+      {"path": "outages.reports.1", "op": "exists", "value": false}
+    ]},
+    "steps_min": 2,
+    "tags": ["medium", "outages", "canvas"]
+  },
+  {
+    "id": "star-landlord-message",
+    "request": "Star the message from the landlord.",
+    "start_path": "/messages",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "messages.inbox.msg-landlord.starred", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-support-reply.starred", "op": "eq", "value": true},
+      {"path": "messages.inbox.msg-heat-advisory.starred", "op": "eq", "value": false},
+      {"path": "messages.inbox.msg-paperless.starred", "op": "eq", "value": false}
+    ]},
+    "steps_min": 2,
+    "tags": ["medium", "messages", "icon_only", "scroll"]
+  },
+  {
+    "id": "pay-50",
+    "request": "Pay $50 toward my bill.",
+    "start_path": "/",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "billing.payments.0.amount_cents", "op": "eq", "value": 5000},
+      {"path": "billing.payments.1", "op": "exists", "value": false},
+      {"path": "billing.balance_cents", "op": "eq", "value": 9237}
+    ]},
+    "steps_min": 5,
+    "tags": ["hard", "billing"]
+  },
+  {
+    "id": "message-support-meter",
+    "request": "Send a message to support saying my meter is broken.",
+    "start_path": "/",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "messages.sent.0.to", "op": "eq", "value": "support"},
+      {"path": "messages.sent.0.body", "op": "contains", "value": "meter"},
+      {"path": "messages.sent.0.body", "op": "contains", "value": "broken"},
+      {"path": "messages.sent.1", "op": "exists", "value": false}
+    ]},
+    "steps_min": 6,
+    "tags": ["hard", "messages"]
+  },
+  {
+    "id": "stop-promotions",
+    "request": "Stop sending me promotions. No emails, no texts, no push notifications.",
+    "start_path": "/",
+    "initial_state_overrides": {},
+    "check": {"all": [
+      {"path": "settings.notifications.promotions.email", "op": "eq", "value": false},
+      {"path": "settings.notifications.promotions.sms", "op": "eq", "value": false},
+      {"path": "settings.notifications.promotions.push", "op": "eq", "value": false},
+      {"path": "settings.notifications.surveys.email", "op": "eq", "value": true},
+      {"path": "settings.notifications.billing.sms", "op": "eq", "value": true},
+      {"path": "settings.notifications.outages.push", "op": "eq", "value": true}
+    ]},
+    "steps_min": 6,
+    "tags": ["hard", "settings", "icon_only", "scroll"]
+  }
+]

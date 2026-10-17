@@ -1,0 +1,10 @@
+# Sandbox app (T1). Python 3.13, shared with .venv-gym; versions resolved together with nemo-gym==0.7.0.
+fastapi==0.143.3
+uvicorn==0.54.0
+jinja2==3.1.6
+python-multipart==0.0.32
+# Tests (oracle, determinism, no-egress) and the screenshot gallery
+pytest==9.1.1
+httpx==0.28.1
+playwright==1.62.0
+pillow==13.0.0

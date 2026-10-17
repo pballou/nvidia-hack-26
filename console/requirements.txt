@@ -1,0 +1,2 @@
+# GUI assist console (T1). Installs on top of sandbox/requirements.txt (same venv).
+-r ../sandbox/requirements.txt
