@@ -185,12 +185,12 @@ MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PC
 
 ## Gate G results
 
-**Verdict: PASS** (attempt 2, Sat 2026-10-17 20:22 EDT, T4). The merged sft-template
-grounder on vllm-metal matches the H200 `grounder` on 200 dev rows:
-- `prompt_tokens` identical on all 200;
-- hit rate 86.0% vs 85.0%;
-- 99.0% of hit/miss decisions agree;
-- local p50 1.77 s.
+**Verdict: PASS for both adapters (T4).** Each time, the merged grounder on vllm-metal
+matched the H200 `grounder` serving the same adapter, on the same 200 dev rows:
+- **FINAL (round-1 GRPO, the demo adapter), Sat 22:22 EDT:** `prompt_tokens` identical on
+  all 200; hit rate 87.0% vs 87.0%; 99.0% of hit/miss decisions agree.
+- **sft-template, Sat 20:22 EDT (attempt 2):** `prompt_tokens` identical on all 200; hit
+  rate 86.0% vs 85.0%; 99.0% agree; local p50 1.77 s with Lightning idle.
 
 It only fits in memory with Teams and most Chrome tabs closed (attempt 1).
 
@@ -200,7 +200,7 @@ Scripts: [scripts/gate_g_merge.py](../scripts/gate_g_merge.py) (merge),
 [scripts/gate_g.py](../scripts/gate_g.py) (rows, requests, verdict). Artifacts are in
 `~/models/gate_g/` on Patrick's Mac.
 
-### FINAL adapter (round-1 GRPO): H200 half captured, local half pending
+### FINAL adapter (round-1 GRPO): Sat 22:04–22:22 EDT (T4). PASS
 
 The night loop finished at 22:02 with FINAL = round 1 GRPO,
 `/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/adapter` (dev 87.00).
@@ -216,11 +216,35 @@ The night loop finished at 22:02 with FINAL = round 1 GRPO,
   - Output `~/models/grounder-merged-night-20261017-193859-round_1-grpo`, weights sha256
     `cd120bc0…`.
   - 186 modules; peft's merge equals the manual `W + 2·B·A` (max diff 0.0).
-- **Local half:** waits until Patrick has closed Teams and Chrome. Then run
-  `MODEL=~/models/grounder-merged-night-20261017-193859-round_1-grpo` with
-  [the procedure below](#how-to-run-gate-g-attempt-2s-exact-procedure), using
-  `--endpoint local=…` only and `--out ~/models/gate_g/night-20261017-193859-round_1-grpo`.
-  `compare` then pairs it with the H200 half already captured.
+- **Local half** (22:11–22:22): run with
+  [the procedure below](#how-to-run-gate-g-attempt-2s-exact-procedure),
+  `MODEL=~/models/grounder-merged-night-20261017-193859-round_1-grpo`. Teams and Chrome
+  were closed. T2's final agent eval was using Lightning at concurrency 2 the whole time.
+
+| Check | Local (Mac, vllm-metal, merged) | H200 (`grounder`, runtime LoRA) | Rule |
+| --- | --- | --- | --- |
+| `prompt_tokens` identical | 200/200 rows | same | every row ✓ |
+| Hit rate | **87.0%** | **87.0%** | gap ≤ 2 points: 0.0 ✓ |
+| Hit/miss agreement | **99.0%** (1 local-only hit, 1 H200-only hit; McNemar p = 1.0) | | ≥ 90% ✓ |
+| Latency p50 / p90 | 2.92 s / 3.78 s (GPU shared with T2's eval) | 0.64 s / 0.80 s (tunnel, shared with T2) | reported |
+
+- **Per platform** (local / H200): desktop 89.7 / 91.2, mobile 84.0 / 84.0,
+  web 86.6 / 85.4.
+- **Agreement detail:** 159/200 replies are byte-identical. The median point distance is
+  0 and the p90 is 1 on the 0–1000 grid.
+- **Latency:** sft-template's 1.77 s was measured with Lightning idle; this run competed
+  with T2's eval for the GPU. Local requests also waited for Lightning to go idle 49
+  times (55.5 s in total, at most 5 s each, `--yield-max-s 5`).
+- **Memory and Lightning:**
+  - Pressure stayed normal; 28% free at the lowest.
+  - Under T2's load, Lightning's warm probe went from 0.26 s (baseline, T2 already
+    running) to 0.3–0.95 s.
+  - Its decode inter-token latency rose from ~0.038 s to at most ~0.067 s (≤1.75×) while
+    the grounder ran.
+  - The watchdog's trip lines were relaxed for T2's load (probe margin 3 s, ratio 3×, ITL
+    2.5×); memory triggers were unchanged. It never fired.
+- **Artifacts:** `~/models/gate_g/night-20261017-193859-round_1-grpo/` (`selection.json`,
+  `h200.jsonl`, `local.jsonl`, `summary_local_vs_h200.json`, `watch.jsonl`, server log).
 
 ### Attempt 2: Sat 2026-10-17, 20:15–20:22 EDT (T4). PASS
 
@@ -381,7 +405,8 @@ started after the orchestrator's GO (T2's eval had finished at ~19:30):
 
 Lightning, voice and the 2B grounder all on this Mac: 30 + 2 + 0.6 = 32.6B. One grounder
 instance does both clicks and screen summaries. Prerequisites:
-- Gate G has passed for the adapter you're showing.
+- Gate G has passed for the adapter you're showing. FINAL (round-1 GRPO) passed at 22:22;
+  its merge is `~/models/grounder-merged-night-20261017-193859-round_1-grpo`.
 - Teams is quit and Chrome is closed (Playwright's own browser is fine).
 - The Mac is on power, with Low Power Mode off.
 - Lightning is up on :8000 (§2).
@@ -391,7 +416,8 @@ instance does both clicks and screen summaries. Prerequisites:
 #    the agent's own planner calls from tripping it; memory triggers are unchanged.
 python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 \
   --log ~/models/gate_g/watch-video.jsonl --probe-every 30 --probe-margin-s 1.5
-GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # healthy in ~45 s
+MODEL=~/models/grounder-merged-night-20261017-193859-round_1-grpo \
+  GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # FINAL; healthy in ~45 s
 # 2. The console with the real agent, pointed at the Mac grounder for clicks and summaries
 #    (--grounder defaults to grounder):
 scripts/demo_up.sh --agent real --headed --vlm-url http://127.0.0.1:8011/v1 \
