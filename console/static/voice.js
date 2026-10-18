@@ -20,6 +20,20 @@
  * Option+E (é) and other chords never touch the microphone. Every state change is announced in #voice-status
  * (role=status), which is also the visible line under the mic. Nothing here throws into the page: every failure
  * becomes a message.
+ *
+ * A warm microphone, so the first words aren't lost. The first press opens the microphone (getUserMedia, an
+ * AudioContext, the worklet: about half a second), says "Starting the microphone…", and records from the very first
+ * frame; "Listening… start speaking now" (and the red button) appear only once frames arrive. After that take the
+ * stream, context and worklet stay open ("warm"): the worklet keeps the last ~400 ms in a ring (pcm-worklet.js), and
+ * the next press starts with that pre-roll, so audio from just before the key went down is included (never any
+ * older than ~0.5 s), with no new getUserMedia. While warm, a line in the voice area says "Microphone ready
+ * (releases after 5 min idle)" with a Turn off button. Everything is released (tracks stopped, context closed) after
+ * 5 minutes without a recording, when the page is hidden or unloads, when voice input goes off, when the track
+ * ends, and by Turn off; the next press opens it again. A press resumes a suspended context (Safari) inside the key
+ * or click handler.
+ *
+ * window.AcmeVoice (for tests): setIdleReleaseMs(ms) -> ms in use, mic() -> {warm, recording, kind, rate,
+ * idleReleaseMs}, lastTake() -> {cold, preRollMs, seconds, heldSeconds, rate, sent} | null, release().
  */
 'use strict';
 
@@ -39,6 +53,12 @@
   const RECHECK_MS = 4000;  // voice input off because the recognizer isn't up: ask /api/config again
   const FLUSH_TIMEOUT_MS = 300;
   const DONE_MS = 2500;
+  const PRE_ROLL_MS = 400;           // a warm take starts with this much audio from just before the press...
+  const PRE_ROLL_MAX_AGE_MS = 500;   // ...and never with audio older than this
+  const IDLE_RELEASE_MS = 5 * 60 * 1000;  // a warm microphone is released after this long without a recording
+  const WARM_SLOW_MS = 250;          // a warm take with no frames yet after this says "Starting the microphone…"
+  const WARM_WATCHDOG_MS = 1500;     // ...and after this the warm microphone is opened again from scratch
+  const COLD_WATCHDOG_MS = 4000;     // a just-opened microphone that sends no frames for this long is an error
   const SILENT_RMS = 0.002;  // about -54 dBFS: a muted or dead microphone
   // A whole transcript that means "stop", after lowercasing and turning punctuation into spaces. Anchored at both
   // ends with a closed list of words, so a request such as "Stop sending me promotions." is not a stop.
@@ -61,8 +81,14 @@
     asr: null,           // /api/config "asr": {available, model, label, error?}
     reasons: new Map(),  // why voice input is off: source -> message (empty = available)
     wasOff: false,       // it was off after loading, so coming back gets announced
-    state: 'off',        // off | idle | starting | listening | transcribing | done | error
-    rec: null,           // the recording in progress (see startRecording)
+    // opening = a take has started but no frames have arrived yet (not red); listening = frames are arriving
+    state: 'off',        // off | idle | opening | listening | transcribing | done | error
+    rec: null,           // the take in progress (see startRecording)
+    mic: null,           // the open ("warm") microphone, kept between takes (see openMic)
+    takeSeq: 0,
+    lastTake: null,      // what the last take held (window.AcmeVoice.lastTake)
+    idleMs: IDLE_RELEASE_MS,
+    idleTimer: 0,
     held: null,          // event.code of the key holding push-to-talk right now
     armed: 0,            // timer: a modifier held in a text field, not recording yet (see onKeyDown)
     pttCode: DEFAULT_PTT,
@@ -236,6 +262,7 @@
     if (!on) {
       cancelCountdown('');
       if (V.state !== 'transcribing') setState('off');
+      releaseMic('');  // voice input is off: the microphone is not kept open for it
       if (!checking) V.wasOff = true;
       const why = [...V.reasons.values()][0];
       el.hint.dataset.tone = checking ? '' : 'off';
@@ -302,15 +329,15 @@
     if (!mic) return;
     window.clearTimeout(V.doneTimer);
     mic.dataset.state = state;
-    const listening = state === 'starting' || state === 'listening';
+    const listening = state === 'opening' || state === 'listening';
     // A plain action button: its name says what pressing it does ("Speak", "Stop listening"), so no aria-pressed.
     mic.removeAttribute('aria-pressed');
     mic.disabled = state === 'off';
     if (state === 'transcribing') mic.setAttribute('aria-label', 'Transcribing… press to cancel');
     else mic.removeAttribute('aria-label');
     setText(el.micLabel, listening ? 'Stop listening' : (state === 'transcribing' ? 'Transcribing…' : 'Speak'));
-    el.timer.hidden = !listening;
-    if (!listening) mic.style.setProperty('--level', '0');
+    el.timer.hidden = state !== 'listening';
+    if (state !== 'listening') mic.style.setProperty('--level', '0');
     if (state === 'done') {
       V.doneTimer = window.setTimeout(() => { if (V.state === 'done') setState('idle'); }, DONE_MS);
     }
@@ -323,7 +350,7 @@
       const target = Math.min(1, Math.max(0, (db + 60) / 48));  // -60 dBFS .. -12 dBFS
       V.level = target > V.level ? target : V.level * 0.85 + target * 0.15;
       el.mic.style.setProperty('--level', V.level.toFixed(3));
-      const secs = rec.frames / rec.rate;
+      const secs = (rec.frames - rec.preFrames) / rec.rate;  // since the press (the pre-roll is extra)
       setText(el.timer, `${fmtClock(secs)} / ${fmtClock(MAX_SECONDS)}`);
       V.rafId = window.requestAnimationFrame(frame);
     };
@@ -332,57 +359,69 @@
     V.rafId = window.requestAnimationFrame(frame);
   }
 
-  // --- capture ----------------------------------------------------------------------------
-  async function startRecording(mode) {
-    if (V.rec || !isAvailable() || V.state === 'transcribing') return;
-    cancelCountdown('');  // a new utterance replaces a pending auto-run
-    const rec = {
-      mode, live: false, stopping: false, stopWanted: null, chunks: [], frames: 0, rate: TARGET_RATE,
-      lastRms: 0, peakRms: 0, stream: null, ctx: null, src: null, node: null, kind: '', flushed: null, maxTimer: 0,
+  // --- the microphone ---------------------------------------------------------------------
+  // V.mic, once a take has had frames: {stream, ctx, src, node, kind: 'worklet'|'script', rate, ring (script only),
+  // take (the take it feeds, or null), onEnded, announced}. It stays open between takes (see the header).
+
+  const micIsWarm = () => Boolean(V.mic && V.mic.ctx && V.mic.ctx.state !== 'closed');
+
+  /** Safari (and a context made outside a gesture) can start or fall back to 'suspended' / 'interrupted'. Called
+   *  in the key or click handler, where resuming is allowed. */
+  function wake(ctx) {
+    if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
+    try { ctx.resume().catch(() => {}); } catch { /* an old webkitAudioContext: no promise */ }
+  }
+
+  function newContext(rate) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = rate ? new AC({ sampleRate: rate }) : new AC();
+    wake(ctx);
+    return ctx;
+  }
+
+  /** The first press (or one after a release): open the microphone for take `rec`. The context is made here,
+   *  still inside the press handler, before getUserMedia. */
+  async function openMic(rec) {
+    const mic = {
+      stream: null, ctx: null, src: null, node: null, kind: '', rate: TARGET_RATE, ring: null, take: null,
+      onEnded: null, announced: false,
     };
-    V.rec = rec;
-    setState('starting');
-    say('Starting the microphone…');
     try {
-      rec.stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
-      if (V.rec !== rec) { teardown(rec); return; }
-      await openGraph(rec);
-      if (V.rec !== rec) { teardown(rec); return; }
+      try { mic.ctx = newContext(TARGET_RATE); } catch { mic.ctx = null; }  // openGraph tries the default rate
+      mic.stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+      if (V.rec !== rec) { closeMic(mic); return; }  // cancelled while asking: nothing was recorded, nothing kept
+      await openGraph(mic);
+      if (V.rec !== rec) { closeMic(mic); return; }
     } catch (err) {
-      teardown(rec);
+      closeMic(mic);
       if (V.rec !== rec) return;  // cancelled meanwhile; its message is already shown
+      clearTake(rec);
       V.rec = null;
       V.held = null;
       await micFailed(err);
       return;
     }
-    rec.live = true;
-    rec.maxTimer = window.setTimeout(() => {
-      if (V.rec === rec) stopRecording('send', { limit: true });
-    }, MAX_SECONDS * 1000);
-    setState('listening');
-    say(mode === 'ptt' ? 'Listening… release to send' : 'Listening… press again to send', { tone: 'live' });
-    startMeter(rec);
-    if (rec.stopWanted) stopRecording(rec.stopWanted);
+    V.mic = mic;
+    for (const t of mic.stream.getAudioTracks()) t.onended = () => { if (V.mic === mic) micLost(mic); };
+    attach(rec);
+    rec.watchdog = window.setTimeout(() => noFrames(rec), COLD_WATCHDOG_MS);
   }
 
-  async function openGraph(rec) {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    let ctx = null;
+  async function openGraph(mic) {
+    let ctx = mic.ctx;
     let src = null;
     try {
-      ctx = new AC({ sampleRate: TARGET_RATE });
-      rec.ctx = ctx;
-      src = ctx.createMediaStreamSource(rec.stream);
+      if (!ctx) throw new Error('no context yet');
+      src = ctx.createMediaStreamSource(mic.stream);
     } catch {
       // Firefox can't connect a microphone to a context at another rate: record at the default and resample.
       if (ctx) ctx.close().catch(() => {});
-      ctx = new AC();
-      rec.ctx = ctx;  // so teardown closes it even if the next line throws
-      src = ctx.createMediaStreamSource(rec.stream);
+      ctx = newContext(0);
+      mic.ctx = ctx;  // so closeMic closes it even if the next line throws
+      src = ctx.createMediaStreamSource(mic.stream);
     }
-    rec.src = src;
-    rec.rate = ctx.sampleRate;
+    mic.src = src;
+    mic.rate = ctx.sampleRate;
     if (ctx.state !== 'running') {
       await Promise.race([ctx.resume().catch(() => {}), new Promise((r) => { window.setTimeout(r, 1000); })]);
       if (ctx.state !== 'running') {
@@ -391,68 +430,343 @@
         throw e;
       }
     }
-    const onSamples = (f32) => {
-      if (V.rec !== rec || !f32 || !f32.length) return;
-      rec.chunks.push(f32);
-      rec.frames += f32.length;
-      rec.lastRms = window.AcmeWav.rms(f32);
-      if (rec.lastRms > rec.peakRms) rec.peakRms = rec.lastRms;
-    };
+    const ringFrames = Math.round((mic.rate * PRE_ROLL_MS) / 1000);
     if (ctx.audioWorklet && window.AudioWorkletNode) {
       try {
         await ctx.audioWorklet.addModule('/static/pcm-worklet.js');
         const node = new window.AudioWorkletNode(ctx, 'pcm-capture', {
           numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
           channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
-          processorOptions: { chunkFrames: Math.max(128, Math.round(ctx.sampleRate * 0.064)) },
+          processorOptions: { chunkFrames: Math.max(128, Math.round(mic.rate * 0.064)), ringFrames },
         });
-        node.port.onmessage = (e) => {
-          const d = e.data || {};
-          if (d.type === 'chunk') onSamples(d.samples);
-          else if (d.type === 'flushed' && rec.flushed) rec.flushed();
-        };
+        node.port.onmessage = (e) => onWorkletMessage(mic, e.data || {});
         src.connect(node);
         node.connect(ctx.destination);  // keeps the node pulled; it outputs silence
-        rec.node = node;
-        rec.kind = 'worklet';
+        mic.node = node;
+        mic.kind = 'worklet';
         return;
       } catch { /* fall back to ScriptProcessor */ }
     }
-    const size = ctx.sampleRate <= 24000 ? 1024 : 2048;
+    const size = mic.rate <= 24000 ? 1024 : 2048;
     const sp = ctx.createScriptProcessor(size, 1, 1);
-    sp.onaudioprocess = (e) => onSamples(new Float32Array(e.inputBuffer.getChannelData(0)));
+    mic.ring = { chunks: [], frames: 0, cap: ringFrames };
+    sp.onaudioprocess = (e) => onScriptSamples(mic, new Float32Array(e.inputBuffer.getChannelData(0)));
     src.connect(sp);
     sp.connect(ctx.destination);
-    rec.node = sp;
-    rec.kind = 'script';
+    mic.node = sp;
+    mic.kind = 'script';
   }
 
-  function flushGraph(rec) {
-    if (rec.kind !== 'worklet' || !rec.node) return Promise.resolve();
+  function post(mic, msg) {
+    try { mic.node.port.postMessage(msg); return true; } catch { return false; }
+  }
+
+  function onWorkletMessage(mic, d) {
+    if (d.type === 'ended') {
+      if (mic.onEnded && mic.onEnded.id === d.id) mic.onEnded();
+      return;
+    }
+    const rec = mic.take;
+    if (!rec || d.id !== rec.id || V.mic !== mic) return;  // a take that already ended
+    if (d.type === 'preroll') addPreRoll(rec, d.samples);
+    else if (d.type === 'chunk') addSamples(rec, d.samples);
+  }
+
+  /** ScriptProcessor fallback: between takes the newest ~400 ms are kept here, as the worklet does. */
+  function onScriptSamples(mic, f32) {
+    if (V.mic !== mic || !f32.length) return;
+    if (mic.take) { addSamples(mic.take, f32); return; }
+    const ring = mic.ring;
+    ring.chunks.push({ f32, at: performance.now() });
+    ring.frames += f32.length;
+    while (ring.chunks.length > 1 && ring.frames - ring.chunks[0].f32.length >= ring.cap) {
+      ring.frames -= ring.chunks.shift().f32.length;
+    }
+  }
+
+  /** The script ring's newest samples: at most PRE_ROLL_MS, none older than PRE_ROLL_MAX_AGE_MS. Empties it. */
+  function takeScriptRing(mic) {
+    const ring = mic.ring;
+    const now = performance.now();
+    const cap = Math.floor((mic.rate * PRE_ROLL_MS) / 1000);
+    const parts = [];
+    let n = 0;
+    for (let i = ring.chunks.length - 1; i >= 0 && n < cap; i -= 1) {
+      const { f32, at } = ring.chunks[i];
+      // its last sample arrived at `at`; the j-th from the end is j / rate older
+      const young = Math.floor(((PRE_ROLL_MAX_AGE_MS - (now - at)) * mic.rate) / 1000);
+      const k = Math.min(f32.length, young, cap - n);
+      if (k <= 0) break;
+      parts.unshift(f32.subarray(f32.length - k));
+      n += k;
+      if (k < f32.length) break;
+    }
+    ring.chunks = [];
+    ring.frames = 0;
+    const out = new Float32Array(n);
+    let off = 0;
+    for (const p of parts) { out.set(p, off); off += p.length; }
+    return out;
+  }
+
+  /** Connect take `rec` to the open microphone: it starts with the pre-roll, then live audio. */
+  function attach(rec) {
+    const mic = V.mic;
+    rec.rate = mic.rate;
+    mic.take = rec;
+    if (mic.kind === 'worklet') {
+      post(mic, { type: 'start', id: rec.id, preRollMs: PRE_ROLL_MS, maxAgeMs: PRE_ROLL_MAX_AGE_MS });
+    } else {
+      addPreRoll(rec, takeScriptRing(mic));
+    }
+  }
+
+  function addPreRoll(rec, f32) {
+    if (!f32 || !f32.length) return;
+    rec.chunks.push(f32);
+    rec.frames += f32.length;
+    rec.preFrames += f32.length;
+    const r = window.AcmeWav.rms(f32);
+    if (r > rec.peakRms) rec.peakRms = r;
+  }
+
+  function addSamples(rec, f32) {
+    if (!f32 || !f32.length) return;
+    rec.chunks.push(f32);
+    rec.frames += f32.length;
+    rec.lastRms = window.AcmeWav.rms(f32);
+    if (rec.lastRms > rec.peakRms) rec.peakRms = rec.lastRms;
+    if (!rec.live && V.rec === rec && !rec.stopping) goLive(rec);
+  }
+
+  /** Frames are arriving for this take: only now is it "Listening…" (and red). */
+  function goLive(rec) {
+    rec.live = true;
+    window.clearTimeout(rec.slowTimer);
+    window.clearTimeout(rec.watchdog);
+    rec.maxTimer = window.setTimeout(() => {
+      if (V.rec === rec) stopRecording('send', { limit: true });
+    }, MAX_SECONDS * 1000);
+    setState('listening');
+    const send = rec.mode === 'ptt' ? 'release to send' : 'press again to send';
+    say(rec.cold ? `Listening… start speaking now, ${send}` : `Listening… ${send}`, { tone: 'live' });
+    startMeter(rec);
+    if (rec.stopWanted) stopRecording(rec.stopWanted);
+  }
+
+  /** No frames for this take. A warm microphone may have died quietly (a context that won't resume, a stalled
+   *  device): open it again once. A just-opened one that sends nothing is an error. */
+  function noFrames(rec) {
+    if (V.rec !== rec || rec.live || rec.stopping) return;
+    if (!rec.cold) {
+      rec.cold = true;
+      if (V.mic) V.mic.take = null;
+      releaseMic('');
+      say('Starting the microphone…');
+      openMic(rec);
+      return;
+    }
+    clearTake(rec);
+    V.rec = null;
+    V.held = null;
+    releaseMic('');
+    showError('The microphone sent no audio. Check that it isn’t muted or in use by another app, then try again.');
+  }
+
+  /** The track ended without us: the device was unplugged, or the browser or the system took the microphone. */
+  function micLost(mic) {
+    const rec = V.rec;
+    if (rec && mic.take === rec) {
+      clearTake(rec);
+      mic.take = null;
+      V.rec = null;
+      V.held = null;
+      releaseMic('');
+      showError('The microphone stopped (unplugged, or taken by the system or another app). Nothing was sent. '
+        + 'Press Speak to start it again.');
+      return;
+    }
+    releaseMic('');
+    say('The microphone was turned off by the browser or the system. The next recording opens it again.',
+      { tone: 'warn' });
+  }
+
+  /** The worklet posts what it still buffers, then 'ended'; resolves then (or after FLUSH_TIMEOUT_MS).
+   *  discard: drop the take's unsent audio, don't wait. */
+  function endTake(rec, discard) {
+    const mic = V.mic;
+    if (!mic || mic.take !== rec) return Promise.resolve();
+    if (mic.kind !== 'worklet' || discard) {
+      if (mic.kind === 'worklet') post(mic, { type: 'end', id: rec.id, discard: true });
+      mic.take = null;
+      return Promise.resolve();
+    }
     return new Promise((resolve) => {
-      const t = window.setTimeout(resolve, FLUSH_TIMEOUT_MS);
-      rec.flushed = () => { window.clearTimeout(t); resolve(); };
-      try { rec.node.port.postMessage({ type: 'flush' }); } catch { resolve(); }
+      let t = 0;
+      const done = () => {
+        window.clearTimeout(t);
+        if (mic.onEnded === done) mic.onEnded = null;
+        if (mic.take === rec) mic.take = null;
+        resolve();
+      };
+      done.id = rec.id;
+      mic.onEnded = done;
+      t = window.setTimeout(done, FLUSH_TIMEOUT_MS);
+      if (!post(mic, { type: 'end', id: rec.id })) done();
     });
   }
 
-  /** Mic off: stop every track and close the context (the browser's recording indicator goes away). */
-  function teardown(rec) {
-    window.clearTimeout(rec.maxTimer);
-    try { if (rec.src) rec.src.disconnect(); } catch { /* already gone */ }
+  /** Close everything: stop every track and close the context (the browser's recording indicator goes away). */
+  function closeMic(mic) {
+    try { if (mic.src) mic.src.disconnect(); } catch { /* already gone */ }
     try {
-      if (rec.node) {
-        if (rec.kind === 'worklet') { rec.node.port.postMessage({ type: 'stop' }); rec.node.port.onmessage = null; }
-        else rec.node.onaudioprocess = null;
-        rec.node.disconnect();
+      if (mic.node) {
+        if (mic.kind === 'worklet') { mic.node.port.postMessage({ type: 'stop' }); mic.node.port.onmessage = null; }
+        else mic.node.onaudioprocess = null;
+        mic.node.disconnect();
       }
     } catch { /* already gone */ }
-    try { if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop()); } catch { /* already stopped */ }
-    try { if (rec.ctx && rec.ctx.state !== 'closed') rec.ctx.close().catch(() => {}); } catch { /* closed */ }
-    rec.src = null;
-    rec.node = null;
-    rec.stream = null;
-    rec.ctx = null;
+    try {
+      if (mic.stream) mic.stream.getTracks().forEach((t) => { t.onended = null; t.stop(); });
+    } catch { /* already stopped */ }
+    try { if (mic.ctx && mic.ctx.state !== 'closed') mic.ctx.close().catch(() => {}); } catch { /* closed */ }
+    mic.take = null;
+    if (mic.onEnded) mic.onEnded();
+    mic.src = null;
+    mic.node = null;
+    mic.stream = null;
+    mic.ctx = null;
+  }
+
+  /** why: 'off' (Turn off) | 'idle' (the idle timeout) | '' (quiet: page hidden, voice off, a lost track). */
+  function releaseMic(why) {
+    window.clearTimeout(V.idleTimer);
+    V.idleTimer = 0;
+    const mic = V.mic;
+    if (!mic) return false;
+    V.mic = null;
+    closeMic(mic);
+    renderWarm();
+    if (why === 'off') announceMic('Microphone off.');
+    else if (why === 'idle') announceMic(`Microphone off: released after ${fmtSpan(V.idleMs)} without a recording.`);
+    return true;
+  }
+
+  function armIdle() {
+    window.clearTimeout(V.idleTimer);
+    V.idleTimer = window.setTimeout(() => {
+      V.idleTimer = 0;
+      if (V.mic && !V.rec) releaseMic('idle');
+    }, V.idleMs);
+  }
+
+  /** A take is over (sent, cancelled or too short): the microphone stays warm, or is released if the page is hidden
+   *  or voice input went off meanwhile. */
+  function afterTake() {
+    if (!V.mic) return;
+    if (document.hidden || !isAvailable()) { releaseMic(''); return; }
+    armIdle();
+    renderWarm();
+    if (!V.mic.announced) {
+      V.mic.announced = true;
+      announceMic(`${warmText()}. Turn off releases it now.`);
+    }
+  }
+
+  /** "5 min", "90 s", "1.5 s". */
+  function fmtSpan(ms) {
+    if (ms >= 60000 && ms % 60000 === 0) return `${ms / 60000} min`;
+    return `${Math.round(ms / 100) / 10} s`;
+  }
+
+  const warmText = () => `Microphone ready (releases after ${fmtSpan(V.idleMs)} idle)`;
+
+  /** The warm-microphone line in the voice area: shown while the microphone is open, between takes and during one. */
+  function renderWarm() {
+    if (!el.warm) return;
+    const open = Boolean(V.mic);
+    if (!open && el.warm.contains(document.activeElement)) (el.mic.disabled ? el.request : el.mic).focus();
+    el.warm.hidden = !open;
+    if (open) setText(el.warmText, V.rec ? 'Microphone on (recording)' : warmText());
+  }
+
+  function announceMic(text) {
+    if (!el.warmSr) return;
+    el.warmSr.textContent = '';
+    window.setTimeout(() => { el.warmSr.textContent = text; }, 40);
+  }
+
+  function buildWarmLine() {
+    const anchor = el.hint;
+    if (!anchor || document.getElementById('mic-warm')) return;
+    const line = document.createElement('p');
+    line.id = 'mic-warm';
+    line.className = 'note voice-warm';
+    line.hidden = true;
+    const text = document.createElement('span');
+    text.id = 'mic-warm-text';
+    const off = document.createElement('button');
+    off.id = 'mic-off';
+    off.type = 'button';
+    off.className = 'btn btn-small';
+    off.textContent = 'Turn off';
+    off.setAttribute('aria-label', 'Turn off the microphone');
+    line.append(text, document.createTextNode(' '), off);  // a space, not a margin: no indent when it wraps
+    const sr = document.createElement('p');
+    sr.id = 'mic-warm-status';
+    sr.className = 'visually-hidden';
+    sr.setAttribute('role', 'status');
+    sr.setAttribute('aria-live', 'polite');
+    anchor.after(line, sr);
+    el.warm = line;
+    el.warmText = text;
+    el.warmOff = off;
+    el.warmSr = sr;
+    off.addEventListener('click', turnOff);
+  }
+
+  /** Turn off: release the microphone now; a take in progress is dropped. */
+  function turnOff() {
+    if (V.rec) stopRecording('cancel', { why: 'Cancelled: the microphone was turned off. Nothing was sent.' });
+    return releaseMic('off');
+  }
+
+  function clearTake(rec) {
+    window.clearTimeout(rec.maxTimer);
+    window.clearTimeout(rec.slowTimer);
+    window.clearTimeout(rec.watchdog);
+    if (V.rec === rec) window.cancelAnimationFrame(V.rafId);
+  }
+
+  // --- takes ------------------------------------------------------------------------------
+  /** Called inside the key or click handler (or the push-to-talk arm timer). */
+  function startRecording(mode) {
+    if (V.rec || !isAvailable() || V.state === 'transcribing') return;
+    cancelCountdown('');  // a new utterance replaces a pending auto-run
+    window.clearTimeout(V.idleTimer);
+    V.takeSeq += 1;
+    const rec = {
+      id: V.takeSeq, mode, cold: !micIsWarm(), live: false, stopping: false, stopWanted: null, chunks: [], frames: 0,
+      preFrames: 0, rate: TARGET_RATE, lastRms: 0, peakRms: 0, maxTimer: 0, slowTimer: 0, watchdog: 0,
+    };
+    V.rec = rec;
+    setState('opening');
+    if (!rec.cold) {
+      wake(V.mic.ctx);  // still in the handler: Safari resumes a suspended context only here
+      V.sayId += 1;  // the old line goes; "Listening…" follows within a few ms (no "Starting…" in between)
+      el.status.replaceChildren();
+      el.status.dataset.tone = '';
+      attach(rec);
+      renderWarm();
+      rec.slowTimer = window.setTimeout(() => {
+        if (V.rec === rec && !rec.live) say('Starting the microphone…');
+      }, WARM_SLOW_MS);
+      rec.watchdog = window.setTimeout(() => noFrames(rec), WARM_WATCHDOG_MS);
+      return;
+    }
+    if (V.mic) releaseMic('');  // its context was closed under us: start over
+    say('Starting the microphone…');
+    openMic(rec);
   }
 
   /** how: 'send' | 'cancel'. */
@@ -460,28 +774,27 @@
     const rec = V.rec;
     if (!rec || rec.stopping) return;
     V.held = null;
-    if (!rec.live) {
-      if (how === 'send') {  // released before the mic was ready: finish once it is (it will be too short)
-        rec.stopWanted = 'send';
-        return;
-      }
-      V.rec = null;  // startRecording sees this and tears down
-      setState(isAvailable() ? 'idle' : 'off');
-      if (!quiet) say(why || 'Cancelled. Nothing was sent.', { tone: 'warn' });
+    if (!rec.live && how === 'send') {  // released before frames arrived: finish once they do (it will be too short)
+      rec.stopWanted = 'send';
       return;
     }
     rec.stopping = true;
-    window.cancelAnimationFrame(V.rafId);
-    if (how === 'send') await flushGraph(rec);
-    teardown(rec);
-    V.rec = null;
+    clearTake(rec);
+    if (how === 'send') await endTake(rec, false);
+    else endTake(rec, true);
+    V.rec = null;  // a cold take still opening sees this and closes the microphone
+    const held = (rec.frames - rec.preFrames) / rec.rate;
+    V.lastTake = {
+      cold: rec.cold, preRollMs: Math.round((rec.preFrames / rec.rate) * 1000), seconds: rec.frames / rec.rate,
+      heldSeconds: held, rate: rec.rate, sent: false,
+    };
+    afterTake();
     if (how === 'cancel') {
       setState(isAvailable() ? 'idle' : 'off');
       if (!quiet) say(why || 'Cancelled. Nothing was sent.', { tone: 'warn' });
       return;
     }
-    const seconds = rec.frames / rec.rate;
-    if (seconds < MIN_SECONDS) {
+    if (held < MIN_SECONDS) {
       setState('idle');
       say(rec.mode === 'ptt' ? 'Too short. Hold the key while you speak.' : 'Too short. Nothing was sent.', { tone: 'warn' });
       return;
@@ -497,7 +810,8 @@
       showError(`Couldn’t encode the recording: ${oneLine(err && err.message) || 'unknown error'}`);
       return;
     }
-    await transcribe(wav, { seconds, peakRms: rec.peakRms, limit });
+    V.lastTake.sent = true;
+    await transcribe(wav, { seconds: rec.frames / rec.rate, peakRms: rec.peakRms, limit });
   }
 
   async function micFailed(err) {
@@ -891,6 +1205,7 @@
     }
     const code = e.code;
     V.held = code;
+    if (V.mic) wake(V.mic.ctx);  // a suspended warm context (Safari) resumes only in a key or click handler
     if (MODIFIER_RE.test(code) && isTextField(document.activeElement)) {
       // In a text field the modifier may be the start of a character (Option+E, AltGr+Q): wait until it has been
       // held alone for a moment. A chord or a quick release clears this silently, before any getUserMedia.
@@ -938,6 +1253,7 @@
     loadPttKey();
     loadAutorun();
     buildAutorunSetting();
+    buildWarmLine();
 
     el.mic.addEventListener('click', onMicClick);
     el.mic.addEventListener('keydown', (e) => {
@@ -958,6 +1274,22 @@
       if (V.capturing) endCapture(null, '');
       if (V.armed) disarm();
       else if (V.held) { V.held = null; stopRecording('send'); }  // the key-up will never arrive
+    });
+    // The page is hidden: a take with audio is sent (as on blur), and the microphone is released (afterTake).
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return;
+      if (V.armed) disarm();
+      if (V.rec && V.rec.live) {
+        V.held = null;
+        stopRecording('send');
+      } else if (V.rec) {
+        stopRecording('cancel', { quiet: true });
+      }
+      if (!V.rec) releaseMic('');
+    });
+    window.addEventListener('pagehide', () => {
+      if (V.rec) stopRecording('cancel', { quiet: true });
+      releaseMic('');
     });
     if (el.request) {
       el.request.addEventListener('input', () => {
@@ -1053,6 +1385,26 @@
     if (!V.reasons.has('asr')) return;
     if (!cfg || typeof cfg !== 'object' || applyAsr(cfg)) scheduleRecheck();
   }
+
+  // For tests and the console's own debugging; nothing here records or sends audio.
+  window.AcmeVoice = Object.freeze({
+    /** The idle release (default 5 min); restarts a running idle timer. Returns the value in use. */
+    setIdleReleaseMs(ms) {
+      const n = Math.round(Number(ms));
+      if (Number.isFinite(n) && n >= 50) {
+        V.idleMs = n;
+        if (V.mic && !V.rec) armIdle();
+        renderWarm();
+      }
+      return V.idleMs;
+    },
+    mic: () => ({
+      warm: Boolean(V.mic), recording: Boolean(V.rec), kind: V.mic ? V.mic.kind : '', rate: V.mic ? V.mic.rate : 0,
+      idleReleaseMs: V.idleMs,
+    }),
+    lastTake: () => (V.lastTake ? { ...V.lastTake } : null),
+    release: () => turnOff(),
+  });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

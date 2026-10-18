@@ -3,8 +3,8 @@
 Sources, read-only:
   <root>/<run_id>/events.jsonl   the agent's StepEvents (agent/trace.py; console/mock_agent.py)
   <root>/<run_id>/console.json   written by console/runner.py for runs started from the console:
-                                 request, task_id, options, voice, endpoints, status, result, verdict,
-                                 timestamps
+                                 request, task_id, task_match, options, voice, endpoints, status, result,
+                                 verdict, timestamps
 roots = the console's --runs-dir plus the agent's cfg.run_dir_root (deduplicated). Sandbox state
 is never read here: the verdict is the one the console recorded in console.json.
 
@@ -18,6 +18,11 @@ Endpoints (where the run's VLM and Lightning were): console.json's snapshot, tak
 (source "console"), else derived from the start event's config.vlm.base_url / summary_model / lightning
 (source "trace": the label comes from the port, served/reachable are null: nobody checked). Mock runs
 have none (they run no models).
+
+Task: task_match (console.json) says how the console chose task_id: "picked" from the list, or "exact" / "fuzzy"
+matched from the request. task_line is the line the console banner shows too: "Checked as task: pay-50 (matched
+from your request)" or "(picked from the list)"; no parenthesis when console.json predates task_match; "Sandbox
+task: ..." when no verdict was recorded; null for free text.
 
 Honesty rules: a field the trace doesn't have is null (the page shows "—"); nothing is estimated.
 A run is "mock" when any payload says "mock": true (or console.json says the console ran the mock).
@@ -63,6 +68,7 @@ IMAGE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 STAGES = ("voice", "summary", "plan", "ground", "act")
 DONE_REASONS = ("done", "max_steps", "stuck", "stopped", "error")
 STUCK_VERDICTS = ("warn", "stuck")  # action.payload.stuck.verdict (agent/core.py)
+TASK_MATCH_METHODS = ("picked", "exact", "fuzzy")  # console.json task_match.method (console/app.py parse_task_match)
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 1000
 
@@ -217,6 +223,25 @@ def _voice(console: dict | None) -> dict | None:
             "duration_s": _num(v.get("duration_s"))}
 
 
+def _task_match(console: dict | None) -> dict | None:
+    m = _dict(console).get("task_match")
+    if not isinstance(m, dict) or m.get("method") not in TASK_MATCH_METHODS:
+        return None
+    return {"method": m["method"], "score": _num(m.get("score")),
+            "matched_from": m.get("matched_from") if isinstance(m.get("matched_from"), str) else None}
+
+
+def task_line(task_id: str | None, task_match: dict | None, checked: bool) -> str | None:
+    """"Checked as task: pay-50 (matched from your request)" / "(picked from the list)", the console banner's line
+    (console.js taskLine). "Sandbox task: ..." if no verdict was recorded; None for free text."""
+    if not task_id:
+        return None
+    how = _dict(task_match).get("method")
+    why = (" (picked from the list)" if how == "picked"
+           else " (matched from your request)" if how in ("exact", "fuzzy") else "")
+    return f"{'Checked as task' if checked else 'Sandbox task'}: {task_id}{why}"
+
+
 def _count(v: Any) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
 
@@ -317,6 +342,9 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
     plan_pv = next((_str(_payload(ev).get("prompt_version")) for ev in events
                     if ev.get("kind") == "plan" and _str(_payload(ev).get("prompt_version"))), None)
     n_stuck_warnings, n_stuck_stops = stuck_counts(events, dp)
+    task_id = _str(c.get("task_id"))
+    task_match = _task_match(console) if task_id else None
+    verified = verdict.get("passed") if isinstance(verdict.get("passed"), bool) else None
 
     return {
         "run_id": run_id if run_id is not None else (_str(events[0].get("run_id")) if events else None),
@@ -325,7 +353,9 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
         "started_ts": started,
         "ended_ts": ended,
         "request": request,
-        "task_id": _str(c.get("task_id")),
+        "task_id": task_id,
+        "task_match": task_match,
+        "task_line": task_line(task_id, task_match, verified is not None),
         "models": {
             "lightning": _first_model(events, "plan", config, mock),
             "grounder": _first_model(events, "grounding", config, mock),
@@ -335,7 +365,7 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
         "status": _status(done, console),
         "steps": steps,
         "success_claimed": claimed,
-        "verified": verdict.get("passed") if isinstance(verdict.get("passed"), bool) else None,
+        "verified": verified,
         "verdict_explanation": _str(verdict.get("explanation")),
         "total_ms": total_ms,
         "stage_p50_ms": {s: _p50(v) for s, v in timings.items()},

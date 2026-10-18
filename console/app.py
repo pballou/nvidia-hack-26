@@ -4,8 +4,8 @@ HTTP API (binding for console/static; details in console/README.md):
   GET  /                          console/static/index.html (and /static/*, Cache-Control: no-cache)
   GET  /api/config                {agent, sandbox_url, headed, defaults, asr, endpoints}
   GET  /api/tasks                 the 12 sandbox tasks, without their checks
-  POST /api/run                   {request, task_id?, options?} -> {run_id, sid, start_url}; 409 busy, 400 bad input
-                                  (or a grounder the VLM doesn't serve), 503 unavailable
+  POST /api/run                   {request, task_id?, options?, voice?, task_match?} -> {run_id, sid, start_url};
+                                  409 busy, 400 bad input (or a grounder the VLM doesn't serve), 503 unavailable
   GET  /api/runs/{run_id}         run summary
   GET  /api/runs/{run_id}/events  SSE: status, step, result, verdict, end (replay + live; honors Last-Event-ID)
   POST /api/runs/{run_id}/stop    {ok: true}
@@ -20,6 +20,8 @@ import asyncio
 import json
 import logging
 import math
+import re
+import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +47,8 @@ MAX_REQUEST_CHARS = 500
 MAX_VOICE_TEXT_CHARS = 500
 MAX_VOICE_MODEL_CHARS = 120
 VOICE_KEYS = ("text", "model", "latency_ms", "duration_s")
+TASK_MATCH_KEYS = ("method", "score", "matched_from")
+TASK_MATCH_METHODS = ("picked", "exact", "fuzzy")
 IMAGE_RE = logs.IMAGE_RE                 # one definition: the logs page builds image URLs with the same rules
 AGENT_RUN_ID_RE = logs.IMAGE_RUN_ID_RE
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -139,7 +143,89 @@ def parse_run_body(body, tasks_by_id: dict, defaults: dict = DEFAULT_OPTIONS) ->
     voice, problem = parse_voice(body.get("voice"))
     if problem:
         return None, problem
-    return {"request": request, "task_id": task_id, "options": clean, "voice": voice}, None
+    task_match, problem = parse_task_match(body.get("task_match"), task_id, request, tasks_by_id)
+    if problem:
+        return None, problem
+    return {"request": request, "task_id": task_id, "options": clean, "voice": voice, "task_match": task_match}, None
+
+
+def parse_task_match(match, task_id: str | None, request: str, tasks_by_id: dict) -> tuple[dict | None, str | None]:
+    """Optional `task_match` of POST /api/run: how the console chose task_id, {method: picked|exact|fuzzy,
+    score: 0..1 | null, matched_from: str}. Recorded in console.json (the logs page and the banner say "Checked as
+    task: <id> (matched from your request)" or "(picked from the list)"); never passed to the agent.
+    Left out with a task_id whose text the request is (request_key equal), it is recorded as an exact match: the page
+    doesn't send those. Left out otherwise, nothing is recorded (the caller chose the task some other way)."""
+    if match is None:
+        task_text = (tasks_by_id.get(task_id) or {}).get("request") if task_id is not None else None
+        if isinstance(task_text, str) and request_key(request) and request_key(request) == request_key(task_text):
+            return {"method": "exact", "score": 1.0, "matched_from": request}, None
+        return None, None
+    if not isinstance(match, dict):
+        return None, "task_match must be an object"
+    unknown = sorted(set(match) - set(TASK_MATCH_KEYS))
+    if unknown:
+        return None, f"unknown task_match field(s): {', '.join(unknown)}"
+    missing = [k for k in TASK_MATCH_KEYS if k not in match]
+    if missing:
+        return None, f"task_match needs {', '.join(missing)}"
+    if task_id is None:
+        return None, "task_match needs a task_id"
+    if match["method"] not in TASK_MATCH_METHODS:
+        return None, f"task_match.method must be one of {', '.join(TASK_MATCH_METHODS)}"
+    score = match["score"]
+    if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score)
+                              or not 0 <= score <= 1):
+        return None, "task_match.score must be a number from 0 to 1, or null"
+    if not isinstance(match["matched_from"], str) or len(match["matched_from"]) > MAX_REQUEST_CHARS:
+        return None, f"task_match.matched_from must be a string of at most {MAX_REQUEST_CHARS} characters"
+    return {"method": match["method"], "score": None if score is None else float(score),
+            "matched_from": match["matched_from"]}, None
+
+
+_NUMBER_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+    "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_NUMBER_WORD = "(?:" + "|".join([*_NUMBER_WORDS, "hundred"]) + ")"
+_NOT_ALNUM_BEFORE, _NOT_ALNUM_AFTER = r"(?<![^\W_])", r"(?![^\W_])"  # JS (?<![\p{L}\p{N}]) / (?![\p{L}\p{N}])
+_NUMBER_RUN_RE = re.compile(f"{_NOT_ALNUM_BEFORE}{_NUMBER_WORD}(?:[\\s-]+{_NUMBER_WORD})*{_NOT_ALNUM_AFTER}")
+
+
+def _number_words_to_digits(run: str) -> str:
+    """'fifty' -> '50', 'fifty-five' -> '55', 'two hundred five' -> '205' (console.js numberWordsToDigits)."""
+    out: list[int] = []
+    cur: int | None = None
+    for w in re.split(r"[\s-]+", run):
+        if w == "hundred":
+            if cur is not None and cur % 100 == 0 and cur > 0:
+                out.append(cur)
+                cur = None
+            cur = (1 if cur is None else cur) * 100
+            continue
+        v = _NUMBER_WORDS[w]
+        if cur is not None and cur >= 100 and cur % 100 == 0 and v < 100:
+            cur += v
+        elif cur is not None and cur % 100 >= 20 and cur % 10 == 0 and v < 10:
+            cur += v
+        else:
+            if cur is not None:
+                out.append(cur)
+            cur = v
+    if cur is not None:
+        out.append(cur)
+    return " ".join(map(str, out))
+
+
+def request_key(text: str) -> str:
+    """console.js requestKey: case, accents, punctuation, whitespace and how an amount is written ('$50' = '50 dollars'
+    = 'fifty dollars') don't matter. Two texts with the same key are an exact match."""
+    s = "".join(c for c in unicodedata.normalize("NFKD", str(text)) if not unicodedata.category(c).startswith("M"))
+    s = _NUMBER_RUN_RE.sub(lambda m: _number_words_to_digits(m.group(0)), s.lower())
+    s = re.sub(r"\$\s*([0-9]+)(?:\.00)?(?![0-9])", r"\1", s)
+    s = re.sub(f"([0-9])\\s*dollars?{_NOT_ALNUM_AFTER}", r"\1", s)
+    return "".join(c for c in s if c.isalnum())
 
 
 def parse_voice(voice) -> tuple[dict | None, str | None]:
@@ -258,7 +344,7 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
             return _error(400, unserved)
         try:
             run = await run_in_threadpool(runner.start, clean["request"], clean["task_id"], clean["options"],
-                                          clean["voice"], snapshot)
+                                          clean["voice"], snapshot, task_match=clean["task_match"])
         except Busy as e:
             return _error(409, "a run is already in progress; stop it first", active_run_id=e.active_run_id)
         except StartFailed as e:

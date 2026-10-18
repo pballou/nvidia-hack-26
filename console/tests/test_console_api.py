@@ -259,7 +259,9 @@ def test_verdict_after_stop(console, tmp_path):
     {"request": "hi", "options": {"grounder": "big"}}, {"request": "hi", "options": {"thinking": True}},
     {"request": "hi", "options": {"lightning": "cloud"}}, {"request": "hi", "options": {"headed": True}},
     {"request": "hi", "options": "fast"}, ["hi"],
-])
+    {"request": "hi", "task_match": {"method": "fuzzy", "score": 1, "matched_from": "hi"}},  # no task_id
+    {"request": "hi", "task_id": TASK, "task_match": {"method": "fuzzy", "score": 2, "matched_from": "hi"}},
+])  # more task_match cases: test_task_match.py
 def test_bad_run_requests_400(console, tmp_path, body):
     base, _ = console(fake_agent(trace_root=tmp_path))
     r = httpx.post(f"{base}/api/run", json=body)

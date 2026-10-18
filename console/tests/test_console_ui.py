@@ -240,7 +240,9 @@ def test_keyboard_only_sandbox_task(page, ui_console):
     assert pg.inner_text("#run-status").startswith("Done")
     defaults = httpx.get(f"{ui_console}/api/config").json()["defaults"]  # the page runs with the server's defaults
     assert defaults == {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
-    assert watch.run_bodies == [{"request": TASK_REQUEST, "task_id": TASK, "options": defaults}]
+    assert watch.run_bodies == [{"request": TASK_REQUEST, "task_id": TASK, "options": defaults,  # picked: says so
+                                 "task_match": {"method": "picked", "score": None, "matched_from": TASK_REQUEST}}]
+    assert pg.inner_text("#banner-task") == f"Checked as task: {TASK} (picked from the list)"
 
     # the step log, in plain words: the start, one line per tool call, the done summary
     script = SCRIPTS[TASK]["steps"]
@@ -359,21 +361,30 @@ def test_typed_task_text_runs_as_that_task(page, ui_console):
     # mark-all-read starts at /messages: typed as free text it would start at / (and the mock's script fails)
     tab_to(pg, lambda f: f["id"] == "request", limit=5)
     pg.keyboard.type("mark all my messages as read")
-    assert pg.input_value("#task-select") == ""  # typing alone doesn't switch the picker; running does
+    # typing alone doesn't switch the picker (the note says what it matches); leaving the box or running does
+    assert pg.input_value("#task-select") == ""
+    assert pg.inner_text("#request-note").startswith("This matches sandbox task mark-all-read")
     pg.keyboard.press("Enter")
     wait_banner(pg)
     assert watch.run_bodies[-1]["task_id"] == "mark-all-read"
+    # an exact match runs the task's own spelling of the same words, and its task_match is left to the backend
     assert watch.run_bodies[-1]["request"] == pg.input_value("#request") == "Mark all my messages as read."
+    assert "task_match" not in watch.run_bodies[-1]
     assert pg.input_value("#task-select") == "mark-all-read"
     assert step_actions(pg)[0] == "Started at /messages"
     assert pg.get_attribute("#banner", "data-tone") == "pass"
+    assert pg.inner_text("#banner-task") == "Checked as task: mark-all-read (matched from your request)"
     assert pg.text_content("#banner-label") == VERDICT_LABEL
 
-    # picking a task and then changing only case or punctuation keeps the task (no "runs as free text" note)
+    # picking a task and then changing only case or punctuation keeps the task (no "runs as free text" note); so
+    # does a close paraphrase (now matched from the request); a second request in the same words doesn't
     pg.select_option("#task-select", TASK)
     pg.fill("#request", "turn on high contrast")
     assert pg.input_value("#task-select") == TASK and pg.inner_text("#request-note") == ""
-    pg.fill("#request", "turn on high contrast now")
+    pg.fill("#request", "please switch on high contrast now")
+    assert pg.input_value("#task-select") == TASK
+    assert pg.inner_text("#request-note").startswith("Will be checked as task high-contrast (matched from your request")
+    pg.fill("#request", "turn on high contrast and reduce motion")
     assert pg.input_value("#task-select") == "" and "free text" in pg.inner_text("#request-note")
     watch.assert_clean(ui_console)
 

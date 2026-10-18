@@ -46,6 +46,9 @@ Then open <http://127.0.0.1:8095> (the Logs page is <http://127.0.0.1:8095/logs>
   - `test_console_ui.py` (about 10 s) drives the page by keyboard only: pick a task,
     Enter to run, see the ✓ banner, Escape to stop, free text. It also checks for no
     console errors and no off-host requests.
+  - `test_task_match.py` (about 6 s) checks [task matching](#matching-a-request-to-a-sandbox-task)
+    in the real page: the full match table (run it with `-s` to print every score), the
+    picker, Free text undoing a match, the banner and Logs lines, and the `task_match` API.
 
 ## HTTP API (binding for `console/static`)
 
@@ -54,8 +57,8 @@ Then open <http://127.0.0.1:8095> (the Logs page is <http://127.0.0.1:8095/logs>
 | `GET /`, `GET /static/*` | `console/static/index.html` and assets |
 | `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "grounder", thinking: "retry", lightning: "local"}, asr: {available, model, label, fixed_text?, error?}, endpoints: {vlm, lightning}}` (`--grounder` sets `defaults.grounder`, `--lightning` sets `defaults.lightning`; `endpoints` below) |
 | `GET /api/tasks` | `[{id, request, start_path, tags, steps_min}]` from `sandbox/tasks.json` (no checks) |
-| `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local}, voice?: {text, model, latency_ms, duration_s}}` (`voice` is logged in `console.json`, never sent to the agent) → `{run_id: "c-<hex>", sid, start_url}`. Errors: 400 `{error}` (validation; or `grounder model '<x>' is not served at <url> (serves: ...)` when the VLM's served names are known and lack it), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
-| `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, options, agent_run_id, result, verdict, endpoints, n_events}`. `n_events` counts stream messages (it equals the last `id`). `endpoints` is the snapshot taken at run start. |
+| `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local}, voice?: {text, model, latency_ms, duration_s}, task_match?: {method: picked\|exact\|fuzzy, score: 0..1\|null, matched_from: str (≤500)}}` (`voice` and `task_match` are logged in `console.json`, never sent to the agent; `task_match` needs a `task_id`, has exactly those three fields, and is recorded as `exact` when left out with a request that is the task's text) → `{run_id: "c-<hex>", sid, start_url}`. Errors: 400 `{error}` (validation; or `grounder model '<x>' is not served at <url> (serves: ...)` when the VLM's served names are known and lack it), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
+| `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, task_match, options, agent_run_id, result, verdict, endpoints, n_events}`. `n_events` counts stream messages (it equals the last `id`). `endpoints` is the snapshot taken at run start. |
 | `GET /api/runs/{run_id}/events` | SSE stream (below) |
 | `POST /api/runs/{run_id}/stop` | `{ok: true}`. Idempotent; waits up to ~10 s for the agent to stop. |
 | `POST /api/transcribe` | Voice input. Body: a 16 kHz mono PCM16 WAV, either raw `audio/wav` or multipart field `audio`, 0.2–60 s → `{text, duration_s, latency_ms, model}`. Errors: 400 bad audio, 413 too large, 503 engine unavailable. |
@@ -176,14 +179,28 @@ pixel coordinates and text. Re-run it after any sandbox layout change, then re-r
 
 It's local only: no Web Speech API, no MediaRecorder, no cloud.
 
+- **Warm microphone:** the mic stays open after the first take, so the start of a
+  sentence isn't clipped.
+  - The first press says "Starting the microphone…" and records from the first audio
+    frame.
+  - Later presses start with about 400 ms of pre-roll from just before the key went
+    down, and call no `getUserMedia`.
+  - "Listening…" shows only once frames arrive.
+  - While warm, the page shows "Microphone ready (releases after 5 min idle)" with a
+    Turn off button.
+  - It also releases when the page is hidden. On macOS a fully covered window counts
+    as hidden, so keep the headed agent window from covering the console completely.
+
 - **Recording:** click **Speak**, or hold Right Option (`AltRight`, configurable in
   Options). Space-hold works when focus isn't on a field or control.
 - **Capture:** `voice.js` records raw PCM through an AudioWorklet (`pcm-worklet.js`,
   with a ScriptProcessor fallback). `wav.js` resamples to 16 kHz if the browser
   refuses a 16 kHz context, and encodes PCM16 WAV.
 - **Transcription:** the WAV is POSTed to `/api/transcribe`.
-- **After transcription:** the transcript fills the request box and selects the
-  matching task, if any. The log shows `Heard (engine, N ms): …`.
+- **After transcription:** the transcript fills the request box and the picker shows the
+  task it [matches](#matching-a-request-to-a-sandbox-task), if any (an exact match shows the
+  task's own text; a fuzzy one keeps what was said). Choosing a task or Free text cancels the
+  auto-run. The log shows `Heard (engine, N ms): …`.
 - **Auto-run** (Options, "After voice input", saved in localStorage): run in 1.5 s (the
   default), run in 5 s, or don't auto-run. Esc or Cancel stops the countdown. Nothing
   runs by itself when the transcript is over 500 characters, when you edited the request
@@ -204,8 +221,9 @@ It's local only: no Web Speech API, no MediaRecorder, no cloud.
   on by itself when it comes up (a missing microphone re-checks too). `demo_up.sh`
   defaults to Parakeet and only warns when the sidecar is down.
 - **Page API:** `console.js` exposes `window.AcmeConsole` (`ready`, `config()`,
-  `isRunning()`, `setRequest(text)`, `run()`, `stop()`, `matchTask()`) and fires
-  `acme:run-start` / `acme:run-end`, which `voice.js` uses.
+  `isRunning()`, `setRequest(text)`, `run()`, `stop()`, `matchTask(text)` → task or null,
+  `matchTaskDetailed(text)`, `explainMatch(text)`) and fires `acme:run-start` /
+  `acme:run-end`, which `voice.js` uses.
 - **Tests:** `test_asr.py` (validation, engines, fake sidecar), `test_voice.py` (the
   WAV encoder, the endpoint, the fake-mic page flow, and a static scan for forbidden
   APIs) and `test_voice_ui.py` (push-to-talk and the countdown, with Chromium's fake
@@ -228,10 +246,12 @@ read-only and never reads sandbox state; the verdict is the one the console reco
   every root: `--runs-dir`, the agent's `cfg.run_dir_root`, and every root a run used.
 - **`console.json`** (written by `runner.py` into the trace dir as soon as it is known,
   status `running`, then atomically at the end, before `end`):
-  `{console_run_id, agent, request, task_id, options, sid, start_url, voice, endpoints,
-  status, result, verdict, started_ts, ended_ts}`.
+  `{console_run_id, agent, request, task_id, task_match, options, sid, start_url, voice,
+  endpoints, status, result, verdict, started_ts, ended_ts}`.
 - **RunSummary:** run and console ids, agent (`mock` when any payload says so), times,
-  request, task, models (Lightning, grounder, summary, ASR), status, steps, claimed and
+  request, task, `task_match` and `task_line` ("Checked as task: pay-50 (matched from your
+  request)" or "(picked from the list)", the banner's line, shown in the summary card's Task
+  row; no parenthesis for a `console.json` from before `task_match`), models (Lightning, grounder, summary, ASR), status, steps, claimed and
   verified success, total time, p50 per stage (voice, summary, plan, ground, act), counts
   (events, errors, invalid tool calls, unreadable lines), `n_stuck_warnings`,
   `n_stuck_stops`, `endpoints`, voice, prompt version and SHAs. A field the trace doesn't
@@ -272,6 +292,46 @@ read-only and never reads sandbox state; the verdict is the one the console reco
   - `fixtures/real_traces/` holds two real runs.
   - `fixtures/stuck_trace/` is a synthetic run in `agent/core.py`'s exact shapes. Its
     verdicts, reason and question come from `ProgressTracker`.
+
+## Matching a request to a sandbox task
+
+A run is checked against the portal's state only when it runs as one of the 12 sandbox
+tasks (`task_id`: its start page, initial state and check). Picking a task from the list does
+that; so does a request that matches one. `console.js` `createTaskMatcher` does the matching,
+in the page, for typed text and voice transcripts alike.
+
+- **Exact:** the request is the task's text once case, accents, punctuation and how an amount
+  is written are ignored (`requestKey`; `console/app.py` `request_key` is the same function).
+  The box then shows the task's own text (the same words).
+- **Fuzzy:** both texts become content tokens: filler dropped ("please", "can you", "I'd like
+  to", "um", "okay", ...), synonyms folded ("towards" → "toward", "texts" → "sms", "font" →
+  "text", "enable" → "turn on", "stop" → "off"), numbers normalized ("$50", "50 dollars" and
+  "fifty dollars" are all `50`), light stemming. A task is a candidate only if:
+  - the request has all of its anchor words (`TASK_ANCHORS`: e.g. pay-50 needs "pay" and
+    `50`, high-contrast needs "high", "contrast" and "on");
+  - nothing contradicts it: another number, month, district or channel, the opposite on/off,
+    a negated anchor ("don't ..."), a schedule word ("every month"), another task's key word,
+    or a second request ("... and reduce motion").
+
+  Score: weighted overlap (anchors 2.5, a task word the request skips counts half). The best
+  candidate wins if it scores ≥ 0.5 and beats the next candidate by ≥ 0.15. The box keeps the
+  user's words: the agent sees what they said, and only `task_id` changes.
+- **Anything else is free text:** no task and no verdict. The matcher is conservative on purpose,
+  because a wrong task gives a wrong verdict. "Pay my bill", "Download my August statement",
+  "Turn off high contrast", "Report an outage in Hillcrest" and "Turn on SMS for billing" all
+  stay free text.
+- **The picker shows the match** before the run, so it can be undone with Free text (that task
+  isn't offered again until the box is emptied). Voice input updates the picker at once (and
+  changing it cancels the auto-run). Typed text updates it when the box loses focus or on Run;
+  while typing, a note says what it matches.
+- **Recorded:** `POST /api/run` sends `task_match` `{method: picked|fuzzy, score, matched_from}`.
+  For an exact match the page leaves it out and the backend records `{method: "exact", score: 1,
+  matched_from: request}` itself. Both the banner (above the verdict) and the Logs page say
+  "Checked as task: pay-50 (matched from your request)" or "(picked from the list)".
+- **Debugging:** `AcmeConsole.explainMatch(text)` returns the tokens and, for every task, its
+  score and what ruled it out. The table in `test_task_match.py` (run with `-s`) prints every case.
+- **The mock agent** only has scripts for the tasks' exact texts. A fuzzy-matched run under the
+  mock gets "no scripted plan" and a ✗ verdict; the real agent reads the user's words.
 
 ## The no-DOM rule
 

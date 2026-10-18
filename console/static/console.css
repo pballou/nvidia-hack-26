@@ -710,6 +710,7 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   font-size: 1.06rem; font-weight: 700; line-height: 1.32;
   overflow-wrap: anywhere;
 }
+.banner-task { font-size: 0.85rem; font-weight: 600; margin-top: 0.2rem; overflow-wrap: anywhere; }
 .banner-label { font-size: 0.85rem; font-weight: 700; margin-top: 0.15rem; text-wrap: balance; }
 .banner-expl { font-size: 0.85rem; color: var(--muted); margin-top: 0.1rem; overflow-wrap: anywhere; }
 .banner-expl .btn-link { margin-left: 0.15rem; font-weight: 600; }

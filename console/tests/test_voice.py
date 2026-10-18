@@ -11,7 +11,9 @@ Three layers, checked separately:
   source) against a live console running the real mock agent and the real sandbox: click the mic, click again, the
   stub transcript fills the box and selects its sandbox task, a countdown runs it, and the verdict banner shows ✓.
   Also: Esc during the countdown, push-to-talk (Right Option, Space off controls but not on the Run button or a
-  focused scroller), and "stop" spoken during a slow run. Every browser test checks for no console errors, no request off 127.0.0.1 and
+  focused scroller), and "stop" spoken during a slow run. The capture fallbacks (a refused 16 kHz context, no
+  AudioWorklet) also get a warm second press with its pre-roll, then Turn off (the warm microphone's own tests are in
+  test_voice_ui.py). Every browser test checks for no console errors, no request off 127.0.0.1 and
   no touch of the Web Speech API or MediaRecorder at runtime; a static scan checks console/static never names them.
 
 Browser tests are marked `e2e` like test_console_ui.py (skip with -m "not e2e").
@@ -48,6 +50,9 @@ LOCAL_HOST = "127.0.0.1"
 FAKE_MIC = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
 DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}  # console default (--grounder)
 HEARD_STUB = re.compile(r"^Heard \(stub, \d+ ms\): Turn on high contrast\.$")
+# The first press opens the microphone and records from its first frame; later presses find it warm.
+COLD_TOGGLE = "Listening… start speaking now, press again to send"
+COLD_PTT = "Listening… start speaking now, release to send"
 FORBIDDEN_APIS = ("SpeechRecognition", "webkitSpeechRecognition", "MediaRecorder")
 
 e2e = pytest.mark.e2e
@@ -515,18 +520,19 @@ def test_mic_click_transcribes_and_runs_a_verified_task(mic, fast_console):
     m.wait_mic("listening")
     s = m.state()
     assert s["pressed"] is None and s["label"] == "Stop listening", s
-    assert s["status"] == "Listening… press again to send", s
+    assert s["status"] == COLD_TOGGLE, s
     time.sleep(1.2)
     m.pg.click("#mic-btn")
     m.wait_mic("done")
 
-    # every state on the way, each announced in the live region
+    # every state on the way, each announced in the live region ("opening": the mic is starting, no frames yet)
     trace = m.trace()
-    assert is_subsequence(["idle", "starting", "listening", "transcribing", "done"], states(trace)), trace
+    assert is_subsequence(["idle", "opening", "listening", "transcribing", "done"], states(trace)), trace
     by_state = {t["state"]: t for t in trace}
     assert all(t["pressed"] is None for t in trace), trace
+    assert by_state["opening"]["status"] == "Starting the microphone…"
     assert by_state["transcribing"]["status"] == "Transcribing…"
-    assert by_state["listening"]["status"] == "Listening… press again to send"
+    assert by_state["listening"]["status"] == COLD_TOGGLE
 
     # the upload: one raw 16 kHz mono PCM16 WAV about as long as the recording, with the fake mic's beeps in it
     assert len(m.wavs) == 1 and m.content_types == ["audio/wav"]
@@ -596,7 +602,7 @@ def test_push_to_talk_keys(mic, fast_console):
     m.pg.focus("#request")
     m.pg.keyboard.down("AltRight")
     m.wait_mic("listening")
-    assert m.state()["status"] == "Listening… release to send"
+    assert m.state()["status"] == COLD_PTT
     time.sleep(0.6)
     m.pg.keyboard.up("AltRight")
     m.wait_mic("done")
@@ -612,6 +618,7 @@ def test_push_to_talk_keys(mic, fast_console):
     assert m.pg.evaluate("document.activeElement === document.body")
     m.pg.keyboard.down("Space")
     m.wait_mic("listening")
+    assert m.state()["status"] == "Listening… release to send"  # the microphone is warm now
     time.sleep(0.6)
     m.pg.keyboard.up("Space")
     m.wait_mic("done")
@@ -718,8 +725,10 @@ def test_saying_stop_stops_a_running_task(mic, slow_console):
 # AudioWorkletNode, so it captures with a ScriptProcessor. Every stream and context is kept to check the release.
 AUDIO_SPY = """(() => {
   const md = navigator.mediaDevices, gum = md.getUserMedia.bind(md), AC = window.AudioContext;
-  window.__streams = []; window.__contexts = []; window.__scriptProcessors = 0;
-  md.getUserMedia = async (c) => { const s = await gum(c); window.__streams.push(s); return s; };
+  window.__streams = []; window.__contexts = []; window.__scriptProcessors = 0; window.__gumCalls = 0;
+  md.getUserMedia = async (c) => {
+    window.__gumCalls += 1; const s = await gum(c); window.__streams.push(s); return s;
+  };
   window.AudioContext = function (...a) { const c = new AC(...a); window.__contexts.push(c); return c; };
   window.AudioContext.prototype = AC.prototype;
   const csp = AC.prototype.createScriptProcessor;
@@ -764,17 +773,43 @@ def test_capture_fallbacks_still_send_16k_mono_wav(mic, fast_console, mode):
     assert (channels, rate, width) == (1, 16000, 2)
     assert abs(frames / rate - held) < 0.35, (frames / rate, held)  # a wrong resample ratio would show here
     assert max(abs(x) for x in array("h", pcm)) > 500  # the fake mic's beeps survived
-    spy = m.pg.evaluate("""() => ({ rates: window.__contexts.map((c) => c.sampleRate),
-        states: window.__contexts.map((c) => c.state), sp: window.__scriptProcessors,
-        tracks: window.__streams.flatMap((s) => s.getTracks().map((t) => t.readyState)) })""")
-    assert spy["tracks"] and set(spy["tracks"]) == {"ended"}, spy  # the mic is released
-    assert spy["states"] and set(spy["states"]) == {"closed"}, spy  # every context closed, the refused one too
+    spy_js = """() => ({ rates: window.__contexts.map((c) => c.sampleRate),
+        states: window.__contexts.map((c) => c.state), sp: window.__scriptProcessors, gum: window.__gumCalls,
+        tracks: window.__streams.flatMap((s) => s.getTracks().map((t) => t.readyState)) })"""
+    spy = m.pg.evaluate(spy_js)
+    assert spy["tracks"] == ["live"] and spy["gum"] == 1, spy  # warm: kept for the next press
     if mode == "resample":
         assert spy["rates"][0] == 16000 and len(spy["rates"]) == 2 and spy["rates"][1] != 16000, spy
-        assert spy["sp"] == 0
+        assert spy["states"] == ["closed", "running"] and spy["sp"] == 0, spy  # the refused one is closed
     else:
-        assert spy["rates"] == [16000] and spy["sp"] == 1, spy
+        assert spy["rates"] == [16000] and spy["states"] == ["running"] and spy["sp"] == 1, spy
     assert m.state()["request"] == STUB_TEXT
+    assert m.pg.evaluate("window.AcmeVoice.mic()")["kind"] == ("worklet" if mode == "resample" else "script")
+
+    # the second press: no getUserMedia, and the take starts with the ~400 ms pre-roll (kept at the context's
+    # rate in the worklet, or in the page for the ScriptProcessor), resampled like the rest
+    time.sleep(0.6)
+    m.pg.click("#mic-btn")
+    m.wait_mic("listening")
+    t0 = time.time()
+    time.sleep(1.0)
+    m.pg.click("#mic-btn")
+    held = time.time() - t0
+    m.wait_mic("done")
+    m.pg.keyboard.press("Escape")
+    take = m.pg.evaluate("window.AcmeVoice.lastTake()")
+    assert not take["cold"] and 300 <= take["preRollMs"] <= 500 and take["rate"] == spy["rates"][-1], take
+    channels, rate, width, frames, pcm = read_wav(m.wavs[1])
+    assert (channels, rate, width) == (1, 16000, 2)
+    assert abs(frames / rate - held - take["preRollMs"] / 1000) < 0.35, (frames / rate, held, take)
+    assert max(abs(x) for x in array("h", pcm)) > 500
+    assert m.pg.evaluate(spy_js)["gum"] == 1
+
+    # Turn off: every track stopped, every context closed
+    m.pg.click("#mic-off")
+    m.wait("window.__contexts.every((c) => c.state === 'closed')")
+    spy = m.pg.evaluate(spy_js)
+    assert spy["tracks"] == ["ended"] and set(spy["states"]) == {"closed"}, spy
     m.assert_clean(fast_console)
 
 
@@ -784,14 +819,14 @@ def test_status_line_never_shows_stale_text(mic, fast_console):
 
     A recording cancelled while the mic is starting leaves "Starting the microphone…" on screen. Starting again says
     the same words (cleared, rewritten 60 ms later) and the mic goes live in ~30 ms; the late write used to replace
-    "Listening… release to send" while recording."""
+    "Listening… release to send" while recording. Each round turns the warm microphone off, so the next starts cold."""
     m = mic
     m.pg.context.add_init_script(GUM_GATE)
     open_console(m, fast_console)
     for _ in range(3):
         m.pg.evaluate("window.__hold = true; document.activeElement.blur()")
         m.pg.keyboard.down("AltRight")
-        m.wait_mic("starting")
+        m.wait_mic("opening")
         m.pg.click("#ptt-change")  # changing the key cancels the starting recording, quietly
         m.pg.keyboard.up("AltRight")
         m.pg.keyboard.press("Escape")  # leave key capture, keep Right Option
@@ -799,14 +834,18 @@ def test_status_line_never_shows_stale_text(mic, fast_console):
         assert s["mic"] == "idle" and s["status"] == "Starting the microphone…", s
         m.pg.evaluate("window.__hold = false; window.__release()")
         time.sleep(0.2)
+        assert not m.pg.evaluate("window.AcmeVoice.mic().warm")  # cancelled before any audio: nothing kept open
         m.pg.evaluate("document.activeElement.blur()")
         m.pg.keyboard.down("AltRight")
         m.wait_mic("listening")
         time.sleep(0.3)  # well past the 60 ms re-announce
         s = m.state()
-        assert s["mic"] == "listening" and s["status"] == "Listening… release to send", s
+        assert s["mic"] == "listening" and s["status"] == COLD_PTT, s
         m.pg.keyboard.press("Escape")  # cancel; nothing sent
         m.pg.keyboard.up("AltRight")
         m.wait_mic("idle")
+        assert m.pg.evaluate("window.AcmeVoice.mic().warm")
+        m.pg.click("#mic-off")
+        assert not m.pg.evaluate("window.AcmeVoice.mic().warm")
     assert not m.wavs and not m.run_bodies
     m.assert_clean(fast_console)

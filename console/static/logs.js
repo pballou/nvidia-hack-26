@@ -667,7 +667,10 @@
     const when = isNum(r.started_ts)
       ? h('time', { datetime: isoOf(r.started_ts), title: fmtFull(r.started_ts), text: fmtWhen(r.started_ts) }) : na();
     let task;
-    if (has(r.task_id)) task = h('span', { class: 'task-id', title: `Sandbox task ${r.task_id}` }, sv('task '), str(r.task_id));
+    if (has(r.task_id)) {
+      task = h('span', { class: 'task-id', title: has(r.task_line) ? str(r.task_line) : `Sandbox task ${r.task_id}` },
+        sv('task '), str(r.task_id));
+    }
     else if (r.console_run_id) task = h('span', { class: 'task-id is-free', title: 'Free text: no sandbox check', text: 'free text' });
     else task = h('span', { class: 'task-id is-free' }, h('span', { 'aria-hidden': 'true', text: 'task —' }), sv('no task recorded'));
     const tr = h('tr', { class: 'run-row', 'data-run-id': r.run_id, 'data-status': str(r.status) || 'unknown' },
@@ -1030,8 +1033,24 @@
     }
 
     let task;
-    if (has(s.task_id)) task = h('span', { class: 'task-id', text: str(s.task_id) });
-    else if (c) task = h('span', { class: 'muted-text', text: 'free text (no sandbox check)' });
+    if (has(s.task_id)) {
+      // "Checked as task: pay-50 (matched from your request)": the console banner's line (logs.py task_line)
+      const line = has(s.task_line) ? str(s.task_line) : `Sandbox task: ${str(s.task_id)}`;
+      const at = line.indexOf(str(s.task_id));
+      task = [h('span', { class: 'task-line' }, line.slice(0, at), h('span', { class: 'task-id', text: str(s.task_id) }),
+        line.slice(at + str(s.task_id).length))];
+      const tm = isObj(s.task_match) ? s.task_match : null;
+      if (tm && tm.method === 'fuzzy') {
+        task.push(h('span', { class: 'kv-sub', text: [
+          `close match${isNum(tm.score) ? `, score ${tm.score.toFixed(2)}` : ''}`,
+          has(tm.matched_from) ? `from “${oneLine(tm.matched_from)}”` : null,
+          'the agent got the request as written; the task set its start page and check',
+        ].filter(Boolean).join(' · ') }));
+      } else if (tm && tm.method === 'exact') {
+        task.push(h('span', { class: 'kv-sub', text: 'the request is the task’s text (case, punctuation and how an '
+          + 'amount is written aside)' }));
+      }
+    } else if (c) task = h('span', { class: 'muted-text', text: 'free text (no sandbox check)' });
     else task = na('no console record for this run');
 
     const ids = [h('span', { class: 'kv-pair' }, h('span', { class: 'kv-k', text: 'agent ' }),

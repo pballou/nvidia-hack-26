@@ -13,11 +13,20 @@
  *
  * Voice input lives in voice.js and drives the page through window.AcmeConsole (below):
  * ready (resolves after /api/config and /api/tasks were tried), config(), isRunning(),
- * isStarting(), setRequest(text, voice?) -> {taskId, request}, run(), stop(). The page fires
+ * isStarting(), setRequest(text, voice?) -> {taskId, request}, run(), stop(), matchTask(text) -> task | null,
+ * matchTaskDetailed(text) -> {task, method: 'exact'|'fuzzy', score, runner_up} | null (see createTaskMatcher) and
+ * explainMatch(text) (every task's score and what ruled it out). The page fires
  * `acme:run-start` / `acme:run-end` on document (detail: {runId, request, taskId}).
  * `voice` ({text, model, latency_ms, duration_s} from /api/transcribe) goes into POST /api/run
  * for the logs page, but only while the request box still holds exactly what that transcript put
  * there, and only for the first run that uses it. The backend never passes it to the agent.
+ *
+ * A run is checked as a sandbox task (task_id: its start page, state and verdict) when the task was picked from the
+ * list or the request matches one, exactly or fuzzily (createTaskMatcher). The picker shows the match before the
+ * run (voice input at once, typed text when the box loses focus) so it can be undone (Free text). The agent always
+ * gets the user's request: a fuzzy match never swaps in the task's text. POST /api/run carries task_match {method:
+ * picked|fuzzy, score, matched_from}; an exact match is left out (the backend records it). The banner says "Checked as
+ * task: <id> (matched from your request)" or "(picked from the list)" above the verdict.
  */
 'use strict';
 
@@ -82,6 +91,9 @@
     config: null,
     tasksById: new Map(),
     taskId: null,
+    taskMatch: null,    // how taskId was chosen: {method: picked|exact|fuzzy, score, matched_from} (see setTask)
+    declined: null,     // a task id the user chose Free text over: not matched again until the box is emptied
+    matcher: null,      // createTaskMatcher over /api/tasks
     starting: false,
     run: null,          // the run being shown (see attach())
     es: null,
@@ -112,6 +124,8 @@
     run: () => startRun(),
     stop: () => stopRun(),
     matchTask: (text) => matchTask(text),
+    matchTaskDetailed: (text) => matchTaskDetailed(text),
+    explainMatch: (text) => (S.matcher ? S.matcher.explain(oneLine(text)) : null),
   });
 
   function emit(name, detail) {
@@ -337,7 +351,7 @@
       'banner-title', 'banner-label', 'banner-expl', 'banner-details', 'banner-summary', 'banner-claim', 'banner-extra',
       'options', 'options-summary', 'live-btn', 'view-toggle', 'view-before', 'view-after', 'screen-img', 'screen-empty',
       'screen', 'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge', 'endpoints', 'vlm-endpoint',
-      'vlm-endpoint-text', 'vlm-warning', 'lightning-endpoint', 'grounder-note', 'banner-question',
+      'vlm-endpoint-text', 'vlm-warning', 'lightning-endpoint', 'grounder-note', 'banner-question', 'banner-task',
     ]) ui[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = $(id);
     ui.optionSets = OPTION_NAMES.map((n) => $(`opt-${n}`));
 
@@ -357,6 +371,7 @@
       }
     });
     ui.request.addEventListener('input', onRequestInput);
+    ui.request.addEventListener('change', () => syncMatch(true));  // leaving the box: the picker shows its match
     ui.taskSelect.addEventListener('change', onTaskChange);
     ui.stopBtn.addEventListener('click', stopRun);
     document.addEventListener('keydown', (e) => {
@@ -624,6 +639,7 @@
         S.tasksById.set(String(t.id), t);
         ui.taskSelect.add(new Option(`${t.request} (${difficulty(t)})`, String(t.id)));
       }
+      S.matcher = createTaskMatcher([...S.tasksById.values()]);
     } catch {
       ui.taskMeta.textContent = 'Couldn’t load the sandbox tasks. Free text still works.';
     }
@@ -664,38 +680,7 @@
     return out;
   }
 
-  // --- request form ---------------------------------------------------------------------
-  function onTaskChange() {
-    const id = ui.taskSelect.value || null;
-    const prev = S.taskId ? S.tasksById.get(S.taskId) : null;
-    S.voice = null;  // the box now holds the picked task, not what was heard
-    clearFormError();
-    ui.requestNote.textContent = '';
-    if (id && S.tasksById.has(id)) {
-      const t = S.tasksById.get(id);
-      S.taskId = id;
-      ui.request.value = t.request;
-      ui.taskMeta.textContent = taskMetaText(t);
-    } else {
-      if (prev && ui.request.value === prev.request) ui.request.value = '';
-      S.taskId = null;
-      ui.taskMeta.textContent = '';
-    }
-  }
-
-  function onRequestInput() {
-    clearFormError();
-    if (S.voice && ui.request.value !== S.voice.request) S.voice = null;  // edited: no longer the transcript
-    if (!S.taskId) return;
-    const t = S.tasksById.get(S.taskId);
-    if (t && requestKey(ui.request.value) !== requestKey(t.request)) {  // same words: still that task
-      S.taskId = null;
-      ui.taskSelect.value = '';
-      ui.taskMeta.textContent = '';
-      ui.requestNote.textContent = 'You edited the task text, so this runs as free text (no sandbox check).';
-    }
-  }
-
+  // --- matching a request to a sandbox task ---------------------------------------------------
   const NUMBER_WORDS = new Map(Object.entries({
     zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
     eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
@@ -736,35 +721,420 @@
       .replace(/[^\p{L}\p{N}]+/gu, '');
   }
 
-  function matchTask(text) {
-    const key = requestKey(text);
-    if (!key) return null;
-    for (const t of S.tasksById.values()) if (requestKey(t.request) === key) return t;
-    return null;
+  // Exact: the request's requestKey is a task's (same words; case, punctuation and how an amount is written aside).
+  // Fuzzy: both texts become content tokens (fuzzyTokens: filler dropped, synonyms folded, light stemming), the
+  // task's anchor words (TASK_ANCHORS: its number, month, district, on/off and key nouns) must all be in the request,
+  // nothing in the request may contradict the task (another number, month, district or channel, the opposite on/off,
+  // a negated anchor, a schedule word, another task's key word, a second request), and the weighted overlap must be
+  // >= MATCH_MIN_SCORE and beat the next eligible task by MATCH_MIN_MARGIN. Anything else is free text.
+  const MATCH_MIN_SCORE = 0.5;
+  const MATCH_MIN_MARGIN = 0.15;
+  const ANCHOR_WEIGHT = 2.5;   // an anchor counts this much in the overlap; other words 1 (0.5 if 3+ tasks have them)
+  const MISSING_WEIGHT = 0.5;  // a task word the request leaves out costs half; a word the request adds costs fully
+
+  const W = (src) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'gu');
+  // Spoken-language rewrites, in order, on lowercase text without punctuation: filler goes, synonyms become the
+  // word the task texts use, multi-word names become one token. Task texts and requests both go through them.
+  const PHRASES = [
+    [W('(?:can|could|would|will) (?:you|u)'), ' '],
+    [W('i (?:would|d) (?:like|love) (?:you )?(?:to )?|id (?:like|love) (?:you )?(?:to )?'), ' '],
+    [W('i (?:want|need) (?:you )?to|i wanna|help me|go ahead and|for me|thank you'), ' '],
+    [W(['please', 'pls', 'plz', 'um+', 'uh+', 'uhm', 'erm?', 'hmm+', 'okay', 'ok', 'hey', 'hi', 'hello', 'so', 'just',
+      'kindly', 'thanks', 'now', 'actually', 'quickly', 'right away', 'alright', 'all right'].join('|')), ' '],
+    [W('(?:sms|text) messages?|sms texts?|texts|texting|s m s'), ' sms '],  // before 'text' (the font)
+    [W('text (alerts?|notifications?)'), ' sms $1 '],
+    [W('auto pay(?:ments?)?|autopayments?|automatic (?:bill )?pay(?:ments?)?|auto payments?'), ' autopay '],
+    [W('(?:power )?outages?|blackouts?|power cuts?|power failures?'), ' outage '],
+    [W('(?:is |are )?(?:not|isnt|arent) working|(?:does not|doesnt|do not|dont) work|stopped working|broke|busted|'
+      + 'faulty|malfunctioning|not functioning'), ' broken '],
+    [W('(?:every|each) (month|week|day)'), (_, unit) => ` ${unit === 'day' ? 'daily' : `${unit}ly`} `],
+    [W('make a payment(?: of)?|payment of'), ' pay '],
+    [W('switch|flip'), ' turn '],
+    [W('enable|activate|set up|sign up for|start using'), ' turn on '],
+    [W('disable|deactivate|unsubscribe(?: me)?(?: from)?|opt out(?: of)?|cancel|no more'), ' turn off '],
+    [W('stop'), ' off '],
+    [W('every|everything|each'), ' all '],
+    [W('favou?rites?'), ' star '],
+    [W('fonts?|letters|lettering|writing'), ' text '],
+    [W('larger|increase|enlarge|big'), ' bigger '],
+    [W('highest|biggest|largest|peak|max|maximum'), ' most '],
+    [W('electricity|energy|usage|consumption|kwh|kilowatt hours?'), ' power '],
+    [W('used|using|uses|consumed'), ' use '],
+    [W('invoice'), ' statement '],
+    [W('can not|cannot|unable to'), ' cant '],
+    [W('customer (?:support|service)|support team|help desk|helpdesk'), ' support '],
+    [W('(?:electric|electricity|power|smart) meter'), ' meter '],
+    [W('landlady|property manager'), ' landlord '],
+    [W('promos?|promotional|marketing|offers|deals|ads|advertising|advertisements'), ' promotion '],
+    [W('e mails?'), ' email '],
+    [W('mail|inbox'), ' message '],
+    [W('neighbou?rhood|area'), ' district '],
+    [W('old town'), ' oldtown '], [W('maple grove'), ' maplegrove '], [W('harbou?r point'), ' harborpoint '],
+    [W('north gate'), ' northgate '], [W('hill crest'), ' hillcrest '], [W('river side'), ' riverside '],
+    [W('sept?'), ' september '], [W('jan'), ' january '], [W('feb'), ' february '], [W('apr'), ' april '],
+    [W('jun'), ' june '], [W('jul'), ' july '], [W('aug'), ' august '], [W('oct'), ' october '],
+    [W('nov'), ' november '], [W('dec'), ' december '],
+    [W('twice'), ' 2 '], [W('thrice'), ' 3 '],
+  ];
+  const STOP = new Set(('a an the my me mine i im ive it its this that these those to too for of in at from with as '
+    + 'is are was were be been being am do does did done doing and or you your yours we our us they them their he she '
+    + 'his her him can could would will should shall might must have has had having there here what which who whom '
+    + 'whose when where why how some any one about into onto over up down out then than also very really much more '
+    + 'again if whether say said saying says tell telling told let lets want need get got go going gonna wanna like by '
+    + 'turn').split(' '));  // 'turn' too: "turn on" / "turn off" carry their meaning in on / off
+  const NEGATORS = new Set(['not', 'dont', 'never', 'wont', 'doesnt', 'didnt', 'isnt', 'arent', 'without', 'except',
+    'neither', 'nor']);
+  const NEGATION_SPAN = 3;  // a negator covers the next 3 content words: "don't turn on high contrast"
+  const MONTHS = new Set(['january', 'february', 'march', 'april', 'june', 'july', 'august', 'september', 'october',
+    'november', 'december']);  // not "may": far more often the verb
+  const DISTRICTS = new Set(['riverside', 'hillcrest', 'oldtown', 'maplegrove', 'harborpoint', 'northgate']);
+  const POLARITY = new Set(['on', 'off']);
+  const CHANNELS = new Set(['email', 'sms', 'push']);
+  const SCHEDULE = new Set(['monthly', 'weekly', 'daily', 'recurring', 'schedule', 'scheduled', 'tomorrow', 'later',
+    'automatically', 'automatic']);
+  const CONJUNCTIONS = new Set(['and', 'also', 'then', 'plus', 'after', 'afterwards']);
+  // Opposite intent: "cancel my outage report", "remove the star". Read from the raw words, because synonyms
+  // fold "cancel"/"stop" into "turn off" before tokenizing. Only "off"-type tasks may contain them.
+  const UNDO_WORDS = new Set(['cancel', 'cancelled', 'canceled', 'remove', 'undo', 'unstar', 'delete', 'withdraw',
+    'revoke', 'refund', 'retract', 'unmark', 'reverse']);
+  // A question is not a request ("Is high contrast on?", "Should I pay $50?"), unless the task itself asks one
+  // ("Which month did I use the most power? Open it."). Polite "can/could/would you ...?" stays a request.
+  const QUESTION_START = new Set(['is', 'are', 'was', 'were', 'did', 'does', 'should', 'how', 'why', 'what', 'when',
+    'where', 'which', 'who', 'have', 'has']);
+  const CLAUSE_SKIP = new Set(['i', 'you', 'we', 'me', 'to', 'can', 'could', 'would', 'will', 'please']);
+  // Verbs that start a second request after "and" / "then". Light verbs ('turn', 'make', 'set') only count when the
+  // words after them are foreign to the task ("... and turn on high contrast"), not when they repeat it.
+  const ACTION_VERBS = ['turn', 'make', 'set', 'change', 'reduce', 'decrease', 'lower', 'raise', 'send', 'pay',
+    'download', 'open', 'close', 'mark', 'star', 'unstar', 'report', 'delete', 'remove', 'archive', 'add', 'update',
+    'edit', 'show', 'find', 'check', 'click', 'select', 'email', 'call', 'reply', 'forward', 'print', 'schedule',
+    'start', 'save', 'share', 'upload', 'move', 'toggle', 'write', 'type', 'submit', 'buy', 'order', 'book', 'search',
+    'view', 'sort', 'filter', 'hide', 'mute', 'block', 'dismiss', 'zoom', 'navigate', 'log', 'sign', 'read', 'pin',
+    'flag'];
+  const LIGHT_VERBS = new Set(['turn', 'mak', 'set']);
+  const NO_STEM = new Set([...MONTHS, ...DISTRICTS, ...POLARITY, ...CHANNELS, 'autopay', 'bus', 'gas', 'yes', 'this',
+    'its', 'is', 'us', 'as', 'has', 'was', 'does', 'news', 'status', 'access', 'press', 'less', 'process']);
+
+  /** Light stemming (both sides get it, so it only has to be consistent): -s, -es, -ies, -ed, -ing, a final -e and a
+   *  doubled final consonant ('starred' -> 'star', 'forgetting' -> 'forget', 'messages' / 'message' -> 'messag'). */
+  function stem(w) {
+    if (w.length <= 3 || NO_STEM.has(w) || /^\d/.test(w)) return w;
+    let s = w;
+    if (s.endsWith('ies') && s.length > 4) s = `${s.slice(0, -3)}y`;
+    else if (s.endsWith('ing') && s.length >= 6) s = s.slice(0, -3);
+    else if (s.endsWith('ed') && s.length >= 5) s = s.slice(0, -2);
+    else if (s.endsWith('es') && s.length >= 5) s = s.slice(0, -2);
+    else if (s.endsWith('s') && !/(?:ss|us|is)$/.test(s)) s = s.slice(0, -1);
+    if (s.length >= 4 && s.endsWith('e')) s = s.slice(0, -1);
+    if (/([b-df-hj-km-np-rtv-z])\1$/.test(s)) s = s.slice(0, -1);  // not ll or ss: 'bill', 'press'
+    return s;
+  }
+  const ACTION_STEMS = new Set(ACTION_VERBS.map(stem));
+
+  const plainNumber = (n) => {  // '50.00' -> '50', '50.50' -> '50point5'
+    const [whole, frac = ''] = n.split('.');
+    const f = frac.replace(/0+$/, '');
+    return f ? `${Number(whole)}point${f}` : String(Number(whole));
+  };
+
+  /** Request text -> {tokens: content stems in order, negated: stems a negator covers, clauses: [{verb, after}] for
+   *  "... and <verb> ..."}. Amounts: '$50', '50 dollars', 'fifty dollars', 'fifty bucks' -> '50'. */
+  function fuzzyTokens(text) {
+    let s = str(text).normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[’‘`´]/g, "'");
+    s = s.replace(/(\p{L})'s(?![\p{L}\p{N}])/gu, '$1')  // possessive: "landlord's" -> "landlord"
+      .replace(/(\p{L})'(\p{L})/gu, '$1$2')               // "can't" -> "cant", "i'd" -> "id"
+      .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')             // 1,000 -> 1000
+      .replace(NUMBER_RUN_RE, (run, at, all) => (run === 'one' && !/^\s*(?:dollars?|bucks?)\b/.test(all.slice(at + 3))
+        ? run : ` ${numberWordsToDigits(run)} `))       // a lone 'one' is a pronoun ("the one from my landlord")
+      .replace(/\$\s*(\d+(?:\.\d+)?)/g, (_, n) => ` ${plainNumber(n)} `)
+      .replace(/(\d+\.\d+)/g, (_, n) => plainNumber(n))
+      .replace(/(\d+(?:point\d+)?)\s*(?:dollars?|bucks?|usd)(?![\p{L}\p{N}])/gu, '$1')
+      .replace(/(\d+)\s*cents?(?![\p{L}\p{N}])/gu, '$1c');
+    s = ` ${s.replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+    const raw = s.trim().split(/\s+/).filter(Boolean);
+    const undo = raw.filter((w) => UNDO_WORDS.has(w));
+    const first = (raw[0] === 'do' && /\?\s*$/.test(str(text))) || QUESTION_START.has(raw[0]) ? raw[0] : null;
+    for (const [re, to] of PHRASES) s = s.replace(re, to);
+    const all = s.split(/\s+/).filter(Boolean);
+    const clauses = [];
+    all.forEach((w, i) => {
+      if (!CONJUNCTIONS.has(w) || CONJUNCTIONS.has(all[i - 1])) return;
+      let j = i + 1;
+      while (j < all.length && (CONJUNCTIONS.has(all[j]) || CLAUSE_SKIP.has(all[j]))) j += 1;
+      if (j < all.length && ACTION_STEMS.has(stem(all[j]))) {
+        clauses.push({ verb: stem(all[j]),
+          after: all.slice(j + 1).filter((x) => !STOP.has(x) && !NEGATORS.has(x)).slice(0, 3).map(stem) });
+      }
+    });
+    const tokens = [];
+    const negated = new Set();
+    let span = 0;
+    for (const w of all) {
+      if (STOP.has(w)) continue;
+      if (NEGATORS.has(w)) { span = NEGATION_SPAN; continue; }
+      const t = stem(w);
+      tokens.push(t);
+      if (span > 0) { negated.add(t); span -= 1; }
+    }
+    return { tokens, negated, clauses, undo, question: first };
   }
 
-  /** Select sandbox task `t` and put its exact text in the request box. */
-  function selectTask(t) {
+  const tokenSet = (text) => new Set(fuzzyTokens(text).tokens);
+
+  // Per task: the words a request must contain (each inner list: any one of them), and words that are fine in a
+  // request though the task text lacks them (the portal's statements are 2026's). A task id not listed here gets
+  // its numbers, months, districts, on / off and the words no other task has.
+  const TASK_ANCHORS = {
+    'text-size-large': { need: [['text'], ['bigger']] },
+    'download-september-statement': { need: [['download'], ['september'], ['statement', 'bill']], also: ['2026'] },
+    'mark-all-read': { need: [['mark'], ['all'], ['read']] },
+    'turn-on-autopay': { need: [['autopay'], ['on']] },
+    'high-contrast': { need: [['high'], ['contrast'], ['on']] },
+    'sms-billing-off': { need: [['sms'], ['bill'], ['off']] },
+    'max-usage-month': { need: [['month'], ['most']] },
+    'report-outage-riverside': { need: [['report'], ['outage'], ['riverside']] },
+    'star-landlord-message': { need: [['star'], ['landlord']] },
+    'pay-50': { need: [['pay'], ['50']] },
+    'message-support-meter': { need: [['support'], ['meter'], ['broken']] },
+    'stop-promotions': { need: [['promotion'], ['off']] },
+  };
+  // Anchors too common to mean "that other task" when they turn up in a request for this one.
+  const GENERIC_ANCHORS = new Set(['on', 'off', 'all', 'most', 'month', 'read', 'high', 'mark', 'report', 'broken',
+    'bill']);
+  const classOf = (t) => (/^\d/.test(t) ? 'number' : MONTHS.has(t) ? 'month' : DISTRICTS.has(t) ? 'district'
+    : POLARITY.has(t) ? 'polarity' : CHANNELS.has(t) ? 'channel' : '');
+  const byClass = (tokens) => {
+    const out = {};
+    for (const t of tokens) {
+      const c = classOf(t);
+      if (c) (out[c] = out[c] || new Set()).add(t);
+    }
+    return out;
+  };
+
+  /** The matcher for a task list: {detailed(text), explain(text)}. */
+  function createTaskMatcher(tasks) {
+    const models = tasks.map((t) => ({ task: t, id: String(t.id), toks: tokenSet(t.request), key: requestKey(t.request),
+      question: fuzzyTokens(t.request).question,
+      spec: Object.prototype.hasOwnProperty.call(TASK_ANCHORS, String(t.id)) ? TASK_ANCHORS[String(t.id)] : null }));
+    const df = new Map();
+    for (const m of models) for (const tok of m.toks) df.set(tok, (df.get(tok) || 0) + 1);
+    for (const m of models) {
+      m.need = m.spec ? m.spec.need.map((alts) => alts.flatMap((a) => [...tokenSet(a)]))
+        : [...m.toks].filter((tok) => classOf(tok) || df.get(tok) === 1).map((tok) => [tok]);
+      m.anchors = new Set(m.need.flat());
+      m.also = new Set(((m.spec && m.spec.also) || []).flatMap((a) => [...tokenSet(a)]));
+      m.accept = new Set([...m.toks, ...m.anchors, ...m.also]);
+      m.cls = byClass(m.toks);
+    }
+    const foreign = new Set();
+    for (const m of models) for (const a of m.anchors) if (!GENERIC_ANCHORS.has(a) && !classOf(a)) foreign.add(a);
+    const weight = (m, tok) => (m.anchors.has(tok) ? ANCHOR_WEIGHT : (df.get(tok) || 0) >= 3 ? 0.5 : 1);
+
+    /** One task against a request: {id, task, score (weighted overlap, 0..1), eligible, why: [what rules it out]}. */
+    function judge(m, req) {
+      const R = new Set(req.tokens);
+      const why = [];
+      const tside = new Set(m.toks);
+      for (const alts of m.need) {
+        const hit = alts.find((a) => R.has(a));
+        if (!hit) {
+          why.push(`missing ${alts.join('|')}`);
+          continue;
+        }
+        if (req.negated.has(hit)) why.push(`negated ${hit}`);
+        for (const a of alts) tside.delete(a);
+        tside.add(hit);
+      }
+      const rcls = byClass(R);
+      const mine = (c) => m.cls[c] || new Set();
+      for (const c of ['number', 'month', 'district']) {
+        for (const tok of rcls[c] || []) if (!mine(c).has(tok) && !m.also.has(tok)) why.push(`other ${c} ${tok}`);
+      }
+      if (mine('polarity').size) {
+        for (const tok of rcls.polarity || []) if (!mine('polarity').has(tok)) why.push(`opposite ${tok}`);
+      }
+      if (mine('channel').size && rcls.channel) {  // channels: none named, or exactly the task's
+        const said = [...rcls.channel].sort().join('+');
+        const want = [...mine('channel')].sort().join('+');
+        if (said !== want) why.push(`channels ${said}, not ${want}`);
+      }
+      if (req.undo.length && !mine('polarity').has('off')) why.push(`opposite intent: ${req.undo[0]}`);
+      if (req.question && m.question !== req.question) why.push(`a question (${req.question} …), not a request`);
+      for (const tok of R) {
+        if (SCHEDULE.has(tok) && !m.toks.has(tok)) why.push(`schedule word ${tok}`);
+        if (foreign.has(tok) && !m.accept.has(tok)) why.push(`another task's word ${tok}`);
+      }
+      for (const c of req.clauses) {
+        if (!m.toks.has(c.verb) && (!LIGHT_VERBS.has(c.verb) || c.after.some((t) => !m.accept.has(t)))) {
+          why.push(`a second request: and ${[c.verb, ...c.after].join(' ')}`);
+        }
+      }
+      for (const o of models) {  // all of another task's anchors, some of them foreign to this one: two requests
+        if (o !== m && o.need.every((alts) => alts.some((a) => R.has(a)))
+            && [...o.anchors].some((a) => R.has(a) && !m.accept.has(a))) why.push(`also asks for ${o.id}`);
+      }
+      const rside = new Set([...R].filter((tok) => !m.also.has(tok) || tside.has(tok)));
+      let inter = 0;
+      let union = 0;
+      for (const tok of new Set([...rside, ...tside])) {
+        const w = weight(m, tok);
+        const both = rside.has(tok) && tside.has(tok);
+        if (both) inter += w;
+        union += both || rside.has(tok) ? w : w * MISSING_WEIGHT;
+      }
+      const score = union ? Math.round((inter / union) * 1000) / 1000 : 0;
+      return { id: m.id, task: m.task, score, eligible: why.length === 0, why };
+    }
+
+    /** The best other task: {id, score (0 when a rule rules it out), similarity, ruled_out (the first reason)}. */
+    function runnerUp(judged, bestId) {
+      const o = judged.filter((j) => j.id !== bestId)
+        .sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.score - a.score)[0];
+      return o ? { id: o.id, score: o.eligible ? o.score : 0, similarity: o.score, ruled_out: o.why[0] || null } : null;
+    }
+
+    /** {task, method: 'exact'|'fuzzy', score, runner_up} or null (free text: no sandbox check). */
+    function detailed(text) {
+      const key = requestKey(text);
+      if (!key) return null;
+      const req = fuzzyTokens(text);
+      const judged = models.map((m) => judge(m, req));
+      const exact = models.find((m) => m.key === key);
+      if (exact) return { task: exact.task, method: 'exact', score: 1, runner_up: runnerUp(judged, exact.id) };
+      const ok = judged.filter((j) => j.eligible).sort((a, b) => b.score - a.score);
+      if (!ok.length) return null;
+      const [best, second] = ok;
+      if (best.score < MATCH_MIN_SCORE || best.score - (second ? second.score : 0) < MATCH_MIN_MARGIN) return null;
+      return { task: best.task, method: 'fuzzy', score: best.score, runner_up: runnerUp(judged, best.id) };
+    }
+
+    /** Why a request did or didn't match: its tokens and every task's score and reasons (for tests and debugging). */
+    function explain(text) {
+      const req = fuzzyTokens(text);
+      return {
+        tokens: req.tokens, negated: [...req.negated], clauses: req.clauses,
+        tasks: models.map((m) => judge(m, req)).map(({ task, ...j }) => j)
+          .sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.score - a.score),
+      };
+    }
+
+    return { detailed, explain };
+  }
+
+  function matchTaskDetailed(text) {
+    return S.matcher ? S.matcher.detailed(oneLine(text)) : null;
+  }
+
+  function matchTask(text) {
+    const m = matchTaskDetailed(text);
+    return m ? m.task : null;
+  }
+
+  // --- request form ---------------------------------------------------------------------
+  // S.taskId is the sandbox task the next run is checked as; S.taskMatch says how it was chosen: {method: 'picked'
+  // (from the list) | 'exact' | 'fuzzy' (matched from the request), score, matched_from}. The agent always gets the
+  // request box's text: a fuzzy match keeps the user's own words; an exact one shows the task's own spelling of the
+  // same words. S.declined is a matched task the user chose Free text over: it isn't matched again (while they edit
+  // the same words) until the box is emptied, a task is picked or voice input replaces the text.
+  function setTask(t, match) {
     S.taskId = String(t.id);
+    S.taskMatch = match;
     ui.taskSelect.value = S.taskId;
-    ui.request.value = t.request;
     ui.taskMeta.textContent = taskMetaText(t);
   }
 
-  /** Put text in the request box (voice input). A sandbox task's text selects that task, so its verdict shows.
-   *  `voice` (the /api/transcribe reply) is kept with the text it produced, for the next run's POST body. */
+  function clearTask() {
+    S.taskId = null;
+    S.taskMatch = null;
+    ui.taskSelect.value = '';
+    ui.taskMeta.textContent = '';
+  }
+
+  const MATCH_HINT = 'This matches sandbox task ';
+
+  function matchNote(id, method) {
+    return `Will be checked as task ${id} (matched from your request${method === 'fuzzy'
+      ? '; the agent gets your words as they are' : ''}). Choose Free text to skip the check.`;
+  }
+
+  function onTaskChange() {
+    const id = ui.taskSelect.value || null;
+    const prev = S.taskId ? S.tasksById.get(S.taskId) : null;
+    const how = S.taskMatch && S.taskMatch.method;
+    clearFormError();
+    if (id && S.tasksById.has(id)) {
+      const t = S.tasksById.get(id);
+      S.voice = null;  // the box now holds the picked task, not what was heard
+      S.declined = null;
+      setTask(t, { method: 'picked', score: null, matched_from: t.request });
+      ui.request.value = t.request;
+      ui.requestNote.textContent = '';
+      return;
+    }
+    if (prev && how === 'picked' && ui.request.value === prev.request) {
+      ui.request.value = '';  // that text came from the picker
+      S.voice = null;
+      ui.requestNote.textContent = '';
+    } else if (prev && oneLine(ui.request.value)) {  // the user's own words were matched: keep them, unmatched
+      S.declined = S.taskId;
+      ui.requestNote.textContent = 'Runs as free text: no sandbox check.';
+    } else {
+      ui.requestNote.textContent = '';
+    }
+    clearTask();
+  }
+
+  function onRequestInput() {
+    clearFormError();
+    if (S.voice && ui.request.value !== S.voice.request) S.voice = null;  // edited: no longer the transcript
+    syncMatch(false);
+  }
+
+  /** Keep the task picker in step with the request box. A task stays selected while the box still says it (a picked
+   *  task: the same words; a matched one: still that match). select=false (typing): a new match is only announced
+   *  in the note; the picker follows when the box loses focus, on Run, and for voice input. */
+  function syncMatch(select) {
+    const text = oneLine(ui.request.value);
+    if (!text) S.declined = null;  // an empty box starts over
+    const cur = S.taskId ? S.tasksById.get(S.taskId) : null;
+    const how = S.taskMatch && S.taskMatch.method;
+    if (cur && how === 'picked' && requestKey(text) === requestKey(cur.request)) return;  // same words: still that task
+    let m = text ? matchTaskDetailed(text) : null;
+    if (m && S.declined === String(m.task.id)) m = null;  // the user chose Free text over this task
+    if (m && (select || (cur && String(m.task.id) === S.taskId))) {
+      const changed = S.taskId !== String(m.task.id) || how !== m.method;
+      setTask(m.task, { method: m.method, score: m.score, matched_from: text });
+      if (changed) ui.requestNote.textContent = matchNote(m.task.id, m.method);
+      return;
+    }
+    let note = ui.requestNote.textContent;
+    if (cur) {
+      clearTask();
+      note = how === 'picked' ? 'You edited the task text, so this runs as free text (no sandbox check).'
+        : 'No longer matches that sandbox task, so this runs as free text (no sandbox check).';
+    }
+    if (m) note = `${MATCH_HINT}${m.task.id}: running it checks the portal’s state afterwards.`;  // picked on blur/Run
+    else if (!text || note.startsWith(MATCH_HINT)) note = '';
+    ui.requestNote.textContent = note;
+  }
+
+  /** Put text in the request box (voice input). Text that matches a sandbox task (matchTaskDetailed) selects it in
+   *  the picker, so its check runs and the user can see (and undo) that before the run. An exact match shows the
+   *  task's own text (the same words); a fuzzy one keeps what was said. `voice` (the /api/transcribe reply) is kept
+   *  with the text it produced, for the next run's POST body. */
   function setRequestText(text, voice) {
     const clean = oneLine(text).slice(0, 500);
-    const t = matchTask(clean);
+    const m = matchTaskDetailed(clean);
     clearFormError();
-    ui.requestNote.textContent = '';
-    if (t) {
-      selectTask(t);
+    S.declined = null;
+    if (m) {
+      setTask(m.task, { method: m.method, score: m.score, matched_from: clean });
+      ui.request.value = m.method === 'exact' ? m.task.request : clean;
+      ui.requestNote.textContent = matchNote(m.task.id, m.method);
     } else {
-      S.taskId = null;
-      ui.taskSelect.value = '';
+      clearTask();
       ui.request.value = clean;
-      ui.taskMeta.textContent = '';
+      ui.requestNote.textContent = '';
     }
     const v = cleanVoice(voice);
     S.voice = v ? { request: ui.request.value, voice: v } : null;
@@ -833,15 +1203,21 @@
       return;
     }
     const voice = voiceFor(request);
-    const match = matchTask(request);
-    if (match && (!S.taskId || S.taskId === String(match.id))) {
-      // typed text that is a sandbox task's text runs as that task (its start page and verdict), as voice does
-      selectTask(match);
-      ui.requestNote.textContent = '';
-      request = ui.request.value.trim();
+    // typed text that matches a sandbox task runs as that task (its start page, state and verdict), as voice does
+    syncMatch(true);
+    const task = S.taskId ? S.tasksById.get(S.taskId) : null;
+    if (task && S.taskMatch && S.taskMatch.method === 'exact' && request !== task.request) {
+      ui.request.value = task.request;  // the same words, as the task writes them
+      request = task.request;
     }
     const options = readOptions();
     const taskId = S.taskId;
+    const taskMatch = taskId && S.taskMatch ? { ...S.taskMatch } : null;
+    // An exact match isn't sent: the backend records one itself when the request is the task's text.
+    const sentMatch = taskMatch && taskMatch.method !== 'exact'
+      ? { method: taskMatch.method, score: isNum(taskMatch.score) ? taskMatch.score : null,
+        matched_from: str(taskMatch.method === 'picked' ? request : taskMatch.matched_from).slice(0, 500) }
+      : null;
     S.starting = true;
     if (document.activeElement === ui.runBtn) ui.request.focus();  // Run is disabled until the run ends
     ui.runBtn.disabled = true;
@@ -851,7 +1227,9 @@
       res = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ request, task_id: taskId, options, ...(voice ? { voice } : {}) }),
+        body: JSON.stringify({
+          request, task_id: taskId, options, ...(voice ? { voice } : {}), ...(sentMatch ? { task_match: sentMatch } : {}),
+        }),
       });
       data = await res.json().catch(() => ({}));
     } catch {
@@ -877,8 +1255,14 @@
     }
     if (voice && S.voice && S.voice.voice === voice) S.voice = null;  // one transcript, one run
     attach(String(data.run_id), {
-      request, taskId, options, startUrl: data.start_url, focusOnEnd: true,
+      request, taskId, taskMatch, options, startUrl: data.start_url, focusOnEnd: true,
     });
+  }
+
+  /** GET /api/runs/{id} task_match ({method, score, matched_from}) as the page uses it, or null. */
+  function cleanTaskMatch(v) {
+    if (!isObj(v) || !['picked', 'exact', 'fuzzy'].includes(v.method)) return null;
+    return { method: v.method, score: isNum(v.score) ? v.score : null, matched_from: str(v.matched_from) };
   }
 
   async function watchRun(runId, { quietIfDone = false } = {}) {
@@ -895,16 +1279,17 @@
     S.voice = null;
     ui.request.value = str(info.request);
     const taskId = info.task_id && S.tasksById.has(String(info.task_id)) ? String(info.task_id) : null;
-    S.taskId = taskId;
-    ui.taskSelect.value = taskId || '';
-    ui.taskMeta.textContent = taskId ? taskMetaText(S.tasksById.get(taskId)) : '';
+    const taskMatch = taskId ? cleanTaskMatch(info.task_match) : null;
+    S.declined = null;
+    if (taskId) setTask(S.tasksById.get(taskId), taskMatch || { method: 'picked', score: null, matched_from: str(info.request) });
+    else clearTask();
     ui.requestNote.textContent = '';
     if (isObj(info.options)) for (const name of OPTION_NAMES) setRadio(name, info.options[name]);
     keepServedChoice();  // that run's grounder may not be served any more: the radios describe the next run
     renderOptionsSummary();
     renderEndpoints();
     attach(String(info.run_id || runId), {
-      request: str(info.request), taskId: info.task_id || null, options: info.options,
+      request: str(info.request), taskId: info.task_id || null, taskMatch, options: info.options,
       focusOnEnd: active || !quietIfDone, quiet: !active, agentRunId: info.agent_run_id || null,
     });
   }
@@ -941,6 +1326,7 @@
       id: runId,
       request: str(info.request),
       taskId: info.taskId || null,
+      taskMatch: info.taskId ? cleanTaskMatch(info.taskMatch) : null,  // how the task was chosen (the banner says)
       options: isObj(info.options) ? info.options : null,
       startUrl: info.startUrl || null,
       focusOnEnd: Boolean(info.focusOnEnd),
@@ -1670,6 +2056,11 @@
     setText(ui.bannerQuestion, question ? `“${question}”` : '');
     // focus lands here after a run: a screen reader then reads the question as the banner's name
     ui.banner.setAttribute('aria-labelledby', question ? 'banner-title banner-question' : 'banner-title');
+    const task = taskLine(run, Boolean(v));
+    ui.bannerTask.hidden = !task;
+    setText(ui.bannerTask, task);
+    ui.bannerTask.title = run.taskMatch && run.taskMatch.method === 'fuzzy' && isNum(run.taskMatch.score)
+      ? `Close match (score ${run.taskMatch.score.toFixed(2)}): the agent got your words, the check is this task's` : '';
     setText(ui.bannerLabel, label);
     renderCheck(expl, check.details, check.more);
 
@@ -1710,6 +2101,16 @@
       ui.bannerExtra.append(a);
     }
     ui.banner.hidden = false;
+  }
+
+  /** "Checked as task: pay-50 (matched from your request)" (or "(picked from the list)"); "Sandbox task: …" when no
+   *  verdict came; '' for free text. The logs page shows the same line (console/logs.py task_line). */
+  function taskLine(run, checked) {
+    if (!run.taskId) return '';
+    const how = run.taskMatch && run.taskMatch.method;
+    const why = how === 'picked' ? ' (picked from the list)'
+      : how === 'exact' || how === 'fuzzy' ? ' (matched from your request)' : '';
+    return `${checked ? 'Checked as task' : 'Sandbox task'}: ${run.taskId}${why}`;
   }
 
   /** "Agent’s summary: “…”", cut to SUMMARY_MAX characters with a Show more button, so a long one (a real agent's,
