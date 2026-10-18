@@ -50,7 +50,11 @@ screens. `gym eval compare`: 3 fail→pass, 1 pass→fail.
   star-landlord-message (scroll), stop-promotions (scroll) stay 0→0.
 - **Latency:** not comparable; Kyle's SFT shared the GPU during the grounder run.
 - **Artifacts (T2's Mac):** `results/agent_v4_sft_template/` (rollouts, aggregate metrics,
-  run_info, `agent_compare/compare_report.md`). BLADE: TBD.
+  run_info, `agent_compare/compare_report.md`). BLADE: [docs/blade/agent_base_vs_sft.md](blade/agent_base_vs_sft.md):
+  the +4 is not significant (Fisher p = 0.48), only ~2-3 of it is the grounder, grounder output
+  failures 10 → 0 is the robust gain, and the biggest drop-off is the shared observation pipeline
+  (summaries cut off the notifications grid and drop toggle state). It also found a lenient
+  `mark-all-read` check (2 SFT passes cleared the bell notifications too; strict: 20/36).
 - **Step budget:** the Gym eval keeps `max_steps` 12 (this table and Sunday's grounder rerun,
   `BASELINE=` in `scripts/agent_eval.sh` reuses this base arm). Since Sat ~19:40 the
   *interactive* agent (console, demo) uses `max_steps` 25 plus a "stuck" stop
