@@ -18,7 +18,7 @@ Target: everything finished by 10:30.
 | Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM (+ vllm-metal on the Mac), NVIDIA Brev (H200), NeMo-Speech.cpp (Parakeet voice input), TRL, Playwright | all | — |
 | ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (final, Sun). Form text: §Form text |
 | ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (final, Sun 00:30). Form text: §Form text |
-| ☑ Red Hat vLLM bounty + explanation | How vLLM fits (one process for `base` + `grounder`, Gym evals, colocated GRPO rollouts, vllm-metal on the Mac), how we configured it, measured results | Kyle | `docs/bounty-vllm.md` (draft). Form text: §Form text |
+| ☑ Red Hat vLLM bounty + explanation | How vLLM fits (one process for `base` + `grounder`, Gym evals, colocated GRPO rollouts, vllm-metal on the Mac), how we configured it, measured results | Kyle | `docs/bounty-vllm.md`. Form text: §Form text |
 
 ## Bounty asks → where we answer them
 
@@ -49,7 +49,7 @@ Condensed from the organizers' bounty slides. "Open" is what a judge could push 
 | **Challenge:** genuinely served on vLLM; vLLM plays a meaningful role in how the app runs | vLLM serves every generative model at every stage: H200 grounder, Gym evals, GRPO rollouts, and Lightning plus the local grounder on the Mac ([bounty-vllm.md](bounty-vllm.md) §2) | — |
 | **Required:** vLLM as the serving layer for a core model; functional and central | One process serves `base` + `grounder`, on the H200 and on the Mac, and the parameter-cap design depends on it (§2) | — |
 | **Demonstrate:** performance, efficiency, throughput, latency, scalability or reliability | 32,000 Gym replies in ~7 min; grounding p50 0.64–0.75 s; Gate G parity between CUDA and Metal runtime LoRA (87.0 vs 87.0); GRPO log-probs match (§4) | No controlled benchmark (`vllm bench serve`). Latencies come from real runs, several on a shared GPU |
-| **Submit:** how vLLM fits, how we configured and optimized it, measurable results; depth over breadth | bounty-vllm.md §2–§4; form text below | We'd planned it as checkbox-only. Check whether the form has a text box |
+| **Submit:** how vLLM fits, how we configured and optimized it, measurable results; depth over breadth | bounty-vllm.md §2–§4; form text below | The form has a text box for it (confirmed Sun); paste §Form text |
 
 ## Final submission checklist (Sun 2026-10-18; submit by 10:30, deadline 11:00)
 
@@ -91,7 +91,7 @@ with the full docs; each one links to its full doc for judges who want more.
 - **Lightning text: final** (Sun 00:35). It matches bounty-lightning.md and results.md: the agent
   numbers name each arm (base 18/36, sft-template 22/36, final 17/36, all within noise), and the
   thinking result is the 12 × 3 off/retry/on ablation, not Saturday's n=1 read.
-- **vLLM text: draft** (Sun). It matches bounty-vllm.md.
+- **vLLM text: final** (Sun). It matches bounty-vllm.md. The form has a text box for it.
 
 **Lightning bounty:**
 
