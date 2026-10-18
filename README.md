@@ -11,6 +11,9 @@ GUI assist lets a bank, utility or benefits portal's customers say what they wan
 watch it happen on the real site, with small models that run on the company's own
 hardware. Market sizing, ROI assumptions and sources: [docs/pitch.md](docs/pitch.md).
 
+**On Hugging Face:** model [patrickballou/gui-assist-grounder](https://huggingface.co/patrickballou/gui-assist-grounder) ·
+data [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data). Run it yourself: [Quick start](#quick-start).
+
 This is an accessibility agent built for the
 [NVIDIA x Red Hat Small Models Hack](https://luma.com/nvidia-redhat-small-models-hack)
 (Raleigh, NC, 17–18 October 2026), **Fine-Tuned & Specialized** track. A user describes
@@ -48,38 +51,61 @@ Open <http://127.0.0.1:8095>, pick **"Turn on high contrast."** in the task list
 press Enter. You'll see each step, where the agent clicked, and a ✓/✗ checked against
 the sandbox's own state (the agent never sees that state).
 
-**3. Bring up the models** (details: [docs/local-mac.md](docs/local-mac.md)).
+**3. Get the models from Hugging Face.**
 
-- **Grounder VLM on :8001.** Tunnel to the GPU box (served names `base` and
-  `grounder`, [docs/gpu-box.md](docs/gpu-box.md) §3):
-  `ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 permanent-tan-marmot`.
-  Or serve it on the Mac (docs/local-mac.md §3b).
-- **Lightning:** local on :8000, served as `lightning` (the official NVIDIA BF16
-  checkpoint, docs/local-mac.md §2; ~1.2 s per planner step on an idle server, ~4 s inside
-  the fully local agent). Or hosted, which needs
-  only `NVIDIA_API_KEY` in `.env` but is slow (25–80 s per step).
-
-**4. Run the real agent.**
+| What | Where | Notes |
+| --- | --- | --- |
+| Our grounder (final: SFT + GRPO in NeMo Gym) | [patrickballou/gui-assist-grounder](https://huggingface.co/patrickballou/gui-assist-grounder) | Merged weights at the root; PEFT LoRA in `adapter/`; model card with all results |
+| Our training data | [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data) | Slice manifest, dev/train files, Lightning-rewritten instructions and method (no images) |
+| Base model | [Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B) | Needed to serve the LoRA (`base` = adapter off) |
+| Planner | [nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) | Official BF16. Or skip the download and use hosted Lightning with `NVIDIA_API_KEY` |
 
 ```bash
-scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API
-# the console starts with thinking off and the request check on: --thinking retry|on, --clarify off change that
+hf download patrickballou/gui-assist-grounder --local-dir models/gui-assist-grounder
+hf download Qwen/Qwen3.5-2B --revision 15852e8c16360a2fea060d615a32b45270f8a8fc
+hf download nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16      # ~60 GB; skip for hosted Lightning
 ```
 
-**Fully local (Mac), the setup the demo video uses:** one vllm-metal instance on :8011 serves
-`base` (screen summaries) and the final LoRA as `grounder` (clicks). Bring it up with
-[docs/local-mac.md](docs/local-mac.md#fully-local-mode-for-the-video), and keep the browser headless:
+**4. Serve the grounder and run the real agent.** One vLLM process serves `base` (screen
+summaries) and the LoRA as `grounder` (clicks), so it counts as one 2B model.
+
+*On an NVIDIA GPU (vLLM 0.31.0):*
 
 ```bash
+vllm serve Qwen/Qwen3.5-2B --served-model-name base --port 8001 \
+  --enable-lora --max-lora-rank 64 --lora-modules grounder=models/gui-assist-grounder/adapter \
+  --max-model-len 16384 --limit-mm-per-prompt '{"image": 1, "video": 0}' \
+  --mm-processor-kwargs '{"size": {"longest_edge": 2073600, "shortest_edge": 65536}}' \
+  --default-chat-template-kwargs '{"enable_thinking": false}'
+scripts/demo_up.sh --agent real --lightning hosted --vlm-url http://127.0.0.1:8001/v1 --summary-model base
+```
+
+Self-hosting Lightning on a Hopper GPU needs the vLLM #61603 patch
+([docs/gpu-box.md](docs/gpu-box.md) §2). Never add `--speculative-config`: it would add
+models beyond the 33B budget.
+
+*Fully local on a Mac (Apple silicon, 128 GB; what the demo video uses):* install vllm-metal
+0.31.0 ([docs/local-mac.md](docs/local-mac.md) §0), start Lightning on :8000 (§2; ~1.2 s per
+planner step on an idle server, ~4 s inside the agent), then:
+
+```bash
+# vllm-metal names the language-model layers differently, so re-key the adapter (same tensors):
+python3 -I scripts/gate_g_lora_keys.py --adapter models/gui-assist-grounder/adapter --out models/gui-assist-mlx-keys
+# A memory watchdog (required by the launcher) and the grounder on :8011, in two terminals:
+python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 --probe-margin-s 1.5
+LORA=models/gui-assist-mlx-keys GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh
 scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model base --vlm-label "Mac (vllm-metal)"
 ```
 
-The script checks that the VLM (`--vlm-url`, else `vlm.base_url` in `configs/agent.yaml`)
-and Lightning respond. It also checks that the VLM serves the chosen grounder and summary
-model, then prints the console URL. The console starts with Grounder `grounder` (the LoRA;
-`--grounder base` for the adapter off). It refuses a run whose grounder the VLM doesn't
-serve, and shows where each model runs (the Logs page does this per run). Then run an easy
-task such as "Make the text bigger, I can't read this."
+Quit memory-heavy apps first (the launcher refuses below 26% free). Keep the browser
+headless: `--headed` renders different pixels (unmeasured; pay-50 fell from 8/8 to 1/4).
+
+`demo_up.sh` checks that the VLM serves both names and that Lightning answers, then prints
+the console URL (<http://127.0.0.1:8095>). The console starts with the tuned `grounder`
+(the Grounder toggle switches to `base`), thinking off and the "ask when unclear" check
+on (`--thinking retry|on`, `--clarify off`). Try "Make the text bigger, I can't read
+this." or "Pay fifty dollars toward my bill." The ✓/✗ comes from the sandbox's own
+state, which the agent never sees.
 
 **5. Voice input (optional).** NVIDIA Parakeet TDT 0.6B v3 runs locally through
 NeMo-Speech.cpp 0.2.0. Audio never leaves the machine, and there's no cloud speech.
@@ -107,7 +133,6 @@ NeMo-Speech.cpp 0.2.0. Audio never leaves the machine, and there's no cloud spee
 
 Run the pieces separately with `scripts/run_sandbox.sh`, `scripts/run_asr.sh` and
 `scripts/run_console.sh --agent mock|real` (voice uses Parakeet; `--asr stub` for fixed text).
-Record headless: `--headed` renders different pixels (unmeasured; pay-50 fell from 8/8 to 1/4).
 
 Tests:
 `.venv-gym/bin/python -m pytest sandbox/tests console/tests -q`. They cover the
