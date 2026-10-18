@@ -2,7 +2,7 @@
 
 > **Status:** Sun 2026-10-18, 00:30. The overnight loop ran 19:38 → 22:02 and its results are
 > filled in (§2, §4). Every number below is measured and logged in [runs.md](runs.md) or the
-> [BLADE reports](blade/), unless marked **TBD**. Owners: Kyle (loop, training), Charlie (envs, eval, BLADE).
+> [BLADE reports](blade/). Owners: Kyle (loop, training), Charlie (envs, eval, BLADE).
 
 ## 1. Summary
 
@@ -116,7 +116,7 @@ inputs, so that arm is confounded):
 | --- | --- | --- | --- | --- |
 | `base` | 18/36 (50%) | 24/36 (8 false) | 10/259 | Sat 18:45, `agent-v4`, reportable |
 | `grounder` = sft-template | **22/36 (61%)** | 25/36 (4 false) | 6/234 | Sat 19:05, `agent-v4`, reportable |
-| `grounder` = FINAL (sft-lightning + GRPO round 1) | 17/36 (47%) | 27/36 (11 false) | 6/256 | Sat 22:05, `agent-v4`, reportable |
+| `grounder` = FINAL (sft-lightning + GRPO round 1) | 17/36 (47%) | 27/36 (11 false) | 6/256 | Sat 22:04, `agent-v4`, reportable |
 
 - **All three are within noise on agent success.** FINAL vs base: `mean/reward` −0.028, 95% CI
   [−0.20, +0.14]; failed actions 10 → 0 (the compare CI excludes 0, but all 10 sit in 4 base
@@ -133,7 +133,7 @@ Base vs sft-template (Sat 18:45 / 19:05):
 
 - **Strict-check caveat:** with a strict `mark-all-read` check, sft-template is 20/36 (+2), as the
   current check doesn't guard the bell notifications ([BLADE](blade/agent_base_vs_sft.md)). The
-  check was kept unchanged for the FINAL rerun (Sat 22:05), so all three arms are comparable.
+  check was kept unchanged for the FINAL rerun (Sat 22:04), so all three arms are comparable.
 - **`gym eval compare`:** `mean/reward` +0.111, 95% CI [−0.06, +0.28], so suggestive but not
   significant at n=36. Failed actions per episode −0.28, CI [−0.52, −0.04] (10 → 0). The CI
   excludes 0, but the 10 are clustered in 4 rollouts of 2 tasks. No-change actions 83 → 45, and Lightning's done claims matched the sandbox 31/36 vs
@@ -347,9 +347,9 @@ Each round leaves Gym artifacts in `/home/ubuntu/night/round_<r>/`: profile roll
 `knobs_used.json`, `grpo_command.txt` and `grpo.log`, dev rollouts, the `gym eval compare` report
 and `summary.json`. Adapters go to `/home/ubuntu/ckpt/night/<launch>/round_<r>/`. The
 paired SSv2-clean compare reports are in `/home/ubuntu/night/evals/compare_ssv2_*_vs_final/`. The
-box is stopped; the orchestrator copied the summaries and adapters to Patrick's Mac. The numbers
-quoted here are logged in [runs.md](runs.md) and the BLADE reports. **TBD:** commit a small
-sample of the round artifacts.
+box is stopped. The round artifacts (summaries, pools, rollouts, compare reports) aren't committed:
+they stay on the box's disk and in the orchestrator's copy on Patrick's Mac. Every number quoted
+here is logged in [runs.md](runs.md) or the BLADE reports.
 
 ## 5. Measurement we can trust
 
@@ -563,8 +563,12 @@ recorded as `reportable=no`). Then run BLADE (`.agents/skills/nemo-gym-blade-ana
 comparable pair: base vs SFT on dev, each kept round vs the previous one, and `agent_base` vs
 `agent_grounder`.
 
-**Published (TBD links, public Sunday morning):**
+**Published.** Both repos are private until the Sunday ~9:30 release check, then public.
 
-- the adapter and merged model: `patrickballou/gui-assist-grounder`;
-- the training slice manifest, the Lightning rewrites and any rejection-sampled rows, each with
-  the command and config that made it: `patrickballou/gui-assist-data`.
+- **The final adapter and the merged final model:**
+  [patrickballou/gui-assist-grounder](https://huggingface.co/patrickballou/gui-assist-grounder).
+- **The training slice manifest and the Lightning rewrites**, each with the command and config
+  that made it: [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data).
+  - Whether the 8,028 hosted-API rewrites are included depends on the NVIDIA API terms check in
+    [status.md](status.md).
+  - No rejection-sampled rows trained a reported model, so none are published.

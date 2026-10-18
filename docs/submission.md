@@ -27,9 +27,9 @@ with the full docs; each one links to its full doc for judges who want more.
 - **NeMo Gym text: final** (Sun 00:30). It matches bounty-nemo-gym.md: the SFT number is
   sft-lightning's (the dev pick), the agent numbers name each arm, and the final adapter's numbers
   are filled in.
-- **Lightning text: still to update.** Its "18/36 → 22/36" agent result is sft-template's. The
-  final grounder's rerun scored 17/36, and all three arms are within noise, so name the arm or
-  add the rerun.
+- **Lightning text: final** (Sun 00:35). It matches bounty-lightning.md and results.md: the agent
+  numbers name each arm (base 18/36, sft-template 22/36, final 17/36, all within noise), and the
+  thinking result is the 12 × 3 off/retry/on ablation, not Saturday's n=1 read.
 
 **Lightning bounty:**
 
@@ -38,15 +38,23 @@ with the full docs; each one links to its full doc for judges who want more.
 > screen changed, what its last action did, and a screen description from a 2B VLM), then calls
 > one of five schema-checked tools. A call like `click("the L option in the Text size row")` goes
 > to our fine-tuned 2B grounder, which turns the description into a pixel. Offline, Lightning
-> also rewrites raw accessibility labels into user-style click instructions for the grounder's
-> training data. In a human audit, 42 of 43 checkable rewrites were faithful (85.7% if "unsure"
-> counts as a failure), and the data is published with its prompt. We self-host NVIDIA's official BF16 checkpoint: about 1.2 s per planner step on an
-> idle server, against about 26 s on the hosted free tier. We tune it with corrective schema
-> validation, compact observations and per-step thinking control. Turning thinking on only after
-> a problem step raised claimed-equals-verified from 6/12 to 9/12 tasks and cut actions that
-> changed nothing on screen from 45 to 27 (n=1 per task). In the NeMo Gym `web_agent` env (12 tasks × 3),
-> swapping the base grounder for the fine-tuned one raised verified success from 18/36 to 22/36 (20/36 with a
-> stricter mark-all-read check; not significant at n=36) and cut failed actions from 10 to 0 (significant). Full write-up:
+> also rewrites raw accessibility labels into user-style click instructions for the final
+> grounder's SFT data (8,620 rewrites kept). In a human audit, 42 of 43 checkable rewrites were
+> faithful (85.7% if "unsure" counts as a failure), and the data is published with its prompt. We
+> self-host NVIDIA's official BF16 checkpoint: about 1.2 s per planner step on an idle server,
+> against about 26 s on the hosted free tier. We tune it with corrective schema validation,
+> compact observations and per-step thinking control. On the interactive agent (12 tasks × 3,
+> raw-label SFT grounder `sft-template`), thinking on every call verified 26 of the 32 jobs all
+> three arms completed, against 21 with thinking only after a problem step (the interactive
+> default) and 19 with it off (paired McNemar on vs off p = 0.039), with 4 false success claims
+> instead of 9 and about half the steps of thinking off, at a median 10.9 s per planning call vs
+> 5.9 s with retry. In the NeMo Gym `web_agent` env (12 tasks × 3, thinking off), verified
+> success is within noise for all three grounders: base 18/36, `sft-template` 22/36 (20/36 with a
+> stricter mark-all-read check), and the final grounder (SFT on the Lightning rewrites, then
+> GRPO) 17/36. Both tuned grounders cut failed actions from 10 to 0 (the CI excludes 0, but the 10
+> sit in 4 base rollouts of 2 tasks), and BLADE traces about 6 of the 9 rollouts that changed
+> between the `sft-template` and final arms to the planner or the screen descriptions, not the
+> clicks. Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-lightning.md`
 
 **NeMo Gym bounty:**

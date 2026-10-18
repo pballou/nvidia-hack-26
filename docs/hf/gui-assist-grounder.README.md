@@ -1,7 +1,7 @@
 ---
-license: apache-2.0  # base model is Apache-2.0; team to confirm (see "Licenses")
+license: apache-2.0  # base model is Apache-2.0; TBD: team to confirm before the repo goes public (see "Licenses")
 base_model: Qwen/Qwen3.5-2B
-library_name: transformers  # TBD: change to peft if only the adapter/ folder is uploaded (no merged weights at the root)
+library_name: transformers  # TBD (orchestrator, at upload): right only if the merged model goes at the repo root as planned; if only adapter/ is uploaded, change to peft
 pipeline_tag: image-text-to-text
 language:
 - en
@@ -36,50 +36,66 @@ pixels. The agent never reads the app's DOM or code. Code, envs and eval logs:
 
 The model is a LoRA adapter on `Qwen/Qwen3.5-2B`'s language model; the vision encoder is frozen.
 Training was LoRA SFT on an OS-Atlas slice with Nemotron-Lightning-rewritten instructions
-(`sft-lightning`). Up to 3 overnight GRPO rounds followed, with a NeMo Gym environment's
-`/verify` endpoint as the reward. A round was kept only if it improved dev (**TBD:** which
-rounds were kept).
+(`sft-lightning`). An overnight loop then ran GRPO rounds (up to 3), with a NeMo Gym environment's
+`/verify` endpoint as the reward. A round was kept only if it improved dev by at least 0.5 points.
+Round 1 was kept (dev 86.27 → 87.00). Round 2 was flat (86.89), so it was reverted and the loop
+stopped. **The released model is `sft-lightning` + GRPO round 1.**
 
-> Draft card. Items marked **TBD** are filled in once the overnight GRPO loop and the morning
-> evals finish.
+> Before upload: the remaining **TBD**s are upload choices for the orchestrator (`library_name`,
+> which `training/` and `eval/` files ship) and the license confirmations. Delete this note and
+> the TBDs once they're resolved.
 
 ## At a glance
 
 | | |
 | --- | --- |
 | Base model | [`Qwen/Qwen3.5-2B`](https://huggingface.co/Qwen/Qwen3.5-2B), revision `15852e8c16`, Apache-2.0 |
-| Parameters | 2B (model-card count; HF safetensors total 2.27B). The LoRA adapter adds about 16.8M (16,819,200, computed for r = 16 from the base weight shapes; **TBD:** confirm against `adapter_model.safetensors`) |
-| Released checkpoint | Round 0: `sft-lightning`, picked on dev (86.27 vs `sft-template`'s 85.86 in the same harness). **TBD:** plus the GRPO rounds kept on dev (from `/home/ubuntu/night/FINAL.json`) |
+| Parameters | 2B (model-card count; HF safetensors total 2.27B). The LoRA adapter adds about 16.8M (16,819,200, computed for r = 16 from the base weight shapes; PEFT loads an adapter of this config as ~16.8M trainable parameters in 372 tensors) |
+| Released checkpoint | `sft-lightning` (round 0, picked on dev: 86.27 vs `sft-template`'s 85.86 in the same harness) + **GRPO round 1** (kept on dev: 86.27 → 87.00). Round 2 was reverted. Loop launch `20261017-193859`, adapter `night/20261017-193859/round_1/grpo/adapter` (`FINAL.json`: best round 1) |
 | Input | One screenshot (any aspect ratio, resized to ≤ 2,073,600 px) + one instruction |
 | Output | `{"point_2d": [x, y]}`, integers on a 0–1000 grid relative to the image |
 | Held-out test | ScreenSpot-v2-clean: 1,244 of ScreenSpot-v2's 1,272 rows. **28 rows excluded**, see [below](#the-28-row-screenspot-v2-exclusion) |
-| Headline so far (SFT, before GRPO) | `sft-template` (raw labels; not the released adapter): SSv2-clean **86.3% → 89.07%**; icons **78.1% → 84.8%**; dev 76.4% → 85.66%; agent tasks verified 18/36 → 22/36. `sft-lightning` (round 0 of the released model): dev 86.27%, SSv2-clean TBD |
+| Headline (base → released) | SSv2-clean **86.3% → 90.35%** (+4.1; never used for selection); icons **78.1% → 85.4%**; dev 76.4% → 87.0%. Agent tasks verified (12 × 3): base 18/36, released 17/36, `sft-template` 22/36, all within noise |
 
 ## Files in this repo
 
-| Path | What | Source on the GPU box |
+| Path | What | Source (GPU box, now stopped; the orchestrator's copy is on Patrick's Mac) |
 | --- | --- | --- |
-| `adapter/` | PEFT LoRA adapter (`adapter_config.json`, weights), for vLLM `--lora-modules` or `PeftModel` | `/home/ubuntu/ckpt/<run>/adapter`. **TBD:** `<run>` from `/home/ubuntu/night/FINAL.json` |
-| `/` (root) | The same model with the adapter merged into the base weights (for runtimes without LoRA, e.g. vllm-metal on a Mac) | `/home/ubuntu/ckpt/<run>/merged`. **TBD:** no merge/export script is in the repo yet |
-| `training/` (TBD) | `args.json`, `run.json`, `summary.json` and `train.log` for SFT; `grpo_summary.json` for each kept GRPO round; the loop's `FINAL.json` | `/home/ubuntu/ckpt/sft-<variant>/`, `/home/ubuntu/ckpt/night/round_<r>/grpo/`, `/home/ubuntu/night/` |
-| `eval/` (TBD) | Gym eval metrics for dev and SSv2-clean, and `gym eval compare` reports | `/home/ubuntu/night/evals/<name>/` |
+| `adapter/` | PEFT LoRA adapter (`adapter_config.json`, weights), for vLLM `--lora-modules` or `PeftModel` | Box `/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/adapter`; Mac copy `~/models/gui-assist/night-20261017-193859-round_1-grpo/`. `adapter_model.safetensors` sha256 `54ce9389…` |
+| `/` (root) | The same model with the adapter merged into the base weights (for runtimes without LoRA, e.g. vllm-metal on a Mac). Merged with [`scripts/gate_g_merge.py`](https://github.com/pballou/nvidia-hack-26/blob/main/scripts/gate_g_merge.py) (peft's merge, equal to `W + 2·B·A`); it passed Gate G (see [Serve](#serve-with-vllm-base-and-grounder-in-one-process)) | Mac `~/models/grounder-merged-night-20261017-193859-round_1-grpo` (weights sha256 `cd120bc0…`) |
+| `training/` (**TBD**, orchestrator at upload: which files ship; drop this row if none) | SFT: `args.json`, `run.json`, `summary.json`, `train.log`. GRPO round 1: `grpo_summary.json`, `log_history.json`, the round's `summary.json`, `knobs_used.json` and `pool_stats.json`. The loop's `FINAL.json`. Round 2 (reverted) is optional, for the record | Box `/home/ubuntu/ckpt/sft-lightning/`, `/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/`, `/home/ubuntu/night/round_1/`, `/home/ubuntu/night/FINAL.json`. The Mac copy has the summaries; anything not in it needs the box restarted |
+| `eval/` (**TBD**, same decision) | Gym eval metrics for dev and SSv2-clean (base, `sft-template`, `sft-lightning`, released), and the paired `gym eval compare` reports | Box `/home/ubuntu/night/evals/{sft-template,sft-lightning,final-round1-grpo}/`, `/home/ubuntu/night/evals/compare_ssv2_{sft-lightning,sft-template}_vs_final/`; base runs `results/{dev,ssv2_clean}_base_qwen35*` in Kyle's checkout on the box |
 
 ## Results
 
 All numbers measure **accuracy**: the predicted point lands inside the target's pixel box, with
 edges counting as inside. Every run goes through the NeMo Gym `gui_grounding` env
 (`gym eval run`), at temperature 0 with max 128 output tokens. Images are capped at 2 MP for
-both models. Checkpoints are chosen on **dev only**. SSv2-clean is only reported, and the final
-checkpoint is evaluated on it once.
+both models. Checkpoints are chosen on **dev only**. SSv2-clean is only reported and was never
+used for selection: both round-0 candidates were scored on it for the table (it favored
+`sft-template`, 89.07 vs 88.10, and the pick followed dev anyway), and the released checkpoint
+was evaluated on it after the loop had picked it.
 
 | Model | Dev (969) | SSv2-clean (1,244) | Mobile | Desktop | Web | Text | Icon |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Qwen3.5-2B base | 76.4 | 86.3 | 91.4 | 84.0 | 81.9 | 92.5 | 78.1 |
-| SFT, raw labels (`sft-template`, round 0) | 85.66 | 89.07 | 92.2 | 89.5 | 85.1 | 92.3 | 84.8 |
-| SFT, Lightning instructions (`sft-lightning`, round 0) | 86.27 | TBD | TBD | TBD | TBD | TBD | TBD |
-| **Released: `sft-lightning` + kept GRPO rounds** (best on dev) | **TBD** | **TBD** | **TBD** | **TBD** | **TBD** | **TBD** | **TBD** |
+| SFT, raw labels (`sft-template`, round-0 candidate) | 85.66 | 89.07 | 92.22 | 89.54 | 85.13 | 92.33 | 84.81 |
+| SFT, Lightning instructions (`sft-lightning`, round 0, picked on dev) | 86.27 | 88.10 | 91.22 | 86.93 | 85.35 | 93.04 | 81.67 |
+| **Released: `sft-lightning` + GRPO round 1** (kept on dev; round 2 reverted) | **87.00** | **90.35** | **93.21** | **88.89** | **88.10** | **94.18** | **85.37** |
 
-The `sft-lightning` dev number is from the loop harness, where `sft-template` scored 85.86.
+- **Dev numbers:** `sft-lightning`'s 86.27 is from the loop harness, where `sft-template` scored
+  85.86 (85.66 in its first launch). The released 87.00 is a selection number, the best on dev
+  across rounds. Re-runs gave 87.00 and 86.89.
+- **SSv2-clean, two runs of the released adapter:** 90.35 is Kyle's eval (`final-round1-grpo`),
+  which the paired comparisons below use. A second, independent T=0 run by the orchestrator
+  (`night-r1`) gave **90.27**, one row apart. Neither was used for any selection.
+- **Paired comparisons on SSv2-clean** (same 1,244 rows, McNemar exact on fixed vs broken rows):
+  - vs `sft-lightning`, the loop's starting adapter: **+2.25**, 34 fixed / 6 broken,
+    p ≈ 8 × 10⁻⁶;
+  - vs `sft-template`: +1.29, 50 fixed / 34 broken, p = 0.10, **not significant**;
+  - vs base: +4.10 (this pair wasn't McNemar-tested).
+- **Released, by platform and type** (text / icon): mobile 96.90 / 88.15, desktop 91.67 / 84.92,
+  web 92.74 / 82.76. Base: mobile 97.6 / 82.9, desktop 90.6 / 74.6, web 87.6 / 75.4.
 
 Dev by source (OS-Atlas, held out by screenshot):
 
@@ -87,12 +103,26 @@ Dev by source (OS-Atlas, held out by screenshot):
 | --- | --- | --- | --- | --- | --- |
 | Qwen3.5-2B base | 68.8 | 73.4 | 70.5 | 78.4 | 82.9 |
 | `sft-template` | 86.9 | 91.1 | 81.3 | 85.1 | 84.5 |
-| `sft-lightning` | TBD (desktop 88.9) | TBD (desktop 88.9) | 78.4 | 88.8 | 85.9 |
-| **Released** | TBD | TBD | TBD | TBD | TBD |
+| `sft-lightning` | 87.5 | 91.1 (90.51) | 77.7 (78.42) | 88.8 | 85.9 |
+| **Released** (round 1) | **89.77** | **92.41** | **84.89** | **86.57** | **84.25** |
+
+`sft-lightning` has two dev runs, both 86.27 overall: its own eval, and the loop's round-0
+re-eval (in parentheses where they differ). Round 1's deltas are against the re-eval.
 
 - **Where SFT helped (`sft-template`):** the gain is mostly desktop (Linux +18.1, macOS +17.7 on dev; SSv2-clean
   desktop +5.5) and icons (SSv2-clean +6.7). Text grounding was already strong and stayed flat
   (92.5 → 92.3).
+- **Where GRPO round 1 helped** (against its start, `sft-lightning`):
+  - Every SSv2-clean split rose, most on icons (+3.70) and web (+2.75). The per-split moves
+    aren't tested on their own.
+  - Much of the icon and desktop gain recovers `sft-lightning`'s deficit there: against
+    `sft-template`, icon is only +0.56 and desktop is −0.65.
+  - On dev, AndroidWorld rose most (78.4 → 84.9, 10 fixed and 1 broken), while FineWeb (−1.7)
+    and UIBert (−2.2) fell. Round 1's dev gain alone is suggestive, not significant: 22 fixed,
+    15 broken, p = 0.32.
+  - One kept round, and no equal-compute non-GRPO control (e.g. SFT on the same 1,282-row
+    pool). So the +2.25 shows the loop's round improved its starting adapter, not that GRPO in
+    particular was needed for it.
 - **Dev noise:** re-evaluating the same adapter in a new launch gave 85.66 vs 85.86. That's
   about 0.2 points from vLLM batch nondeterminism at temperature 0. The GRPO keep gate is
   +0.5 points.
@@ -100,30 +130,49 @@ Dev by source (OS-Atlas, held out by screenshot):
   - one round from `sft-template` on a 111-row pool, 30 steps;
   - dev went from 85.86 to 86.69 (+0.83) in the same harness.
 - **Agent task success** (NeMo Gym `web_agent` env, 12 sandbox tasks × 3 repeats, official
-  BF16 Lightning planner, thinking off; only the grounder's served name changes). Measured with
-  `grounder` = `sft-template`, before GRPO. That isn't the released adapter, which starts from
-  `sft-lightning`. **TBD:** rerun with the released checkpoint, or keep this label.
+  BF16 Lightning planner, thinking off; the same rows, prompts and tools, and only the grounder
+  changes: served name `base`, or the adapter behind `grounder`). `base` and `sft-template` ran
+  Sat 18:45–19:25; the released adapter ran Sat 22:04–22:29, on the serving process the loop had
+  restarted at 22:00.
 
-  | | `base` | `sft-template` |
-  | --- | --- | --- |
-  | Verified success | 18/36 (50%) | **22/36 (61%)** |
-  | Claim matches the sandbox | 26/36 | 31/36 |
-  | False success claims | 8 | 4 |
-  | Failed actions | 10 | 0 |
-  | No-change actions | 83 | 45 |
+  | | `base` | `sft-template` | **Released** |
+  | --- | --- | --- | --- |
+  | Verified success | 18/36 (50%) | 22/36 (61%) | 17/36 (47%) |
+  | Claim matches the sandbox | 26/36 | 31/36 | 24/36 |
+  | False success claims | 8 | 4 | 11 |
+  | Failed actions | 10 | 0 | 0 |
+  | No-change actions | 83 | 45 | — (not tallied) |
 
-  - The mean reward rose by 0.111, but the 95% CI is [-0.06, +0.28]: suggestive, not
-    significant at n=36. The drop in failed actions is significant.
-  - Gains: `text-size-large` 0→2, `sms-billing-off` 0→2, `message-support-meter` 1→2.
-  - Regression: `high-contrast` 2→1.
+  - **All three are within noise on agent success.** Released vs base: mean reward −0.028,
+    95% CI [−0.20, +0.14]. `sft-template` vs base: +0.111, CI [−0.06, +0.28]. With a strict
+    `mark-all-read` check, `sft-template` is 20/36.
+  - **What the tuned grounders do change:** failed actions 10 → 0 with either one. The CI
+    excludes 0, but the 10 sit in 4 base rollouts of 2 tasks. `text-size-large` (a small "L"
+    next to the selected "M") went 0/3 → 3/3 with the released adapter (2/3 with
+    `sft-template`).
+  - **The 22 → 17 drop isn't evidence of a grounder regression.** A BLADE review traces about 6
+    of the 9 rollouts that changed between `sft-template` and the released adapter to the
+    planner or the screen summarizer. The released adapter's hand-labelled hit rate on
+    well-posed targets is 96.5% (110/114), vs 92.6% (112/121) for `sft-template`, which isn't
+    significant either. At n = 36, end-to-end success can't separate the grounders.
+  - **Per task vs base** (verified/3):
+    - released: `text-size-large` 0→3 and `max-usage-month` 0→1; `high-contrast` 2→0,
+      `mark-all-read` 3→1 and `message-support-meter` 1→0, all three traced to the planner or
+      the summarizer;
+    - `sft-template`: `text-size-large` 0→2, `sms-billing-off` 0→2 and `message-support-meter`
+      1→2; `high-contrast` 2→1.
 - **Not comparable with published ScreenSpot-v2 numbers:**
   - SSv2-clean drops 28 desktop rows;
   - we use our own prompt and harness (see "Prompt" below).
 
 Sources: [docs/results.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/results.md)
 and [docs/runs.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/runs.md), which has
-the command, config and output path of every run. The agent table is in results.md ("Agent")
-and in runs.md (the Sat 18:45 row).
+the command, config and output path of every run. The released adapter's SSv2-clean eval and
+paired compares are Kyle's Sat 22:04 row in runs.md, and the duplicate run is the Sat 22:08 row.
+The agent table is in results.md ("Agent") and in runs.md (the Sat 18:45 row, and Patrick's Sat
+22:04 row). Failure analyses are in
+[docs/blade/](https://github.com/pballou/nvidia-hack-26/tree/main/docs/blade):
+`round_1_r0_vs_r1.md` for the GRPO round, `agent_final_vs_sft.md` for the agent arms.
 
 ## The 28-row ScreenSpot-v2 exclusion
 
@@ -227,7 +276,9 @@ curl -s localhost:8001/v1/models   # expect "base" and "grounder"
 - **Pinning the base:** our evals served `Qwen/Qwen3.5-2B` at revision `15852e8c16`. Add
   `--revision 15852e8c16360a2fea060d615a32b45270f8a8fc` to pin it.
 - **Without LoRA support** (e.g. vllm-metal): serve the merged weights at the repo root
-  instead (**TBD**, see Files).
+  instead. They were made with `scripts/gate_g_merge.py`, and passed our Gate G check on 200
+  dev rows: vllm-metal on a Mac vs the H200's runtime-LoRA `grounder` had identical
+  `prompt_tokens` on all 200, a hit rate of 87.0% vs 87.0%, and 99.0% agreement on hit/miss.
 
 ### Query it
 
@@ -286,7 +337,7 @@ a cleaned OS-Atlas slice (Linux, macOS, AndroidWorld, UIBert, FineWeb).
 | Examples | One target per example, no packing. Prompt-completion format, so loss is on the completion only; `max_length=None` (image tokens are never truncated) |
 | Images | Pre-resized with `preprocess_screenshot`; processor capped at the same `MAX_PIXELS = 2_073_600` / `MIN_PIXELS = 65_536` |
 | Run (`sft-template`) | 1× H200, 583 steps, 54 min, peak 8.6 GiB, loss 0.99 → 0.16 |
-| Run (`sft-lightning`, released round 0) | 1× H200, 572 steps, started Sat 18:44, done 19:33. **TBD:** peak memory and loss (no closed runs.md row yet) |
+| Run (`sft-lightning`, released round 0) | 1× H200, 572 steps, Sat 18:44 → 19:33 (49 min, 4.93 s/step median), peak 8.6 GiB, loss 0.98 → 0.21 |
 
 ### GRPO (overnight NeMo Gym loop)
 
@@ -300,8 +351,9 @@ a cleaned OS-Atlas slice (Linux, macOS, AndroidWorld, UIBert, FineWeb).
 3. **GRPO.** Run `training/grpo.py` (TRL `GRPOTrainer`, vLLM colocated), continuing the LoRA.
    The reward is the Gym server's `/verify` (1 if the point is in the box) plus 0.1 × a format
    reward (the reply parses as a point).
-4. **Gate.** Evaluate on dev at temperature 0, then run `gym eval compare`. Keep the adapter
-   only if dev improves by **≥ 0.5 points**; otherwise revert and stop.
+4. **Gate.** Evaluate on dev at temperature 0. Keep the adapter only if dev improves by
+   **≥ 0.5 points**; otherwise revert and stop. A `gym eval compare` against the previous round
+   is saved next to it as a per-row flip report; only the dev delta decides.
 
 | GRPO setting (code defaults) | Value |
 | --- | --- |
@@ -309,20 +361,36 @@ a cleaned OS-Atlas slice (Linux, macOS, AndroidWorld, UIBert, FineWeb).
 | lr | 1e-5, constant with 5 warmup steps; max grad norm 1.0 |
 | Loss | `dapo`, group-scaled rewards, `beta = 0` (no KL), 1 iteration |
 | Sampling | temperature 1.0, top_p 1.0, max 32 completion tokens, thinking off |
-| Limits | ≤ 200 steps per round (knob); gate D2 needs ≤ 35 s/step over the first 20 steps, or the round falls back to rejection-sampled SFT on reward=1 replies |
+| Limits | ≤ 200 steps and a 75-minute budget per round (knobs); gate D2 needs ≤ 35 s/step over the first 20 steps, or the round falls back to rejection-sampled SFT on reward=1 replies |
 
-**TBD for the released model:**
+**The overnight run** (Sat 19:38 → 22:02 EDT, launch `20261017-193859`, from `sft-lightning`):
 
-- rounds run and kept, steps per round, pool sizes;
-- the knob values after the BLADE review;
-- whether the rejection-sampled SFT fallback ran;
-- the per-round dev numbers.
+| Round | Pool | Steps | s/step | Verify reward first → last | Dev before → after | Kept |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | **1,282** of 4,000 profiled rows were sometimes-pass (32%): FineWeb 472, Linux 230, UIBert 220, AndroidWorld 183, macOS 177. Default knobs | 170 (round budget) | 20.6 (gate D2 20.0) | 0.77 → 0.90 | 86.27 → **87.00** (+0.72; 22 fixed, 15 broken) | **Yes: the released adapter** |
+| 2 | **242** weighted entries from 203 candidates (223 sometimes-pass of 4,000, 5.6%, minus 20 excluded ids). Knobs from the round-1 BLADE review: source weights UIBert 1.75, FineWeb 1.25, AndroidWorld 0.75, macOS 0.5, and 285 excluded train ids | 167 (round budget) | 20.4 (gate D2 21.1) | 0.53 → 0.86 | 87.00 → 86.89 (−0.10) | No: reverted, and the loop stopped |
+| 3 | — | not run (round 2 wasn't kept) | | | | |
 
-These come from `round_<r>/summary.json`, `knobs.json` and `FINAL.json`.
+- **The released adapter used default knobs only.** The BLADE knob change went into round 2,
+  which was reverted. The knob values come from a fixed rule in `scripts/blade_pair.py`; no
+  model chooses them.
+- **The rejection-sampled SFT fallback didn't run.** Gate D2 passed in both rounds, so no
+  reward=1 rollouts were used as SFT data.
+- **Clean runs:** 0 `/verify` failures in 16,176 GRPO reward calls, peak 45 GiB, no crashes.
+- **Why round 2 was flat, likely:** round 1 sharpened the model, so a fresh profile found far
+  fewer rows with any signal (223 sometimes-pass vs 1,282). The knob change is a confound, so
+  its effect can't be separated from the smaller pool.
+- **Dev deltas are exact row counts** (+0.72 = 7 rows, −0.10 = 1 row). The loop's own logs
+  show +0.73 / −0.11, because they subtract accuracies already rounded to two decimals. The keep
+  decisions are the same.
+
+Sources: `round_<r>/summary.json`, `pool_stats.json`, `knobs_used.json`, `grpo_summary.json` and
+`FINAL.json`, logged in runs.md (Sat 19:38–22:02 rows).
 
 ### Software and hardware
 
-- **Hardware:** 1× NVIDIA H200 on NVIDIA Brev.
+- **Hardware:** 1× NVIDIA H200 on NVIDIA Brev. The merge for the root weights ran on a Mac's
+  CPU.
 - **Software:** vLLM 0.31.0 (image pinned by digest), torch 2.13.0+cu130, transformers 5.17.0,
   TRL 1.16.0, peft 0.21.2, NeMo Gym 0.7.0.
 
@@ -335,8 +403,8 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
   - The input is a screenshot plus an instruction, and the model answers with `point_2d`.
   - Reward 1 if the point is inside the target's pixel box, with edges counting as inside.
   - Metrics are split by platform, text/icon and source.
-  - It produced every number above, ran the GRPO profiles, and serves `/verify` as the GRPO
-    reward.
+  - It produced every grounding accuracy in Results, ran the GRPO profiles, and serves
+    `/verify` as the GRPO reward.
 - **`web_agent`** (agent eval):
   - The planner is Nemotron 3.5 Lightning (official BF16). It gets a text observation and
     acts only through five tools.
@@ -366,13 +434,19 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
 
 - **Agent failure clusters** from the `web_agent` runs:
   - **Scroll-dependent targets:** the model only sees the current screenshot and can't point at
-    something off-screen. Both scroll tasks stayed at 0/3 with `sft-template`.
-  - **A canvas chart** (picking a bar in a drawn chart): 0/3 with `sft-template`.
-  - **Dense toggle grids,** where neighboring switches look alike. The base grounder failed
-    `sms-billing-off`; `sft-template` passed it 2 of 3 times.
-- **Icons are still weaker than text** (SSv2-clean 84.8 vs 92.3 after `sft-template`;
-  `sft-lightning` TBD).
-- **Web gained least on dev** (FineWeb +1.6 with `sft-template`, +3.0 with `sft-lightning`).
+    something off-screen. Both scroll tasks stayed at 0/3 with all three grounders.
+  - **A canvas chart** (picking a bar in a drawn chart): 0/3 with base and `sft-template`, 1/3
+    with the released adapter. The review attributes that pass to the planner: both tuned
+    grounders hit the same bar, and only the released run's planner stopped there.
+  - **Dense toggle grids,** where neighboring switches look alike: `sms-billing-off` was 0/3 with
+    base, 2/3 with `sft-template` and 0/3 with the released adapter. The review traces
+    `sft-template`'s passes to a one-off screen summary and to its habit of resolving a vague
+    target onto a real switch.
+- **Icons are still weaker than text:** SSv2-clean 85.37 vs 94.18 for the released adapter
+  (`sft-lightning` 81.67 vs 93.04, `sft-template` 84.81 vs 92.33).
+- **Web is the released adapter's weakest dev source:** FineWeb went 82.9 (base) → 85.9
+  (`sft-lightning`) → 84.25 (released; round 1 broke 8 FineWeb rows and fixed 2). On SSv2-clean,
+  though, web gained the most of the three platforms (81.9 → 88.10).
 - **The training labels are mostly accessibility-tree and HTML labels,** some of them rewritten
   by an LLM that never saw the screen.
   - Some source boxes are on the wrong element.
@@ -383,7 +457,8 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
   - there's no high-DPI or multi-monitor handling beyond the 2 MP cap. Very small targets on
     large screens are harder after downscaling.
 - **One target per call** and no reasoning: there is no "I can't find it" signal. A wrong but
-  well-formed point looks like a right one.
+  well-formed point looks like a right one. In the agent runs, when the target wasn't on screen,
+  the released adapter tended to anchor on a literal text match, such as a side-menu link.
 - **Desktop evaluation shares machines with the training data:** see the
   [28-row exclusion](#the-28-row-screenspot-v2-exclusion).
 
@@ -391,7 +466,8 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
 
 - **This model:** `Qwen/Qwen3.5-2B` is **2B** on its model card (HF safetensors total 2.27B).
   The LoRA adapter (r = 16 on 186 modules) adds about 16.8M parameters. That number is computed
-  from the base weight shapes; **TBD:** confirm it against the adapter file.
+  from the base weight shapes, and PEFT loads an adapter of this config as ~16.8M trainable
+  parameters in 372 tensors (A and B for each module).
 - **The whole agent:** Nemotron 3.5 Lightning (30B by card) + this grounder (2B) + NVIDIA
   Parakeet TDT 0.6B for voice input = **32.6B by model-card counts**. The event's cap is 33B.
 - **Why the grounder counts once:** the base and tuned roles are one loaded model with the
@@ -401,7 +477,7 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
 
 - **This model:** Apache-2.0, the same as the base model
   ([`Qwen/Qwen3.5-2B`](https://huggingface.co/Qwen/Qwen3.5-2B): Apache-2.0 per its card).
-  **TBD:** team to confirm.
+  **TBD:** team to confirm before Patrick makes the repo public (~9:30 Sunday).
 - **Training data:**
   - OS-Atlas-data is Apache-2.0 per its card.
   - The UIBert expressions are CC BY 4.0 per the UIBert repo, and are attributed here and in
@@ -411,7 +487,8 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
     - The 1,003 rows from the downloaded BF16 checkpoint fall under its OpenMDW-1.1 license,
       which places no restrictions on outputs.
     - The 8,028 rows from NVIDIA's hosted API fall under the NVIDIA API Trial Terms of Service,
-      which limit trial use to non-production. **Team to confirm**; see the dataset card.
+      which limit trial use to non-production. **TBD:** Patrick's ~9:30 release check decides
+      whether these rows are published or only the local rows are; see the dataset card.
   - Details and the open questions are in the dataset card.
 
 ## Citation

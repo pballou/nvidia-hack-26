@@ -16,8 +16,8 @@
 
 - **GRPO:** 170 steps (TRL, colocated vLLM) on a pool of 1,282 sometimes-pass train rows, with
   the Gym `/verify` point-in-box reward. Default knobs.
-- **Dev:** 86.27 → **87.00 (+0.73)**, which clears the +0.5 keep gate, so the round was
-  **kept**.
+- **Dev:** 86.27 → **87.00 (+0.72, 7 rows)**, which clears the +0.5 keep gate, so the round was
+  **kept**. `summary.json` shows +0.73 because it subtracts accuracies already rounded.
 - **Outcomes:** 22 rows fixed, 15 broken. McNemar exact p = 0.32: the overall gain is
   suggestive, and the per-source shifts below are the real signal.
 - **Without the 46 rows confirmed as data artifacts:** 89.82 → 90.79.
@@ -43,7 +43,7 @@
   text. The point-in-box reward targets exactly that.
 - **Web (FineWeb) and UIBert regressed.** Those are the slices the knobs now push toward.
 
-## Failure taxonomy of r1 (137 dev failures)
+## Failure taxonomy of r1 (126 dev failures)
 
 | Label | Rows | Meaning |
 |---|---|---|
