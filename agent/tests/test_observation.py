@@ -1,6 +1,7 @@
 """agent/observation.py: URL display, summary clipping, rendering."""
 
-from agent.observation import MAX_LINE_CHARS, NO_CHANGE_NOTE, build_observation, clip_summary, display_url
+from agent.observation import (MAX_LINE_CHARS, NO_CHANGE_NOTE, build_observation, clip_summary, display_url,
+                               flatten_json_summary)
 
 
 def test_display_url_keeps_query_except_sid():
@@ -30,3 +31,40 @@ def test_render_no_change_note_and_url():
     text = obs.render()
     assert text.startswith("Step 2 | URL: /settings?tab=accessibility | Title: Settings")
     assert NO_CHANGE_NOTE in text and "sid" not in text
+
+
+# The merged grounder on the Mac (:8011) answered the summary prompt on /billing with one JSON line
+# (runs 20261018-022251-09cacf step 4, 20261018-022950-0d561e step 4), so the cap kept only PAGE and the
+# start of NAV, and the confirm-payment dialog never reached Lightning. The first 240 characters below
+# are from those traces; the rest is illustrative (the full reply, ~217 tokens, wasn't recorded).
+MERGED_GROUNDER_JSON = (
+    '{"PAGE": "Billing", "NAV": "top bar: hamburger menu icon, Acme Utilities logo, customer portal text, '
+    'notification badge with 3, settings gear icon, help question mark icon, user avatar with initials JL and '
+    'dropdown arrow; side menu: Dashboard, Billing, Usage, Messages, Settings, Help", '
+    '"MAIN": ["top: Pay your bill @ left", "middle: Other amount $50 @ right"], '
+    '"STATE": "Other amount selected", '
+    '"OVERLAYS": {"Confirm payment dialog": "Pay $50.00 from Checking 4821?", "buttons": ["Back @ left", '
+    '"Confirm payment @ right"]}}')
+
+
+def test_json_description_becomes_lines_and_keeps_the_dialog():
+    out = clip_summary(MERGED_GROUNDER_JSON).splitlines()
+    assert out[0] == "PAGE: Billing"
+    assert out[1].startswith("NAV: top bar: hamburger menu icon") and len(out[1]) <= MAX_LINE_CHARS
+    assert "MAIN: top: Pay your bill @ left" in out and "STATE: Other amount selected" in out
+    assert "OVERLAYS - Confirm payment dialog: Pay $50.00 from Checking 4821?" in out
+    assert "OVERLAYS - buttons: Confirm payment @ right" in out
+
+
+def test_json_description_cut_off_mid_object_is_split_at_its_keys():
+    cut = MERGED_GROUNDER_JSON[:MERGED_GROUNDER_JSON.index('"STATE"') + 30]
+    out = flatten_json_summary(cut).splitlines()
+    assert out[0] == "PAGE: Billing" and out[-1].startswith("STATE: Other amount")
+    assert any(ln.startswith("MAIN: top: Pay your bill") for ln in out)
+
+
+def test_fenced_json_and_non_json_descriptions():
+    assert flatten_json_summary("```json\n" + MERGED_GROUNDER_JSON + "\n```").startswith("PAGE: Billing\nNAV:")
+    base = "PAGE: Pay your bill\nNAV: hamburger menu icon @ top\nMAIN - bottom-right: Continue → @ right"
+    assert flatten_json_summary(base) is None and clip_summary(base) == base   # the base model's format: unchanged
+    assert flatten_json_summary("") is None and flatten_json_summary("{not json at all") is None

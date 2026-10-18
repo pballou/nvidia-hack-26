@@ -6,6 +6,8 @@ compact. The URL is shown without its query string (the sandbox `sid` is noise).
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import asdict, dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -29,8 +31,56 @@ def display_url(url: str) -> str:
     return (parts.path or "/") + (f"?{query}" if query else "") + (f"#{parts.fragment}" if parts.fragment else "")
 
 
+_JSON_KEY_RE = re.compile(r'[{,]\s*"([A-Za-z][\w /&-]{0,40})"\s*:\s*')
+
+
+def _json_lines(obj: dict, prefix: str = "") -> list[str]:
+    out: list[str] = []
+    for key, value in obj.items():
+        label = f"{prefix} - {key}" if prefix else str(key)
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if isinstance(item, dict):
+                out.extend(_json_lines(item, label))
+            elif item not in (None, ""):
+                out.append(f"{label}: {item}")
+    return out
+
+
+def flatten_json_summary(text: str) -> str | None:
+    """A description written as one JSON object -> "KEY: value" lines; None if it isn't one.
+
+    The merged grounder checkpoint sometimes answers the summary prompt with JSON
+    ({"PAGE": "Billing", "NAV": ..., "OVERLAYS": ...}) on one line, which the per-line cap
+    would cut to its first 240 characters, dialog and all. The base model never does
+    (0 of 1,315 descriptions). A reply cut off mid-object is split at its "KEY": boundaries.
+    """
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.strip("`").strip()
+        t = t[4:].lstrip() if t.lower().startswith("json") else t
+    if not t.startswith("{"):
+        return None
+    try:
+        obj = json.loads(t)
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict):
+        return "\n".join(_json_lines(obj)) or None
+    parts = _JSON_KEY_RE.split(t)  # ["{", key1, value1, key2, value2, ...]
+    lines = []
+    for key, value in zip(parts[1::2], parts[2::2]):
+        value = value.strip().strip("{}[]").strip().strip('"').replace('", "', "; ").replace('","', "; ")
+        if value:
+            lines.append(f"{key}: {value}")
+    return "\n".join(lines) or None
+
+
 def clip_summary(text: str, max_lines: int = MAX_SUMMARY_LINES, max_line_chars: int = MAX_LINE_CHARS) -> str:
-    """Drop blank and repeated lines (small VLMs loop), cap line length and line count."""
+    """Drop blank and repeated lines (small VLMs loop), cap line length and line count.
+
+    A JSON-shaped description is flattened into lines first (flatten_json_summary)."""
+    text = flatten_json_summary(text) or text
     lines, seen = [], set()
     for ln in (text or "").strip().splitlines():
         ln = ln.rstrip()
