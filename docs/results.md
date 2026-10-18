@@ -43,11 +43,12 @@ replays them offline.
 - **How the sets were made:** the non-task phrasings were written by Claude workflows whose
   writers never saw the clarify prompt. The judges agreed with the writers' labels on 196 of 198
   phrasings; the 2 borderline ones aren't counted.
-- **Decision: ships off** (`clarify: off` in `configs/agent.yaml`). It meets the acceptance bar
-  (0 false asks), but on fresh phrasings it asks about 5 of 90 clear requests and misses 5 of 36
-  asks. A false ask costs one extra exchange; a missed ask is the pre-clarify behavior.
-  `AGENT_CLARIFY=on` (or `python -m agent --clarify on`) turns it on. The harness and the Gym
-  `web_agent` server force it off either way.
+- **Decision (Sat night):** off in `configs/agent.yaml` (evals, CLI), because on fresh phrasings
+  it asks about 5 of 90 clear requests and misses 5 of 36 asks. The **console turns it on, with
+  a visible toggle**: the demo uses acceptance-set phrasings (0 false asks), and a false ask costs
+  one extra answer, while a missed ask is the pre-clarify behavior. `AGENT_CLARIFY=on` or
+  `python -m agent --clarify on` turns it on elsewhere. The harness and the Gym `web_agent`
+  server force it off either way.
 - **Prompt iterations, all on the dev sets:**
   - v1 was too lenient: 5/22 asks, and it turned "Allors towards my bill." into "pay bill".
   - v2 added explicit ask checks and examples from other websites.
@@ -163,10 +164,12 @@ the same 32 (task, repeat) jobs in all three arms.
   the median task finishes sooner. The p90 is about the same as retry.
 - **Measured option, not the default: thinking on** verified 5 more of the same 32 jobs than
   retry (26 vs 21), with fewer false claims, at 10.9 s per planning call vs 5.9 s (median task
-  53 s vs 68 s). **The demo default stays `retry`** (decided Sat night): the scripted demo tasks
-  are ones FINAL passes 3/3 with thinking off, a fully local plan step takes ~4 s off vs ~13 s
-  with thinking, and the 26/32 was measured with `sft-template`, not FINAL. Gym evals stay
-  thinking-off, so the reported base-vs-tuned numbers stay comparable.
+  53 s vs 68 s). **The demo recording uses thinking off** (decided Sat night): it's the
+  Gym-measured configuration, in which FINAL passed all 5 scripted tasks 3/3. It also avoids
+  25-45 s thinking pauses on camera (a fully local plan step takes ~4 s off vs ~13 s with
+  thinking), and the 26/32 was measured with `sft-template`, not FINAL. `retry` stays the
+  interactive default. Gym evals stay thinking-off, so the reported base-vs-tuned numbers stay
+  comparable.
 
 ### First reads (Sat afternoon, prompt `agent-v3`, checks before `68c7671`; absolute numbers optimistic)
 

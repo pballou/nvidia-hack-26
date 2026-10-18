@@ -71,6 +71,15 @@ positional, about 50/30/20.
 and the template-vs-Lightning ablation (`train_template.jsonl` vs `train_lightning.jsonl`): whether
 it was trained, and its dev and SSv2 deltas.
 
+### 2c. Pre-flight request check
+
+Before the browser opens, one more Lightning call (thinking off, ~1.6 s) checks the spoken request.
+It either proceeds or asks one short question, e.g. for a clipped "Allors towards my bill." or a
+payment with no clear amount (§4.5). False asks / clear requests and asks / ask cases, live: on the
+acceptance set 0/62 and 22/22; on held-out B 1/45 and 17/19; on held-out C, run once on the frozen
+prompt, 4/45 and 14/17. It's off for evals and the CLI. The console turns it on, with a visible
+toggle.
+
 ## 3. Why Lightning
 
 - **Text-only, with tool calls we can check against a schema.** Perception lives in a 2B VLM and
@@ -198,10 +207,12 @@ Screen:  PAGE / NAV / MAIN / STATE / OVERLAYS  (≤ 40 lines, ≤ 240 chars each
   the scroll-only message 0/2 → 2/2. On vs off, paired: on won 8 jobs and off won 1 (exact McNemar
   p = 0.039); on vs retry p = 0.18. Each call is slower, but runs need half the steps, so the
   median task finishes sooner. **Thinking on is a measured option, not the default:** +5 verified
-  of 32 vs retry at 10.9 s per planning call (retry 5.9 s). The demo keeps `retry`, because its
-  scripted tasks are ones the final grounder passes 3/3 with thinking off, a fully local plan step
-  takes ~4 s off vs ~13 s with thinking, and the 26/32 was measured with `sft-template`. Gym evals
-  stay off, so the reported base-vs-tuned comparison is unchanged.
+  of 32 vs retry at 10.9 s per planning call (retry 5.9 s). **The demo recording uses thinking
+  off,** the Gym-measured configuration in which the final grounder passed all 5 scripted tasks
+  3/3. It also avoids 25-45 s thinking pauses on camera: a fully local plan step takes ~4 s off vs
+  ~13 s with thinking, and the 26/32 was measured with `sft-template`. `retry` stays the
+  interactive default in `configs/agent.yaml`. Gym evals stay off, so the reported base-vs-tuned
+  comparison is unchanged.
 
 ### 4.4 Context budget
 
@@ -248,9 +259,12 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
   Lightning.
   - **Acceptance set** (12 task phrasings, 50 spoken and near-boundary variants, 22 ask cases):
     0 false asks, 22/22 asks.
-  - **Two blind held-out sets** (90 clear, 36 ask): 5 false asks, 31/36 asks.
-  - Because of the held-out false asks it ships off; `AGENT_CLARIFY=on` turns it on.
-    `docs/results.md` has the counts.
+  - **Blind held-out sets:**
+    - B (used to tune v3 → v4): 1 false ask in 45 and 17/19 asks.
+    - C (run once on the frozen prompt): 4 false asks in 45 and 14/17 asks.
+  - Because of the held-out false asks it is off in `configs/agent.yaml` (evals, CLI). The
+    console turns it on, with a visible toggle: the demo uses acceptance-set phrasings, and a
+    false ask costs one extra answer. `docs/results.md` has the counts.
 
 ## 5. Measured in NeMo Gym
 
@@ -386,6 +400,15 @@ step with thinking off, 2-3 s with it on. Hosted: p50 about 26 s, max 94 s. **Su
   so the comparison stays fair.
 - **No prefix cache on vllm-metal**, so every step re-prefills. Next: enable prefix caching once
   vllm-metal supports it for Lightning.
+- **Slow steps on the fully local Mac**, e.g. a 31.9 s done step in a smoke run. A no-change
+  click (an already-downloaded badge) made `retry` think on the next call, which then decoded
+  ~1,100 tokens at the normal ~38 tok/s. The statements table also yields 430-600-token
+  descriptions at ~76 tok/s.
+  Post-Sunday options, each needing a re-measure:
+  - reuse the last description when the screen didn't change;
+  - cap `thinking_max_tokens` at ~768;
+  - don't let a no-change step trigger retry thinking (it is retry's main recovery signal);
+  - lower the summary `max_tokens` to ~480 (that would also cut real ~470-token descriptions).
 
 ## 8. Reproduce
 

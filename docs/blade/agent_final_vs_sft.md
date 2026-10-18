@@ -85,5 +85,6 @@ the summarizer, and the 2 grounder-caused ones cancel. Net grounder effect ≈ 0
   pay-50, report-outage-riverside, text-size-large.
 - **Handle the weak tasks openly:** avoid high-contrast and message-support, or show them and say
   why they fail.
-- **Thinking:** the demo keeps `retry` (decided Sat night). Thinking on's 26/32 was measured with
-  `sft-template`, so it is reported as a measured option, not as FINAL's result.
+- **Thinking:** the demo recording uses thinking off (decided Sat night), the configuration these
+  3/3 results were measured in. Thinking on's 26/32 was measured with `sft-template`, so it is
+  reported as a measured option, not as FINAL's result.

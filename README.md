@@ -212,6 +212,9 @@ is frozen until Sunday's grounder rerun, so the comparison with Saturday's base 
    reward.
 5. **Verifier.** Make the `mark-all-read` check guard the bell notifications, then rerun both
    arms.
+6. **Local latency.** Reuse the screen description when the screen didn't change, cap thinking
+   tokens, and stop a no-change click from triggering retry thinking (a 31.9 s step in a local
+   smoke run; [bounty-lightning.md](docs/bounty-lightning.md) §7).
 
 ## Team
 
