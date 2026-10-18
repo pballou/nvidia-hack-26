@@ -12,8 +12,8 @@ text observation: the URL, whether the screen changed, what its last action did,
 description written by a 2B VLM. It then calls one of five tools. When it calls
 `click("the L option in the Text size row")`, a fine-tuned 2B grounder turns that description into
 a pixel, and Playwright clicks there. Offline, Lightning also rewrites raw accessibility labels into
-click instructions for the grounder's SFT data (whether the final grounder trains on them: TBD,
-§2b). The system fits the 33B cap at 32.6B by model-card counts: Lightning 30B, one Qwen3.5-2B VLM
+click instructions for the grounder's SFT data. The final grounder trained on them: its SFT stage
+used the Lightning-rewritten set, picked on dev over raw labels (§2b). The system fits the 33B cap at 32.6B by model-card counts: Lightning 30B, one Qwen3.5-2B VLM
 whose LoRA adapter is switched per request, so it counts once (`base` describes screens, `grounder`
 clicks), and Parakeet TDT 0.6B for local voice input. Raw HF tensor totals are higher; the rule
 uses card counts. There is no speculative decoding and no judge model.
@@ -39,7 +39,7 @@ uses card counts. There is no speculative decoding and no judge model.
 
 | Tool | Why this shape |
 | --- | --- |
-| `click(target_description)` | A short visual phrase, the way you'd point something out to a sighted helper: visible text or icon, element type, position. This is the style T3's rewrites teach; whether the final grounder trained on them is TBD (§2b), and the Saturday pilot adapter used raw labels. The prompt forbids coordinates, selectors and ids (the validator doesn't enforce this). |
+| `click(target_description)` | A short visual phrase, the way you'd point something out to a sighted helper: visible text or icon, element type, position. This is the style T3's rewrites teach. The final grounder trained on them (§2b); the Saturday pilot adapter and `sft-template` used raw labels. The prompt forbids coordinates, selectors and ids (the validator doesn't enforce this). |
 | `type_text(text, target_description?)` | With a target, the field is grounded, clicked and its text replaced. Enter is never pressed, so submitting is a separate step. |
 | `press_key(key)` | Enter, Tab, Escape, arrows; `ctrl+a` is normalized to `ControlOrMeta+a`. |
 | `scroll(direction: up\|down, amount: small\|page)` | Enums instead of pixels: Lightning can't see how far to scroll. |
@@ -67,9 +67,35 @@ positional, about 50/30/20.
   prompt).
 - **Where:** code in `data_prep/rewrite/`, spec in `docs/tasks/T3-lightning-data-engine.md`.
 
-**TBD (T3 owner):** rows rewritten and dropped, 50-row audit faithfulness, throughput and tokens,
-and the template-vs-Lightning ablation (`train_template.jsonl` vs `train_lightning.jsonl`): whether
-it was trained, and its dev and SSv2 deltas.
+**Rewrite counts** (T3's `train_files.READY.json`, prompt `v4`):
+- 9,384 rows were sent for rewriting: 8,028 through the hosted endpoint and 1,003 through the
+  local official checkpoint. The numeric rule handled the other 353.
+- **8,620 rewrites were kept.** In 411 rows Lightning declined (`keep=false`) and the raw label
+  stayed. The numeric rule removed 353 rows, so the train files have 18,299 rows.
+- **Human audit:** 42 of 43 checkable rewrites were faithful (85.7% if "unsure" counts as a
+  failure).
+
+**Template-vs-Lightning ablation** (trained Sat; same config and seed, measured through the Gym
+`gui_grounding` env; [runs.md](runs.md) Sat 16:35 and 18:44):
+
+| SFT variant | Train rows | Dev (selection) | SSv2-clean (table only) |
+| --- | --- | --- | --- |
+| `sft-template` (raw labels) | 18,652 | 85.66 / 85.86 (two launches) | **89.07** |
+| `sft-lightning` (Lightning instructions) | 18,299 | **86.27** | 88.10 |
+
+- **The pick followed the dev rule, so `sft-lightning` became round 0.** On dev it was +0.41
+  over template in the same harness. That is about 2× the ~0.2-point run-to-run noise but well
+  inside the ~1.1-point sampling SE.
+- **On SSv2-clean, template scored higher** (by 12 rows of 1,244, about 1 point, mostly on icons:
+  81.7 vs 84.8). That eval is for
+  the table only and wasn't used to choose.
+- **The final grounder is `sft-lightning` plus one kept GRPO round** from the NeMo Gym loop: dev
+  87.00 and SSv2-clean 90.35 ([bounty-nemo-gym.md](bounty-nemo-gym.md)).
+- **The variants differ in more than the text.** Template also has the 353 rows the numeric rule
+  removed. So the honest reading is that the rewritten instructions roughly tie with raw labels on
+  grounding accuracy, rather than clearly winning.
+
+**TBD (T3 owner):** throughput and tokens for the rewrite run.
 
 ### 2c. Pre-flight request check
 
