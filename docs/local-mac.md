@@ -11,7 +11,7 @@ so the fully local grounder (§3b) works too ([Gate G results](#gate-g-results),
 | Mode | Lightning (planner) | Grounder | When |
 | --- | --- | --- | --- |
 | **Hybrid (primary)** | Mac, `vllm serve` via **vllm-metal**, **official NVIDIA BF16** | H200 vLLM, base + LoRA (gpu-box.md §3), via a tunnel on 8001 | If Gate L passes |
-| Fully local | Mac, vllm-metal | Mac, vllm-metal, **merged** tuned checkpoint for both roles, on :8011 | Only if Gate G also passes |
+| Fully local | Mac, vllm-metal | Mac, vllm-metal, one instance: base + tuned **LoRA** (`base` summaries, `grounder` clicks), on :8011 | Only if Gate G also passes |
 | All-H200 (fallback) | H200, official BF16 + #61603 patch (gpu-box.md §2) | H200 (gpu-box.md §3) | If Gate L fails |
 
 **Why hybrid:**
@@ -28,8 +28,9 @@ so the fully local grounder (§3b) works too ([Gate G results](#gate-g-results),
 **Parameter cap:**
 - Hybrid: one Lightning (30B) plus one grounder instance (2B) plus Parakeet TDT 0.6B
   (voice input), so 32.6B by model-card counts.
-- Fully local: Lightning plus **one** merged grounder used for both clicks and screen
-  summaries (plus Parakeet, same 32.6B). Never load a second VLM copy.
+- Fully local: Lightning plus **one** Qwen3.5-2B instance with the LoRA switched per
+  request (`base` writes the screen summaries, `grounder` clicks), plus Parakeet: the same
+  32.6B. Never load a second VLM copy.
 - Show base-vs-tuned from the H200 or the Gym numbers, not from a second local
   instance.
 - No speculative decoding or MTP flags anywhere.
@@ -42,7 +43,7 @@ so the fully local grounder (§3b) works too ([Gate G results](#gate-g-results),
 | Nemotron-H / Lightning on vllm-metal | **Experimental.** Prefix caching is off for it, so every planner step re-prefills; keep prompts short and thinking off. |
 | Lightning tool calling (`qwen3_coder` + `nemotron_v3`) on vllm-metal | **Works with official BF16** (quick check, 2026-10-17): median **1.2 s/step** with thinking off; reasoning comes back separately with thinking on. With `tool_choice: "required"`, argument names were 5/5 correct; with `auto`, 4/5. |
 | Qwen3.5 / Qwen3-VL image input on vllm-metal | Experimental. It uses upstream vLLM's HF processor, so preprocessing matches the H200. |
-| LoRA on vllm-metal for Qwen VLMs | Not usable in the stable release (adapter key mismatch, fixed only in dev builds), so serve the **merged** checkpoint locally |
+| LoRA on vllm-metal for Qwen VLMs | **Works in 0.31 (2026-10-18) once the adapter's keys are renamed** for mlx-vlm's module names (`scripts/gate_g_lora_keys.py`). Without the rename it fails with "matched 0 wrapped modules". Gate G passes via LoRA, with the same numbers as the merged checkpoint (fallback). |
 | Fallback planner: llama-server (already installed, b11429) with `ggml-org` Lightning GGUF Q8_0 | Tool parser confirmed; local, but not vLLM |
 | llama.cpp or mlx-vlm for the grounder | **Don't.** Their preprocessing differs (llama.cpp pads), there's conversion work, and no time to re-validate. |
 
@@ -105,16 +106,20 @@ ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 pe
 which Gate G needs.
 
 ```bash
-# Merge once (CPU, streaming): base Qwen3.5-2B + the adapter -> one bf16 checkpoint
-~/.venv-merge/bin/python scripts/gate_g_merge.py --adapter <adapter dir> --out ~/models/grounder-merged-<name>
+# Base + LoRA (the demo mode, like the H200): re-key the adapter once (CPU, seconds)
+~/.venv-merge/bin/python scripts/gate_g_lora_keys.py --adapter <adapter dir> --out ~/models/gui-assist-mlx-keys/<name>
 # Watchdog first (it stops the grounder on memory pressure or a Lightning slowdown), then the server
 python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 \
   --log ~/models/gate_g/watch.jsonl &
-MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh
+LORA=~/models/gui-assist-mlx-keys/<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh
+# Fallback, merged (serves `grounder` only):
+#   ~/.venv-merge/bin/python scripts/gate_g_merge.py --adapter <adapter dir> --out ~/models/grounder-merged-<name>
+#   MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh
 ```
 
 - **[scripts/run_local_grounder.sh](../scripts/run_local_grounder.sh) pins the flags:**
-  - served name `grounder`;
+  - served names `base` + `grounder` with `LORA=` (`--enable-lora --max-lora-rank 64`),
+    or `grounder` alone with a merged `MODEL=`;
   - the frozen 2 MP `--mm-processor-kwargs` (read from `common/grounding.py`);
   - `--max-num-seqs 1`, `--max-num-batched-tokens 2560`;
   - multimodal processor cache off, `enable_thinking` off, no prefix caching;
@@ -123,8 +128,10 @@ MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PC
   after warming Lightning).
 - **Don't use util 0.12 with the default 8,192 batched tokens.** Next to Lightning, that
   setup turned memory pressure yellow ([Gate G results](#gate-g-results), attempt 1).
-- **One instance does both roles:** in this mode the app's `summary_model` is `grounder`.
-  For the console and recording, see
+- **Summaries come from `base`** (`summary_model: base`), as on the H200. The tuned
+  adapter writes a summary as one JSON line, and the agent's 240-char line clip then cuts
+  it; that hid pay-50's confirm dialog from Lightning. In merged mode there is no `base`,
+  so use LoRA mode for the agent. For the console and recording, see
   [Fully local mode for the video](#fully-local-mode-for-the-video).
 
 ## Gates
@@ -185,9 +192,12 @@ MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PC
 
 ## Gate G results
 
-**Verdict: PASS for both adapters (T4).** Each time, the merged grounder on vllm-metal
-matched the H200 `grounder` serving the same adapter, on the same 200 dev rows:
-- **FINAL (round-1 GRPO, the demo adapter), Sat 22:22 EDT:** `prompt_tokens` identical on
+**Verdict: PASS for both adapters, merged and via LoRA (T4).** Each time, the grounder on
+vllm-metal matched the H200 `grounder` serving the same adapter, on the same 200 dev rows:
+- **FINAL via base + LoRA (one instance, the demo setup), Sun 02:47 EDT:**
+  `prompt_tokens` identical on all 200; hit rate 87.0% vs 87.0%; 99.0% agree; local p50
+  1.86 s.
+- **FINAL (round-1 GRPO, the demo adapter) merged, Sat 22:22 EDT:** `prompt_tokens` identical on
   all 200; hit rate 87.0% vs 87.0%; 99.0% of hit/miss decisions agree.
 - **sft-template, Sat 20:22 EDT (attempt 2):** `prompt_tokens` identical on all 200; hit
   rate 86.0% vs 85.0%; 99.0% agree; local p50 1.77 s with Lightning idle.
@@ -199,6 +209,50 @@ Scripts: [scripts/gate_g_merge.py](../scripts/gate_g_merge.py) (merge),
 [scripts/gate_g_watch.py](../scripts/gate_g_watch.py) (watchdog),
 [scripts/gate_g.py](../scripts/gate_g.py) (rows, requests, verdict). Artifacts are in
 `~/models/gate_g/` on Patrick's Mac.
+
+### FINAL via base + LoRA (one instance): Sun 2026-10-18, 02:36–02:50 EDT (T4). PASS
+
+**Why:** T1's live E2E check found that fully local pay-50 failed (23 steps and a false
+success claim). With the merged checkpoint, the tuned grounder also wrote the screen
+summaries.
+- It writes them as one JSON line (`{"PAGE": "Billing", "NAV": …`).
+- `agent/observation.py`'s `clip_summary` cuts every line at 240 chars, so Lightning never
+  saw the "Confirm your payment" dialog.
+- On the H200, summaries come from `base` (adapter off) in the same process.
+
+**Setup:**
+- `LORA=~/models/gui-assist-mlx-keys/night-20261017-193859-round_1-grpo scripts/run_local_grounder.sh`.
+  This serves the base snapshot as `base`, plus the FINAL adapter as `grounder`
+  (`parent: base`), in one vllm-metal instance with the watchdog armed.
+- **Key rename:**
+  - The original adapter fails at startup: "LoRA adapter 1 matched 0 wrapped modules
+    (wrapped: ['model.layers.0.linear_attn.in_proj_a', …])".
+  - vllm-metal wrapped exactly 186 modules under mlx-vlm's names (`model.layers.N.…`).
+    Those equal our 186 PEFT modules (`model.language_model.layers.N.…`) one-to-one after
+    the prefix swap.
+  - `scripts/gate_g_lora_keys.py` writes a re-keyed copy: tensors identical value for
+    value, sha256 `9d04d416…`, provenance in `RENAMED_FROM.json`.
+  - Startup log: "wrapped 186 modules", "Loaded new LoRA adapter: name 'grounder'".
+
+**Gate G** (`grounder` via LoRA vs the FINAL H200 half, same 200 rows):
+- `prompt_tokens` identical 200/200.
+- Hit rate 87.0% vs 87.0%; agreement 99.0% (1 discordant row each way). 158/200 replies
+  are byte-identical.
+- Local p50 1.86 s.
+- These match the merged run, so runtime LoRA on Metal gives the same answers as the merge.
+- Results: `~/models/gate_g/night-20261017-193859-round_1-grpo-lora/`.
+
+**Summary spot-check** (`scripts/gate_g_summary_check.py`: the agent's exact request and
+`clip_summary`, on T1's run screenshots in `/tmp/t1-demo/runs/20261018-022251-09cacf/`):
+
+| Screenshot | `base` | `grounder` (LoRA) |
+| --- | --- | --- |
+| step_04: "Confirm your payment" dialog | 13 plain-text lines, all 5 sections; "Confirm payment button @ bottom-right"; `OVERLAYS: "Confirm your payment" dialog box…` | one JSON line, clipped at 240 chars: the dialog is lost |
+| step_00: dashboard | 19 lines, 4/5 sections | 13 lines, 3/5 sections |
+| step_10: settings | 14 lines, 5/5 sections | 13 lines, 3/5 sections |
+
+`base` summaries took 2.9–4.5 s each. So the agent's `summary_model` is `base` in fully
+local mode too.
 
 ### FINAL adapter (round-1 GRPO): Sat 22:04–22:22 EDT (T4). PASS
 
@@ -286,7 +340,8 @@ The night loop finished at 22:02 with FINAL = round 1 GRPO,
 ### Fully local end-to-end check: 20:25–20:32 EDT (T4)
 
 **Setup:** three demo tasks through the real agent, n=1 each, no config edits:
-- the local grounder did both clicks and screen summaries (one instance);
+- the local grounder did both clicks and screen summaries (one instance, merged). Fully
+  local mode now takes summaries from `base` instead; see the base + LoRA section above;
 - local Lightning, thinking `retry`, sandbox :8091;
 - `scripts/run_agent_tasks.py --ids pay-50,download-september-statement,text-size-large
   --pin-grounder-adapter --pause-on-memory-pressure`, with `AGENT_VLM_BASE_URL`,
@@ -403,10 +458,14 @@ started after the orchestrator's GO (T2's eval had finished at ~19:30):
 
 ## Fully local mode for the video
 
-Lightning, voice and the 2B grounder all on this Mac: 30 + 2 + 0.6 = 32.6B. One grounder
-instance does both clicks and screen summaries. Prerequisites:
-- Gate G has passed for the adapter you're showing. FINAL (round-1 GRPO) passed at 22:22;
-  its merge is `~/models/grounder-merged-night-20261017-193859-round_1-grpo`.
+Lightning, voice and the 2B grounder all on this Mac: 30 + 2 + 0.6 = 32.6B. One Qwen3.5-2B
+instance serves `base` (screen summaries) and `grounder` (the FINAL LoRA, clicks), switching the
+adapter per request as on the H200. Prerequisites:
+- Gate G has passed for the adapter you're showing. FINAL (round-1 GRPO) passed via LoRA at
+  02:47 Sun and merged at 22:22 Sat.
+  - Its re-keyed LoRA copy is `~/models/gui-assist-mlx-keys/night-20261017-193859-round_1-grpo`.
+  - That copy is runtime-only, for vllm-metal's module names. The published HF adapter
+    keeps the original PEFT keys.
 - Teams is quit and Chrome is closed (Playwright's own browser is fine).
 - The Mac is on power, with Low Power Mode off.
 - Lightning is up on :8000 (§2).
@@ -416,24 +475,28 @@ instance does both clicks and screen summaries. Prerequisites:
 #    the agent's own planner calls from tripping it; memory triggers are unchanged.
 python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 \
   --log ~/models/gate_g/watch-video.jsonl --probe-every 30 --probe-margin-s 1.5
-MODEL=~/models/grounder-merged-night-20261017-193859-round_1-grpo \
-  GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # FINAL; healthy in ~45 s
-# 2. The console with the real agent, pointed at the Mac grounder for clicks and summaries
-#    (--grounder defaults to grounder):
+LORA=~/models/gui-assist-mlx-keys/night-20261017-193859-round_1-grpo \
+  GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # FINAL LoRA; healthy in ~45 s
+# 2. The console with the real agent: clicks from `grounder` (the default), summaries from `base`.
 scripts/demo_up.sh --agent real --headed --vlm-url http://127.0.0.1:8011/v1 \
-  --summary-model grounder --vlm-label "Mac (vllm-metal)"
+  --summary-model base --vlm-label "Mac (vllm-metal)"
 #    Same thing as env vars (a flag beats its env var):
-#    AGENT_VLM_BASE_URL=http://127.0.0.1:8011/v1 AGENT_GROUNDER_MODEL=grounder AGENT_SUMMARY_MODEL=grounder \
+#    AGENT_VLM_BASE_URL=http://127.0.0.1:8011/v1 AGENT_GROUNDER_MODEL=grounder AGENT_SUMMARY_MODEL=base \
 #      scripts/demo_up.sh --agent real --headed
 # 3. Record with Cmd+Shift+5 (macOS screen recording), not Zoom.
 ```
 
-- **What to check:** `demo_up.sh` checks that :8011 serves `grounder` for both roles.
-  The console disables the `base` option, and its header reads "VLM: Mac (vllm-metal) ·
-  127.0.0.1:8011 · serves grounder", so the video shows where the grounder runs.
+- **What to check:** `demo_up.sh` checks that :8011 serves both names. The console's
+  Grounder toggle switches between `base` and `grounder` in this one instance, and its
+  header names the Mac VLM, so the video shows where the grounder runs.
+- **Re-keying another adapter:** `scripts/gate_g_lora_keys.py --adapter <dir> --out
+  ~/models/gui-assist-mlx-keys/<name>`.
+- **Fallback:** if LoRA mode won't start, the merged checkpoint
+  (`MODEL=~/models/grounder-merged-night-20261017-193859-round_1-grpo`) serves only
+  `grounder`. Its summaries lose overlays like the pay-50 confirm dialog.
 - **The H200 isn't needed.** Close the 8001 tunnel, so no H200 grounder is in the loop.
 - **Expect per step:** ~4.3 s to plan (thinking off; ~13 s when a thinking retry kicks
-  in), ~1 s to ground a click, ~6 s for each screen summary.
+  in), ~1–2 s to ground a click, ~3–4.5 s for each `base` screen summary.
 - **If the watchdog trips** (it writes `~/models/gate_g/STOPPED`), switch to hybrid.
 
 **Switch back to hybrid** (grounder on the H200):
