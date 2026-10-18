@@ -12,7 +12,8 @@ Run from the repo root, with the sandbox up (`uvicorn sandbox.app:app --port 809
 ```bash
 .venv-gym/bin/python -m console --agent mock              # scripted mock agent, no models needed
 .venv-gym/bin/python -m console --agent real              # T2's agent.core (Lightning + grounder VLM)
-.venv-gym/bin/python -m console --agent real --headed     # also show the Playwright window (video)
+.venv-gym/bin/python -m console --agent real --headed     # debugging only: headed fonts render different pixels
+                                                          # (unmeasured; pay-50 fell from 8/8 to 1/4). Record headless.
 # fully local on the Mac: the merged grounder on :8011 writes the screen summaries too
 .venv-gym/bin/python -m console --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder \
     --vlm-label "Mac (vllm-metal)"
@@ -213,7 +214,8 @@ It's local only: no Web Speech API, no MediaRecorder, no cloud.
   - While warm, the page shows "Microphone ready (releases after 5 min idle)" with a
     Turn off button.
   - It also releases when the page is hidden. On macOS a fully covered window counts
-    as hidden, so keep the headed agent window from covering the console completely.
+    as hidden. Record headless (no agent window); with --headed, keep that window from covering
+    the console completely.
 
 - **Recording:** click **Speak**, or hold Right Option (`AltRight`, configurable in
   Options). Space-hold works when focus isn't on a field or control.

@@ -61,7 +61,7 @@ the sandbox's own state (the agent never sees that state).
 **4. Run the real agent.**
 
 ```bash
-scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API; --headed to watch the browser
+scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API
 # the console starts with thinking off and the request check on: --thinking retry|on, --clarify off change that
 ```
 
@@ -104,7 +104,8 @@ NeMo-Speech.cpp 0.2.0. Audio never leaves the machine, and there's no cloud spee
   - Saying "stop" (or "stop it", "cancel that") during a run stops it.
 
 Run the pieces separately with `scripts/run_sandbox.sh`, `scripts/run_asr.sh` and
-`scripts/run_console.sh --agent mock|real [--headed]` (voice uses Parakeet; `--asr stub` for fixed text).
+`scripts/run_console.sh --agent mock|real` (voice uses Parakeet; `--asr stub` for fixed text).
+Record headless: `--headed` renders different pixels (unmeasured; pay-50 fell from 8/8 to 1/4).
 
 Tests:
 `.venv-gym/bin/python -m pytest sandbox/tests console/tests -q`. They cover the

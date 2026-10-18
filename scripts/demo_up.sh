@@ -27,7 +27,8 @@
 #                     default 127.0.0.1:8096, scripts/run_asr.sh; voice stays off until it answers, and the
 #                     page turns it on by itself). stub = fixed text for UI testing, never auto-run, only
 #                     when asked for. $CONSOLE_ASR overrides the default.
-#   --headed          show the Playwright browser window (for the video)
+#   --headed          show the Playwright browser window. Debugging only,
+#                     unmeasured: headed fonts render different pixels (pay-50 fell from 8/8 to 1/4); record headless
 #   --skip-models     don't check the VLM / Lightning
 # Env: SANDBOX_PORT (8090), CONSOLE_PORT (8095), LIGHTNING_LOCAL_URL (http://127.0.0.1:8000/v1, what
 #      --lightning local checks), PYTHON (.venv-gym/bin/python).

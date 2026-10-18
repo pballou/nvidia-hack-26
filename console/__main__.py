@@ -61,7 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--sandbox-url", default="http://127.0.0.1:8090")
     ap.add_argument("--runs-dir", default="runs",
                     help="mock agent trace dir, relative to the repo root (the real agent uses configs/agent.yaml runs_dir)")
-    ap.add_argument("--headed", action="store_true", help="show the Playwright browser window (for the video)")
+    ap.add_argument("--headed", action="store_true",
+                    help="show the Playwright browser window; debugging only, unmeasured: headed fonts render different pixels (pay-50 fell from 8/8 to 1/4); record headless")
     ap.add_argument("--step-delay", type=float, default=0.8, help="mock agent: seconds per step, so the demo looks live")
     return ap
 

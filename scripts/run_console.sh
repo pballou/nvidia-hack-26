@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start the GUI assist console (docs/tasks/T1-app.md, part B) on 127.0.0.1:8095.
-# Usage: scripts/run_console.sh [--agent mock|real] [--headed] [other `python -m console` flags]
+# Usage: scripts/run_console.sh [--agent mock|real] [other `python -m console` flags]
+#   (--headed exists for debugging only: unmeasured: headed fonts render different pixels (pay-50 fell from 8/8 to 1/4); record headless)
 #   Defaults to --agent mock. The sandbox must be running (scripts/run_sandbox.sh).
 #   PYTHON=.venv-gym/bin/python
 set -euo pipefail
