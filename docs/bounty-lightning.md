@@ -197,8 +197,11 @@ Screen:  PAGE / NAV / MAIN / STATE / OVERLAYS  (≤ 40 lines, ≤ 240 chars each
   Thinking on every call wins on the hardest tasks (same jobs): the canvas chart 0/3 → 2/3 and
   the scroll-only message 0/2 → 2/2. On vs off, paired: on won 8 jobs and off won 1 (exact McNemar
   p = 0.039); on vs retry p = 0.18. Each call is slower, but runs need half the steps, so the
-  median task finishes sooner. **Recommended demo default: thinking on.** Gym evals stay off, so
-  the reported base-vs-tuned comparison is unchanged.
+  median task finishes sooner. **Thinking on is a measured option, not the default:** +5 verified
+  of 32 vs retry at 10.9 s per planning call (retry 5.9 s). The demo keeps `retry`, because its
+  scripted tasks are ones the final grounder passes 3/3 with thinking off, a fully local plan step
+  takes ~4 s off vs ~13 s with thinking, and the 26/32 was measured with `sft-template`. Gym evals
+  stay off, so the reported base-vs-tuned comparison is unchanged.
 
 ### 4.4 Context budget
 

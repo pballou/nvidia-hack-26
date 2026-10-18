@@ -130,11 +130,12 @@ the same 32 (task, repeat) jobs in all three arms.
   were 0/3.
 - **Cost:** each planning call is about 1.7× slower, but runs take about half as many steps, so
   the median task finishes sooner. The p90 is about the same as retry.
-- **Recommendation for the demo default: `thinking: on`.** It solves more tasks, makes fewer
-  false claims and finishes the median task fastest. The UI should show that Lightning is
-  thinking during the longer per-step pauses. Gym evals stay thinking-off, so the reported
-  base-vs-tuned numbers stay comparable. (The default in `configs/agent.yaml` is still `retry`
-  until Patrick decides; the agent pipeline is frozen until Sunday's rerun.)
+- **Measured option, not the default: thinking on** verified 5 more of the same 32 jobs than
+  retry (26 vs 21), with fewer false claims, at 10.9 s per planning call vs 5.9 s (median task
+  53 s vs 68 s). **The demo default stays `retry`** (decided Sat night): the scripted demo tasks
+  are ones FINAL passes 3/3 with thinking off, a fully local plan step takes ~4 s off vs ~13 s
+  with thinking, and the 26/32 was measured with `sft-template`, not FINAL. Gym evals stay
+  thinking-off, so the reported base-vs-tuned numbers stay comparable.
 
 ### First reads (Sat afternoon, prompt `agent-v3`, checks before `68c7671`; absolute numbers optimistic)
 
