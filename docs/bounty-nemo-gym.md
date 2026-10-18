@@ -1,9 +1,8 @@
 # Best Model Improvement with NVIDIA NeMo Gym: GUI Assist
 
-> **Status:** draft of Sat 2026-10-17, ~18:00. Every number below is measured and logged in
-> [runs.md](runs.md), unless marked **TBD**. TBD slots are filled from the overnight loop
-> (Sat ~20:30 → hard end Sun 05:40 tonight, extended from the 02:50 code default) and Sunday's final
-> evals. Owners: Kyle (loop, training), Charlie (envs, eval, BLADE).
+> **Status:** Sun 2026-10-18, 00:30. The overnight loop ran 19:38 → 22:02 and its results are
+> filled in (§2, §4). Every number below is measured and logged in [runs.md](runs.md) or the
+> [BLADE reports](blade/), unless marked **TBD**. Owners: Kyle (loop, training), Charlie (envs, eval, BLADE).
 
 ## 1. Summary
 
@@ -15,7 +14,7 @@ where checkpoints are chosen, and where the reward signal for training comes fro
 - **Two Gym environments, kept in this repo in Gym's layout:**
   - `gui_grounding`: reward 1 if the point lands in the target box;
   - `web_agent`: the full agent on a sandbox web app, rewarded from the app's own state.
-- **Every number below comes from `gym eval run`** through those environments: baselines,
+- **Every accuracy and success rate below comes from `gym eval run`** through those environments: baselines,
   checkpoint selection on a dev split, and the held-out test.
 - **An unattended overnight loop improves the model through Gym.** Each round runs
   `gym eval profile` to find the rows the model sometimes gets right, trains on them with TRL
@@ -24,12 +23,22 @@ where checkpoints are chosen, and where the reward signal for training comes fro
   saved next to it as the per-task flip report. BLADE failure analysis can steer the next round,
   through a small set of pre-approved knobs.
 
-So far, LoRA SFT on open OS-Atlas data, selected and measured in Gym, takes Qwen3.5-2B from
-**76.4% to 85.7% on dev** and **86.3% to 89.1% on ScreenSpot-v2-clean**. Most of the held-out
-gain is on icons (+6.7) and desktop (+5.5). The GRPO rounds are **TBD**. Two one-round
-rehearsals of the loop ran end to end on Saturday: the GRPO path was kept (dev 86.69%) and a
-forced fallback round was reverted (§4). They profiled only 400 and 300 rows (4,000 per round
-overnight), so they test the loop, not the gain.
+LoRA SFT on open OS-Atlas data, selected and measured in Gym, takes Qwen3.5-2B from **76.4% to
+86.3% on dev**. The chosen variant used 8,620 instructions rewritten by Lightning, picked on dev.
+The Gym loop then adds one kept GRPO round: **dev 87.0%**.
+
+On held-out **ScreenSpot-v2-clean**, never used to choose a checkpoint, the final adapter scores
+**90.35%**. A second independent T=0 run of the same adapter gave 90.27%, one row apart; we report
+the run that the paired compares use. Against the baselines:
+- **+4.1 points over base** (86.3%).
+- **+2.25 over the loop's own starting adapter** (sft-lightning, the dev pick, 88.10%), with 34
+  tasks fixed and 6 broken on the same 1,244 rows (McNemar exact p ≈ 8 × 10⁻⁶). Every split rose,
+  most on icons (+3.7) and web (+2.7).
+- **+1.29 over template SFT** (89.07%), the stronger SFT on SSv2-clean but not the dev pick: 50
+  fixed, 34 broken, p = 0.10, not significant.
+
+Round 2 was flat on dev (−0.10, one row) and was reverted, so the keep rule stopped the loop
+there. Base → SFT is plain TRL measured in Gym; SFT → final is the Gym-driven part (§8).
 
 ## 2. Results
 
@@ -40,13 +49,42 @@ through the `gui_grounding` env):
 | --- | --- | --- | --- |
 | Qwen3.5-2B base | — | 76.4% | 86.3% |
 | Pilot SFT | 2,000 raw-label rows, 5 min | 81.3% (+5.0) | — |
-| **Template SFT** (round-0 candidate) | All 18,652 train rows, raw labels, 1 epoch, 54 min | **85.7% (+9.3)** | **89.1% (+2.8)** |
-| Lightning-instruction SFT | Same config and seed on T3's 18,299 rows (353 fewer than template); 8,620 instructions rewritten by Lightning | TBD | TBD |
-| GRPO round 1 | Profile → pool → GRPO with the Gym `/verify` reward | TBD | — |
-| GRPO round 2 / 3 | Same, if the previous round was kept | TBD | — |
-| **Final** (best kept on dev) | | TBD | TBD (evaluated once) |
+| Template SFT (round-0 candidate) | All 18,652 train rows, raw labels, 1 epoch, 54 min | 85.7% (+9.3) | 89.1% (+2.8) |
+| **Lightning-instruction SFT** (round 0, picked on dev) | Same config and seed on T3's 18,299 rows (353 fewer than template); 8,620 Lightning instructions (8,498 differ from the raw label); 49 min | **86.3% (+9.9)** | 88.1% (+1.8) |
+| GRPO round 1: **kept** | 4,000 profiled rows → 1,282-row pool → 170 GRPO steps with the Gym `/verify` reward | **87.0% (+0.72 vs round 0; 7 net rows)** | — |
+| GRPO round 2: reverted | 4,000 profiled rows → 242-row pool (BLADE knobs) → 167 steps | 86.9% (−0.10 vs round 1; 1 row) | — |
+| **Final** (round 1, best kept on dev) | Served as `grounder`; merged copy passed Gate G on the Mac | **87.0% (+10.6)** | **90.35% (+4.1)**; duplicate run 90.27 |
 
-SSv2-clean is only evaluated for the table. Checkpoints are never chosen on it (§5).
+SSv2-clean is only evaluated for the table. Checkpoints are never chosen on it (§5). The two
+round-0 candidates differ by +0.41 on dev (86.27 vs template's 85.86 in the same harness). That is
+about 2× the ~0.2-point run-to-run noise but well inside the ~1.1-point sampling SE (§8).
+SSv2-clean happened to favor template (89.07 vs 88.10). The pick followed the dev rule. Round 3
+didn't run because round 2 wasn't kept. The dev number for the final adapter is a selection
+number: it was the best on dev across rounds, and re-runs gave 87.00 and 86.89.
+
+**Where the Gym loop's gain is** (SSv2-clean, same 1,244 rows; the loop started from sft-lightning):
+
+| Split (rows) | Template SFT | Loop start (sft-lightning) | Final | Δ vs loop start | Δ vs template |
+| --- | --- | --- | --- | --- | --- |
+| All (1,244) | 89.07 | 88.10 | **90.35** | **+2.25** (34 fixed, 6 broken) | +1.29 (50 fixed, 34 broken) |
+| Mobile (501) | 92.22 | 91.22 | 93.21 | +2.00 | +1.00 |
+| Desktop (306) | 89.54 | 86.93 | 88.89 | +1.96 | −0.65 |
+| Web (437) | 85.13 | 85.35 | 88.10 | +2.75 | +2.97 |
+| Text (704) | 92.33 | 93.04 | 94.18 | +1.14 | +1.85 |
+| Icon (540) | 84.81 | 81.67 | 85.37 | +3.70 | +0.56 |
+
+- **Every split rose against the loop's start.** The per-split moves aren't tested on their own.
+  Much of the icon and desktop gain recovers the Lightning SFT's deficit there: against template,
+  icon is only +0.6 and desktop is −0.7. Web is the consistent gain on SSv2-clean, but FineWeb
+  fell 1.7 on dev in the same round, so the slice story isn't stable.
+- **On dev, round 1's own gain was suggestive, not significant:** 22 fixed, 15 broken,
+  p = 0.32 ([BLADE round 1](blade/round_1_r0_vs_r1.md)). The held-out pair against the loop's
+  start is the significant result.
+- **By source on dev, AndroidWorld rose most:** 78.4 → 84.9 on 139 rows (10 fixed, 1 broken),
+  and the Android TextView role went 77.5 → 86.5. That puts it back above template SFT's 81.3.
+  BLADE on the template adapter had found a row-centre click habit on Android lists, which the
+  point-in-box reward scores as a miss. We haven't checked whether round 1's fixes are those
+  rows.
 
 **Where the SFT gain is** (base → template SFT):
 
@@ -70,7 +108,9 @@ SSv2-clean is only evaluated for the table. Checkpoints are never chosen on it (
   call is faster.
 
 **Agent** (`web_agent` env, 12 sandbox tasks × 3 repeats, the same Lightning, rows, prompts and
-tools; only the grounder's served name changes):
+tools; only the grounder is configured differently, by served name or by the adapter behind `grounder`. The FINAL
+arm ran 3 h later on a restarted `:8001`, and BLADE found summarizer and planner differences on identical
+inputs, so that arm is confounded):
 
 | Grounder | Verified success | Claimed success | Invalid tool calls | Status |
 | --- | --- | --- | --- | --- |
@@ -79,26 +119,35 @@ tools; only the grounder's served name changes):
 | `grounder` = FINAL (sft-lightning + GRPO round 1) | 17/36 (47%) | 27/36 (11 false) | 6/256 | Sat 22:05, `agent-v4`, reportable |
 
 - **All three are within noise on agent success.** FINAL vs base: `mean/reward` −0.028, 95% CI
-  [−0.20, +0.14]; failed actions 10 → 0 (significant); text-size-large 0/3 → 3/3. The 22 → 17
-  drop is not a grounder regression. FINAL hits 96.5% of well-posed targets vs SFT's 92.6%, and
-  about 6 of the 9 changed rollouts come from the planner or the summarizer. FINAL also ran on a
-  restarted serving process. Details: [blade/agent_final_vs_sft.md](blade/agent_final_vs_sft.md).
-  The Gym-driven gains are therefore the grounding ones (dev, ScreenSpot-v2-clean) and the
-  robust in-agent click fixes. End-to-end success at n=36 can't separate the grounders.
+  [−0.20, +0.14]; failed actions 10 → 0 (the compare CI excludes 0, but all 10 sit in 4 base
+  rollouts of 2 tasks); text-size-large 0/3 → 3/3.
+- **We find no evidence that the 22 → 17 drop is a grounder regression.** About 6 of the 9
+  changed rollouts trace to the planner or the summarizer. FINAL's hand-labelled hit rate on
+  well-posed targets is 96.5% (110/114) vs SFT's 92.6% (112/121), not significant. FINAL also ran
+  on a restarted serving process. Details: [blade/agent_final_vs_sft.md](blade/agent_final_vs_sft.md).
+- **So the Gym-driven gains are the grounding ones** (dev, ScreenSpot-v2-clean). Inside the agent,
+  both tuned grounders remove base's failed actions, so that comes from SFT, and the loop adds no
+  measurable agent change. End-to-end success at n=36 can't separate the grounders.
 
-- **Strict-check caveat:** with a strict `mark-all-read` check, tuned is 20/36 (+2), as the
+Base vs sft-template (Sat 18:45 / 19:05):
+
+- **Strict-check caveat:** with a strict `mark-all-read` check, sft-template is 20/36 (+2), as the
   current check doesn't guard the bell notifications ([BLADE](blade/agent_base_vs_sft.md)). The
-  check stays unchanged until after Sunday's grounder rerun, so that rerun is comparable.
+  check was kept unchanged for the FINAL rerun (Sat 22:05), so all three arms are comparable.
 - **`gym eval compare`:** `mean/reward` +0.111, 95% CI [−0.06, +0.28], so suggestive but not
-  significant at n=36. Failed actions per episode −0.28, CI [−0.52, −0.04], significant
-  (10 → 0). No-change actions 83 → 45, and Lightning's done claims matched the sandbox 31/36 vs
+  significant at n=36. Failed actions per episode −0.28, CI [−0.52, −0.04] (10 → 0). The CI
+  excludes 0, but the 10 are clustered in 4 rollouts of 2 tasks. No-change actions 83 → 45, and Lightning's done claims matched the sandbox 31/36 vs
   26/36. Flips: 3 fail→pass, 1 pass→fail.
 - **Per task (verified/3):** text-size-large 0→2, sms-billing-off 0→2, message-support-meter 1→2,
-  high-contrast 2→1. Canvas and scroll tasks stay 0/3 in both (BLADE: TBD).
+  high-contrast 2→1. The scroll tasks stay 0/3 in all three arms. The canvas chart task
+  (max-usage-month) is 0/3 for base and SFT and 1/3 for FINAL, planner-driven per
+  [BLADE](blade/agent_final_vs_sft.md). The other canvas task (report-outage-riverside) passes
+  3/3 in every arm.
 - **Setup:** official BF16 Lightning (thinking off), sandbox `68c7671`, `base` screen descriptions
   in both conditions, 0 masked ([runs.md](runs.md) Sat 18:45).
 
-A Saturday read (n=1, 4 easy tasks, not final) had the pilot adapter at 4/4 and base at 3/4. The
+An early Saturday read (interactive harness, not Gym; agent-v3; n=1, 4 easy tasks; not in
+runs.md) had the pilot adapter at 4/4 and base at 3/4. The
 task base missed was a pure grounding miss: Lightning correctly asked for the "L" text-size option
 six times, and every base click landed on "M". Details: [bounty-lightning.md](bounty-lightning.md)
 §5.
@@ -165,10 +214,11 @@ Code: `training/night_loop.py` (the loop), `training/grpo.py` (TRL GRPO with the
 
 **Loop settings, from the code** (`training/night_loop.py` defaults unless noted):
 
-- **Clock:** tonight's run uses extended limits, `--last-round-start 04:15 --no-new-step 05:25
-  --hard-end 05:40`, at most 3 rounds, and the box is stopped as soon as `FINAL.json` exists (by
-  06:00 at the latest). The code defaults are 01:30 / 02:40 / 02:50. Every step's timeout is capped
-  at the hard end, so `finish()` (cleanup, serving the best adapter, `FINAL.json`) runs by then.
+- **Clock:** the overnight run used extended limits, `--last-round-start 04:15 --no-new-step 05:25
+  --hard-end 05:40`, and at most 3 rounds. The code defaults are 01:30 / 02:40 / 02:50. Every
+  step's timeout is capped at the hard end, so `finish()` (cleanup, serving the best adapter,
+  `FINAL.json`) runs by then. In the event the loop ended on the keep rule: `FINAL.json` was
+  written at 22:02, and the box was stopped at 22:35 after the final evals.
 - **Keep gate:** dev must gain ≥ +0.5 points (`KEEP_MIN_GAIN`), otherwise the loop reverts to the
   last kept adapter and stops. A failed dev eval is retried once.
 - **Reward:** `/verify` (weight 1) plus 0.1 × "the reply parses as a point" (`format_reward`, a
@@ -204,8 +254,9 @@ one place, not two.
 **Fallback that is still Gym-driven.** If GRPO fails the gate (or crashes before finishing its
 20-step smoke, or the pool has fewer than 32 rows), the loop runs one rejection-sampled SFT round
 instead, then stops. It trains on the reward=1 replies from the round's own
-`gym eval profile` rollouts, at most 2 distinct replies per row. Those replies are model-generated
-training data, so they're published with the command and config that made them.
+`gym eval profile` rollouts, at most 2 distinct replies per row. Those replies would be
+model-generated training data, so they'd be published with the command and config that made
+them. The fallback didn't run overnight. Rehearsal 2's 541 rows trained no reported model.
 
 **What made TRL GRPO work on Qwen3.5-2B with images** (TRL 1.16.0 + vLLM 0.31.0, found by
 reading the installed sources; details in `training/grpo.py`):
@@ -234,25 +285,78 @@ adapter, with a small profile, knobs `pool_max 300` and `grpo_max_steps 30` (22 
 - **Not a result:** the pool was 111 rows, and the same adapter's dev score moved 0.2 points
   between launches (§5), so gains near the gate are close to the noise.
 
-**Overnight rounds (TBD):**
+**Overnight rounds** (Sat 19:38 → 22:02, launch `20261017-193859`, from sft-lightning; runs.md
+Sat 19:38–22:09):
 
-| Round | Pool (by source) | Method | Steps | s/step | Reward first → last | Dev before → after | Kept |
+| Round | Pool (by source) | Method | Steps | s/step | Verify reward first → last | Dev before → after | Kept |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | TBD | GRPO | TBD | TBD | TBD | round-0 re-eval (TBD) → TBD | TBD |
-| 2 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| 3 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| 1 | **1,282** of 4,000 profiled rows (32% sometimes-pass): fineweb 472, linux 230, uibert 220, androidworld 183, macos 177; default knobs | GRPO | 170 (round deadline) | 20.6 (gate D2 20.0) | 0.77 → 0.90 | 86.27 (round-0 re-eval) → **87.00** (+0.72) | **Yes** |
+| 2 | **242** weighted entries (source weights repeat uibert and fineweb rows and subsample androidworld and macos) from 203 candidates: 223 of 4,000 sometimes-pass (5.6%) minus 20 in `exclude_ids`. Fineweb 81, uibert 78, linux 63, androidworld 10, macos 10; BLADE knobs | GRPO | 167 (round deadline) | 20.4 (gate D2 21.1) | 0.53 → 0.86 | 87.00 → 86.89 (−0.10) | No: reverted, loop stopped |
+| 3 | — | not run (round 2 wasn't kept) | | | | | |
+
+Dev deltas here are exact row counts: round 1 was +0.72 (7 rows), round 2 was −0.10 (1 row).
+The loop's own logs show +0.73 / −0.11 because they subtract accuracies already rounded to two
+decimals. The keep decisions are unchanged.
+
+- **Both rounds were clean runs:** 0 `/verify` failures in 16,176 GRPO reward calls, peak 45 GiB,
+  and no crashes. Round 1's profile (4,000 rows × 8 samples) took 7 minutes.
+- **The final adapter was served automatically:** the loop's `finish()` put it on `:8001` as
+  `grounder` at 22:00:59 and wrote `FINAL.json` at 22:02. Two independent SSv2-clean evals of it
+  followed: Kyle's at 22:04–22:09 (90.35, with the paired compares) and the orchestrator's
+  `night-r1` (90.27; dev 86.89). The H200 was stopped at 22:35.
+
+**BLADE steered round 2, through knobs only** ([blade/round_1_r0_vs_r1.md](blade/round_1_r0_vs_r1.md)).
+The orchestrator ran BLADE on the round-0 → round-1 dev pair at 20:51 and uploaded `knobs.json`.
+Round 2's `knobs_used.json` shows the new values with no clamps or notes. The values come from a
+fixed rule in `scripts/blade_pair.py` (plain Python, no model):
+- **`source_weights`:** clip(the source's model-attributable error ÷ the overall error, rounded to
+  0.25, to [0.5, 2.0]), plus 0.25 for a source with ≥ 5 broken rows. That gave uibert 1.75 (8.2%
+  vs 4.8%), fineweb 1.25 (5.0%, plus 8 broken rows), androidworld 0.75, macos 0.5 (the floor) and
+  linux 1.0.
+- **`exclude_ids`:** 285 train rows. 225 have labels nothing on screen can match or boxes too thin
+  to hit (D-Bus names, AX handles, value literals, file-name slugs, sub-precision boxes). The other
+  60 are unprofiled rows from screenshots where every profiled row never passes.
+
+**Round 2 was flat** (−0.10, one dev row, within noise). **A likely contributor: round 1 sharpened
+the model.** Round 1's GRPO cut training-time entropy from 0.27 to 0.19. On a fresh 4,000-row
+profile at temperature 1.0, the round-1 adapter got the same result on all 8 samples for 94% of
+rows, against 68% in round 1's profile. So far fewer rows had any signal to learn from:
+
+| Round-2 profile vs round 1's | Round 1 | Round 2 |
+| --- | --- | --- |
+| Always-pass rows | 2,469 | 3,448 |
+| Sometimes-pass rows (the GRPO candidates) | 1,282 (32%) | 223 (5.6%) |
+| Never-pass rows | 249 | 329 |
+
+- **Round 2 ended almost fully saturated.** It drew about 1,336 prompts from at most 203 unique
+  rows, about 6.6 passes. Within the round, the share of groups with no gradient signal (all 6
+  replies scored the same) rose from 0.43 to 0.94. Averaged over each round, though, the two were
+  similar (0.72 in round 1 vs 0.74), so saturation alone doesn't explain the difference.
+- **Other changes are confounded with it.** The BLADE knobs also changed in round 2 (above), so
+  we can't separate their effect from the smaller pool.
+- **The keep gate did its job.** The training reward still rose, but dev didn't, so the round
+  was reverted and round 1 stayed the served adapter.
+- **What we'd change next:** profile more than 4,000 rows per round, and cap GRPO at about 2
+  passes over the pool.
+  - Profile size is a launch flag (`--profile-rows`), not a knob.
+  - `grpo_max_steps` is a knob, but knobs are read at the start of a round, before the pool size
+    is known. BLADE's rule also only sets `source_weights` and `exclude_ids`, so it stayed at 200.
 
 Each round leaves Gym artifacts in `/home/ubuntu/night/round_<r>/`: profile rollouts and
 `profile` output, `pool.jsonl` and its pass-rate stats per source (`pool_stats.json`),
 `knobs_used.json`, `grpo_command.txt` and `grpo.log`, dev rollouts, the `gym eval compare` report
-and `summary.json`. Adapters go to `/home/ubuntu/ckpt/night/<launch>/round_<r>/`. A sample is
-committed under TBD.
+and `summary.json`. Adapters go to `/home/ubuntu/ckpt/night/<launch>/round_<r>/`. The
+paired SSv2-clean compare reports are in `/home/ubuntu/night/evals/compare_ssv2_*_vs_final/`. The
+box is stopped; the orchestrator copied the summaries and adapters to Patrick's Mac. The numbers
+quoted here are logged in [runs.md](runs.md) and the BLADE reports. **TBD:** commit a small
+sample of the round artifacts.
 
 ## 5. Measurement we can trust
 
 - **Splits (decided before training):**
   - An OS-Atlas `dev` split, held out **by screenshot**, chooses checkpoints.
-  - **ScreenSpot-v2-clean** is the held-out test, evaluated once on the final adapter.
+  - **ScreenSpot-v2-clean** is the held-out test. It is evaluated after the dev pick and is
+    never used for selection. The final adapter has two independent runs (90.35, 90.27).
   - The overnight loop never touches ScreenSpot. Its profile subsets are drawn from train only.
 - **We found and removed a test-set leak.** SSv2's 28 newer desktop screenshots were captured
   on the same machines as OS-Atlas's Linux and macOS training data, 1–3 weeks later: same
@@ -285,21 +389,24 @@ committed under TBD.
 
 ## 6. Failure analysis (BLADE) and what we changed
 
-**TBD (Charlie): BLADE on base vs template SFT** (`gui_grounding` dev and SSv2-clean rollouts),
-and on each overnight round's dev pair. Planned table: root-cause category → example rollouts →
-the action it drove (a `knobs.json` change, a data change or a prompt change).
+BLADE ran on base → template SFT, on round 0 → round 1 (the pair that set round 2's knobs), and
+on the agent arms. Round 2 was reverted and wasn't analysed. The knob values come from the fixed
+rule in `scripts/blade_pair.py`; no model chooses them.
 
-Read from the slices so far, before BLADE:
+| Pair | Main findings | Action it drove |
+| --- | --- | --- |
+| Base → template SFT ([round_0_base_vs_sft.md](blade/round_0_base_vs_sft.md)) | SFT +9.5 dev (template's 85.86 launch; 118 fixed, 26 broken, McNemar p = 3e-15). About 29% of SFT's failures are data artifacts (misaligned boxes, ungroundable AX / D-Bus labels, sliver boxes). About 24% are points where both models agree on the same wrong spot, mostly duplicate link text on FineWeb. On AndroidWorld, SFT clicks the middle of list rows | Knob recommendation **not applied**: the loop had launched from sft-lightning on default knobs first |
+| Round 0 → round 1 ([round_1_r0_vs_r1.md](blade/round_1_r0_vs_r1.md)) | +0.72 dev (22 fixed, 15 broken, p = 0.32). AndroidWorld +6.5, desktop +2.1, mobile +2.2; FineWeb −1.7, UIBert −2.2. Of round 1's 126 dev failures, 41 are consensus misses, 41 data artifacts and 44 model misses (far, wrong element or near) | Round-2 knobs: `source_weights` and 285 `exclude_ids` (§4). Round 2 was flat and reverted |
+| Agent: base / SFT / FINAL ([agent_base_vs_sft.md](blade/agent_base_vs_sft.md), [agent_final_vs_sft.md](blade/agent_final_vs_sft.md)) | Success within noise for all three. Failed actions 10 → 0 with either tuned grounder. star-landlord: the planner never scrolls. stop-promotions: it scrolls late, and the grid is cut off in the summary | None applied. BLADE recommends a "not found" grounder outcome (in training and in the GRPO reward) as the next step |
+
+**Read from the slices before BLADE** (kept for the record):
 
 - **SFT fixed most of the desktop gap.** Linux and macOS dev rose about 18 points. Base Qwen3.5
   was weakest there (68.8 and 73.4), and our data mix gives desktop ~35%.
-- **Icons are the remaining headroom.** On SSv2-clean, icon is 84.8 vs text 92.3, so that's
-  where we expect sometimes-pass rows and GRPO gains.
-- **Web gained least on dev** (FineWeb +1.6). If BLADE finds the FineWeb sometimes-pass rows
-  are learnable rather than label noise, we raise its `source_weights` knob.
-- **Agent failure clusters** from the Saturday reads (base grounder): scroll-dependent targets,
-  a canvas chart, dense toggle grids. The grounder's part of those will be checked against the
-  Sunday base-vs-tuned `web_agent` pair.
+- **Icons were the remaining headroom.** On SSv2-clean, template's icon score was 84.8 vs text
+  92.3. The final adapter's icon score is 85.4.
+- **Web gained least on dev** (FineWeb +1.6). Round-1 BLADE later raised fineweb to 1.25, because
+  round 1 broke 8 FineWeb rows.
 
 ## 7. Notes for the Gym team (0.7.0)
 
@@ -343,14 +450,27 @@ More we hit, one row each (sources: [research-notes.md](research-notes.md) §3, 
 - **Small eval sets.** On 969 dev rows, a single accuracy has a standard error of about 1.1
   points, and the loop's +0.5 keep threshold is below that. Both sides are scored on the same
   rows, which makes the comparison paired, but the keep rule is a plain accuracy delta. The same
-  adapter also moved 0.2 points between two launches (85.66 vs 85.86, §5). **TBD:** a paired
-  McNemar test on the final base-vs-tuned pair.
+  adapter also moved 0.2 points between two launches (85.66 vs 85.86, §5).
+- **Paired tests, McNemar exact on fixed vs broken tasks:**
+  - the loop's start → final on SSv2-clean: 34 vs 6, p ≈ 8 × 10⁻⁶;
+  - template SFT → final on SSv2-clean: 50 vs 34, p = 0.10;
+  - round 0 → round 1 on dev: 22 vs 15, p = 0.32.
+  So the loop's held-out gain over its own starting adapter is significant. Against template SFT
+  it is not (p = 0.10), and round 1's dev gain on its own was not (p = 0.32). The base → final
+  pair wasn't computed; base's SSv2 rollouts are archived on the stopped box.
+- **One kept round.** Round 2 had 6× fewer sometimes-pass rows (223 vs 1,282),
+  consistent with round 1 sharpening the model (§4). The Gym-driven gain comes from a single GRPO
+  round.
+- **No equal-compute non-GRPO control.** We didn't run, say, rejection-sampled or continued SFT
+  on the same 1,282-row pool. So the +2.25 shows that the loop's round 1 improved its starting
+  adapter, not that GRPO in particular was needed for it.
 - **The SFT itself is not Gym-driven.** It's plain TRL on OS-Atlas, measured and selected in
   Gym. The Gym-driven training is the GRPO loop (or its rejection-sampled fallback), and the
   final table separates the two.
 - **One sandbox app for the agent eval**, with prompts tuned on its traces. Treat absolute agent
   success as in-domain. The base-vs-tuned difference is the comparable number.
-- **One H200 for the event** (~23 GPU-hours), so each GRPO round gets ≤ 75 minutes.
+- **Rounds are time-boxed.** Each round has a 75-minute budget, and both rounds stopped on it at
+  170 and 167 of 200 GRPO steps. The loop itself ended on the keep rule, not the clock.
 
 ## 9. Reproduce
 
@@ -375,7 +495,7 @@ gym eval run --no-serve --agent gui_grounding_simple_agent \
   --input /home/ubuntu/data/gym/ssv2_clean.jsonl --output results/ssv2_clean_base_qwen35.jsonl --concurrency 64
 gym env test --resources-server gui_grounding
 
-# Round-0 SFT (template variant), then dev + SSv2-clean through Gym (runs.md Sat 17:31)
+# Round-0 candidate SFT (template variant), then dev + SSv2-clean through Gym (runs.md Sat 17:31)
 training/sft_full.sh template /home/ubuntu/data/os_atlas_20k/manifest.jsonl
 python -m training.gymctl eval --adapter /home/ubuntu/ckpt/sft-template/adapter --name sft-template --ssv2 --gpu-util 0.35
 
@@ -395,10 +515,26 @@ training/night_loop.sh --init-adapter /home/ubuntu/ckpt/sft-template/adapter \
   --ckpt-dir /home/ubuntu/ckpt/night_rehearsal --max-rounds 1 --profile-rows 400 --blade-wait-min 0.5 \
   --final-port 0 --stop-ports --runs-md none
 
+# Round-0 SFT (Lightning variant, the dev winner), same config and seed (runs.md Sat 18:44, 19:35)
+training/sft_full.sh lightning /home/ubuntu/data/os_atlas_20k/train_lightning.jsonl
+python -m training.gymctl eval --adapter /home/ubuntu/ckpt/sft-lightning/adapter --name sft-lightning --ssv2 --gpu-util 0.35
+
 # The overnight loop, in tmux: profile -> GRPO (Gym /verify reward) -> dev eval + gym eval compare -> keep/revert
+# (runs.md Sat 19:38: default knobs, tonight's extended cutoffs; BLADE edited knobs.json before round 2)
 tmux new-session -d -s night -n loop
-tmux send-keys -t night:loop "training/night_loop.sh --init-adapter /home/ubuntu/ckpt/sft-<winner>/adapter \
-  --train-file /home/ubuntu/data/os_atlas_20k/<winner's train file>.jsonl" Enter
+tmux send-keys -t night:loop "training/night_loop.sh --init-adapter /home/ubuntu/ckpt/sft-lightning/adapter \
+  --train-file /home/ubuntu/data/os_atlas_20k/train_lightning.jsonl \
+  --last-round-start 04:15 --no-new-step 05:25 --hard-end 05:40" Enter
+
+# Final adapter: SSv2-clean eval (Kyle's run; the orchestrator's night-r1 is the second), then the paired compares (runs.md Sat 22:04)
+FINAL=/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/adapter
+python -m training.gymctl eval --adapter $FINAL --name final-round1-grpo --ssv2 --gpu-util 0.30
+E=/home/ubuntu/night/evals
+for b in sft-lightning sft-template; do
+  gym eval compare --baseline $E/$b/ssv2_clean_$b/rollouts.jsonl \
+    --candidates $E/final-round1-grpo/ssv2_clean_final-round1-grpo/rollouts.jsonl \
+    --output-dir $E/compare_ssv2_${b}_vs_final --report-format both
+done
 
 # Any two rollout files
 gym eval profile --inputs <stem>_materialized_inputs.jsonl --rollouts <stem>.jsonl

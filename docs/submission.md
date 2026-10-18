@@ -22,12 +22,14 @@ Target: everything finished by 10:30.
 
 ## Form text (paste-ready drafts)
 
-Short versions of the bounty write-ups for the form's explanation boxes. Fill in the **TBD**s from
-`docs/results.md` on Sunday, and keep them consistent with the full docs. The SFT numbers and
-the 18/36 → 22/36 agent result below are `sft-template`'s. The overnight loop starts from
-`sft-lightning` (dev 86.27%), so add its numbers, and update the agent numbers if the agent eval
-is rerun with the final adapter. Each one links to its
-full doc for judges who want more.
+Short versions of the bounty write-ups for the form's explanation boxes. Keep them consistent
+with the full docs; each one links to its full doc for judges who want more.
+- **NeMo Gym text: final** (Sun 00:30). It matches bounty-nemo-gym.md: the SFT number is
+  sft-lightning's (the dev pick), the agent numbers name each arm, and the final adapter's numbers
+  are filled in.
+- **Lightning text: still to update.** Its "18/36 → 22/36" agent result is sft-template's. The
+  final grounder's rerun scored 17/36, and all three arms are within noise, so name the arm or
+  add the rerun.
 
 **Lightning bounty:**
 
@@ -53,14 +55,14 @@ full doc for judges who want more.
 > turns "the gear icon in the top-right" into a click. Two Gym environments live in our repo:
 > `gui_grounding` (reward = the click lands in the target box; adapted from Gym's
 > `gui_coordinate`) and `web_agent` (Nemotron Lightning plus our grounder on a sandbox app,
-> rewarded from the app's own state). Every number comes from `gym eval run`. SFT took dev
-> accuracy from 76.4% to 85.7% and held-out ScreenSpot-v2-clean from 86.3% to 89.1% (icons
-> +6.7). The improvement loop runs through Gym: `gym eval profile` finds rows the model sometimes
-> gets right, TRL GRPO trains on them with the Gym server's `/verify` as the reward, and a dev
-> eval plus `gym eval compare` decides keep or revert. BLADE failure analysis steers the next
-> round. In the `web_agent` env, the tuned grounder raised verified task success from 18/36 to
-> 22/36 over the base (20/36 with a stricter check), and cut failed actions from 10 to 0. GRPO round 1 in the
-> loop raised dev from 86.27% to 87.00% (AndroidWorld +6.5). Final: TBD dev and TBD ScreenSpot-v2-clean. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
+> rewarded from the app's own state). Every number comes from `gym eval run`. LoRA SFT, with
+> Lightning-rewritten instructions and picked on dev, took dev accuracy from 76.4% to 86.3%. The
+> improvement loop runs through Gym: `gym eval profile` finds rows the model sometimes
+> gets right, TRL GRPO trains on them with the Gym server's `/verify` as the reward, a dev eval
+> through Gym decides keep or revert (gain ≥ +0.5 points), and `gym eval compare` against the
+> previous round is saved as the per-task flip report. BLADE failure analysis steers the next
+> round through pre-approved knobs. GRPO round 1 raised dev from 86.27% to 87.00% (22 fixed vs 15
+> broken, not significant on its own); round 2 was flat and reverted. Final adapter: 87.0% dev and 90.35% on held-out ScreenSpot-v2-clean (a second run gave 90.27). On ScreenSpot-v2-clean that is +4.1 over base (86.3%), and +2.25 over the loop's starting adapter (34 tasks fixed vs 6 broken on the same rows, McNemar p ≈ 8e-6). Against the raw-label (template) SFT, stronger on ScreenSpot-v2-clean but not the dev pick, it is +1.29 (p = 0.10). In the `web_agent` env (12 tasks × 3), agent success is within noise for all grounders (base 18/36, template SFT 22/36, final 17/36), and both tuned grounders cut failed actions from 10 to 0. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
 > were captured on the same machines as OS-Atlas training data. Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-nemo-gym.md`
 
