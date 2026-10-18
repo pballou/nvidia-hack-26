@@ -98,6 +98,8 @@ class Episode:
     n_recoveries: int = 0
     n_after_done: int = 0
     n_thinking_calls: int = 0
+    completion_tokens: int = 0         # Lightning output tokens (plan events' usage)
+    reasoning_tokens: int = 0          # of which thinking (usage.completion_tokens_details.reasoning_tokens)
     latency_ms: dict[str, list[float]] = field(default_factory=dict)
     wall_s: float | None = None
     lightning: str | None = None
@@ -320,7 +322,20 @@ def interactive_episode(run_id: str, events: list[dict], summary: dict | None, t
             setattr(ep, key, value)
         ep.steps = ep.n_lightning_calls
         ep.end_reason, ep.excluded = "incomplete", "incomplete"
+    ep.completion_tokens, ep.reasoning_tokens = _plan_tokens(events)
     return ep
+
+
+def _plan_tokens(events: list[dict]) -> tuple[int, int]:
+    """(completion, reasoning) tokens summed over the run's Lightning calls, from the plan events' usage."""
+    completion = reasoning = 0
+    for ev in events:
+        usage = (ev.get("payload") or {}).get("usage") if ev.get("kind") == "plan" else None
+        if isinstance(usage, dict):
+            completion += _int(usage.get("completion_tokens"))
+            details = usage.get("completion_tokens_details")
+            reasoning += _int(details.get("reasoning_tokens")) if isinstance(details, dict) else 0
+    return completion, reasoning
 
 
 def _is_test_run(events: list[dict], summary: dict | None) -> bool:
@@ -623,6 +638,9 @@ def summarize(eps: list[Episode]) -> dict:
         "runs_succeeded_after_problem": sum(bool(e.verified) for e in problem_verified),
         "lightning_calls": sum(e.n_lightning_calls for e in scored),
         "thinking_calls": sum(e.n_thinking_calls for e in scored),
+        "stuck_stops": sum(e.end_reason == "stuck" for e in scored),
+        "completion_tokens": sum(e.completion_tokens for e in scored),
+        "reasoning_tokens": sum(e.reasoning_tokens for e in scored),
         "latency_ms": {s: _dist(latency[s]) for s in stages},
         "wall_s": _dist([e.wall_s for e in scored if e.wall_s is not None]),
         "tasks": {"n": len(tasks), "solved_any": sum(any(e.verified for e in v) for v in tasks.values())},
@@ -703,6 +721,17 @@ def render_markdown(report: dict) -> str:
             f"{g['runs_succeeded_after_problem']}/{g['runs_with_problem_verified']}"
             if g["runs_with_problem_verified"] else "-",
             f"{g['thinking_calls']}/{g['lightning_calls']}")) + " |")
+
+    out += ["", "Self-assessment and planner cost (per scored run):", "",
+            "| Group | False success claims | Missed success claims | Stuck stops | Max-steps stops "
+            "| Lightning output tokens / run | of which thinking / run |",
+            "|---|---|---|---|---|---|---|"]
+    for name, g in groups.items():
+        n = g["n_scored"] or 1
+        out.append("| " + " | ".join(_cell(c) for c in (
+            name, str(g["false_claims"]), str(g["missed_claims"]), str(g["stuck_stops"]),
+            str(g["end_reasons"].get("max_steps", 0)), f"{g['completion_tokens'] / n:.0f}",
+            f"{g['reasoning_tokens'] / n:.0f}")) + " |")
 
     lat_groups = {n: g for n, g in groups.items() if g["latency_ms"] or g["wall_s"]["n"]}
     if lat_groups:

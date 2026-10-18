@@ -239,6 +239,19 @@ def test_event_recompute_matches_done_stats():
     assert am._stats_from_events(run_b()[:-1])[0]["n_failed_actions"] == 1
 
 
+def test_thinking_tokens_and_stuck_stops():
+    r = "20261017-150300-dddddd"
+    p1 = plan(r, 1, "click", {"target_description": "x"}, thinking=True)
+    p1["payload"]["usage"] = {"completion_tokens": 300, "completion_tokens_details": {"reasoning_tokens": 250}}
+    p2 = plan(r, 2, "click", {"target_description": "x"})
+    p2["payload"]["usage"] = {"completion_tokens": 40}
+    events = [start(r, "Turn on autopay.", "retry"), p1, p2, done_ev(r, 2, False, "stuck", {}, {})]
+    ep = am.interactive_episode(r, events, None, {}, ["thinking"])
+    assert (ep.completion_tokens, ep.reasoning_tokens, ep.end_reason, ep.excluded) == (340, 250, "stuck", None)
+    g = am.summarize([ep])
+    assert (g["stuck_stops"], g["reasoning_tokens"], g["completion_tokens"]) == (1, 250, 340)
+
+
 def test_lightning_outage_run_is_excluded_not_failed():
     """A run that ended because Lightning was unreachable (done reason 'error') is infra, like a Gym mask."""
     r = "20261017-150200-cccccc"
