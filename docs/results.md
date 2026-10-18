@@ -25,6 +25,37 @@ Lightning, the real sandbox, and grounder choices made on the dev split.
 
 ## Agent (sandbox tasks, verified from sandbox state)
 
+### Clarify pre-flight (Sat 23:00–23:50, official BF16 Lightning, local `:8000`)
+
+`agent/clarify.py`, prompt `clarify-v4` (sha `c1adfb0587`): one Lightning call before the browser
+opens (thinking off, T=0, `tool_choice` required) picks `proceed` or `ask_user`. Live pass with
+`scripts/clarify_eval.py`, one call at a time. All three labelled sets are committed with their
+recorded replies (`agent/tests/fixtures/clarify_*.json`), and `agent/tests/test_clarify.py`
+replays them offline.
+
+| Set | Clear requests that proceeded | Ask cases that asked | Notes |
+| --- | --- | --- | --- |
+| **Acceptance** (12 task phrasings, 30 spoken variants, 20 near-boundary proceed cases, 3 spec asks, 19 asks; used to tune v1 → v4) | **62/62 (0 false asks)** | **22/22** | Identical on a second repeat. Includes "Allors towards my bill.", "Pay something toward my bill", "turn it off" |
+| Held-out B (written while v2 was drafted; used to tune v3 → v4) | 44/45 | 17/19 | False ask: "port an outage in the riverside district". Missed: two contradictory requests ("turn on paperless billing and keep mailing me paper bills") |
+| **Held-out C** (written after v4; run once, frozen prompt) | 41/45 | 14/17 | False asks: two clipped last words ("turn on high contra") and two object-first sentences ("the bil pay fifty dollar on it please"). Missed: a security question change, a new card on file, "make the text bigger and smaller" |
+
+- **Latency:** p50 1.6 s, p90 1.7 s per call.
+- **How the sets were made:** the non-task phrasings were written by Claude workflows whose
+  writers never saw the clarify prompt. The judges agreed with the writers' labels on 196 of 198
+  phrasings; the 2 borderline ones aren't counted.
+- **Decision: ships off** (`clarify: off` in `configs/agent.yaml`). It meets the acceptance bar
+  (0 false asks), but on fresh phrasings it asks about 5 of 90 clear requests and misses 5 of 36
+  asks. A false ask costs one extra exchange; a missed ask is the pre-clarify behavior.
+  `AGENT_CLARIFY=on` (or `python -m agent --clarify on`) turns it on. The harness and the Gym
+  `web_agent` server force it off either way.
+- **Prompt iterations, all on the dev sets:**
+  - v1 was too lenient: 5/22 asks, and it turned "Allors towards my bill." into "pay bill".
+  - v2 added explicit ask checks and examples from other websites.
+  - v3 stopped it from asking a lookup question back to the user.
+  - v4 lets clipped-but-obvious words and back-references proceed.
+  - A v5 (contradiction as its own rule) regressed the acceptance set and was reverted. At T=0
+    without thinking, boundary cases flip on small wording changes.
+
 ### Gym `web_agent`: FINAL grounder rerun (Sat 22:05–22:29, reportable)
 
 Same rows (sha checked against the base arm below via `BASELINE=`), planner, thinking (off) and

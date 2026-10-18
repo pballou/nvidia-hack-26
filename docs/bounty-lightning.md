@@ -239,6 +239,18 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
     (`mask_sample=True`, `failure_kind`), whatever its reward.
   - `agent_metrics.py` likewise excludes stopped, incomplete and errored runs.
   - Model-quality failures stay scored.
+- **Pre-flight "understand the request" check** (`agent/clarify.py`, interactive only, off by
+  default). A clipped voice take ("Allors towards my bill.") once made the agent pay the full
+  balance. The pre-flight is one Lightning call before the browser opens, with thinking off, T=0
+  and two tools: `proceed(normalized_request)` or `ask_user(question)`. It asks only for a garbled
+  request, a payment or account change missing a detail, or an unclear target. That ends the run
+  as `needs_input`, and the answer starts a follow-up run. One call takes ~1.6 s on local
+  Lightning.
+  - **Acceptance set** (12 task phrasings, 50 spoken and near-boundary variants, 22 ask cases):
+    0 false asks, 22/22 asks.
+  - **Two blind held-out sets** (90 clear, 36 ask): 5 false asks, 31/36 asks.
+  - Because of the held-out false asks it ships off; `AGENT_CLARIFY=on` turns it on.
+    `docs/results.md` has the counts.
 
 ## 5. Measured in NeMo Gym
 
