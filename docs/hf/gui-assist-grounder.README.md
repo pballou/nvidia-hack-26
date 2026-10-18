@@ -524,6 +524,8 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
 
 ## Licenses
 
+Copyright 2026 Sherpa 6. Built by Sherpa 6 employees (team sherpas) for the NVIDIA x Red Hat Small Models Hack.
+
 - **This model:** Apache-2.0, the same as the base model
   ([`Qwen/Qwen3.5-2B`](https://huggingface.co/Qwen/Qwen3.5-2B): Apache-2.0 per its card). The weights
   derive from it, so its license and NOTICE carry over (LICENSE at the repo root). Confirmed by the team, Sun 2026-10-18.

@@ -219,6 +219,8 @@ multiples of 32. Boxes here are in original pixels, so they don't depend on that
 
 ## Sources and licenses
 
+Copyright 2026 Sherpa 6. Built by Sherpa 6 employees (team sherpas) for the NVIDIA x Red Hat Small Models Hack.
+
 **This dataset is released under CC BY 4.0**, the most restrictive license among the sources
 we include: the UIBert expressions are CC BY 4.0, and everything else is Apache-2.0
 (OS-Atlas-data) or has no restrictions on outputs (Lightning, OpenMDW-1.1). CC BY 4.0 requires
