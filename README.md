@@ -19,8 +19,8 @@ fine-tuned vision model finds what to click on the screen. Because the agent wor
 from screenshots instead of the app's code or DOM, it applies to apps whose internals
 aren't accessible.
 
-> Status: work in progress during the hackathon weekend. Sections marked *TBD* are
-> filled in as results land.
+> Status: final hackathon submission (Sun 2026-10-18). Results are logged in
+> [docs/results.md](docs/results.md), with the command behind each in [docs/runs.md](docs/runs.md).
 
 ## Quick start
 
@@ -55,7 +55,8 @@ the sandbox's own state (the agent never sees that state).
   `ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 permanent-tan-marmot`.
   Or serve it on the Mac (docs/local-mac.md §3b).
 - **Lightning:** local on :8000, served as `lightning` (the official NVIDIA BF16
-  checkpoint, docs/local-mac.md §2; ~1.2 s per planner step). Or hosted, which needs
+  checkpoint, docs/local-mac.md §2; ~1.2 s per planner step on an idle server, ~4 s inside
+  the fully local agent). Or hosted, which needs
   only `NVIDIA_API_KEY` in `.env` but is slow (25–80 s per step).
 
 **4. Run the real agent.**
@@ -65,11 +66,12 @@ scripts/demo_up.sh --agent real                        # local Lightning; --ligh
 # the console starts with thinking off and the request check on: --thinking retry|on, --clarify off change that
 ```
 
-**Fully local (Mac):** the merged grounder on :8011 also writes the screen summaries
-(bring it up with [docs/local-mac.md](docs/local-mac.md)):
+**Fully local (Mac), the setup the demo video uses:** one vllm-metal instance on :8011 serves
+`base` (screen summaries) and the final LoRA as `grounder` (clicks). Bring it up with
+[docs/local-mac.md](docs/local-mac.md#fully-local-mode-for-the-video), and keep the browser headless:
 
 ```bash
-scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder --vlm-label "Mac (vllm-metal)"
+scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model base --vlm-label "Mac (vllm-metal)"
 ```
 
 The script checks that the VLM (`--vlm-url`, else `vlm.base_url` in `configs/agent.yaml`)
@@ -156,14 +158,14 @@ adapter turned off (one 2B model plus an adapter).
 
 ## Results
 
-So far (Saturday evening), all produced with `gym eval run` and `gym eval compare`. Full
+Final numbers, all produced with `gym eval run` and `gym eval compare`. Full
 log with per-platform splits: [docs/results.md](docs/results.md); commands: [docs/runs.md](docs/runs.md).
 
 **Grounding** (Qwen3.5-2B, 2 MP; accuracy = the click point lands inside the target box):
 
 | Grounder | OS-Atlas dev (969 rows) | ScreenSpot-v2-clean (1,244 rows) |
 | --- | --- | --- |
-| Base | 76.4% | 86.3% (text 92.5, icon 78.1) |
+| Base | 76.4% | 86.25% (text 92.5, icon 78.1) |
 | SFT, raw labels (`sft-template`: LoRA r16, 1 epoch on 18,652 rows) | 85.66% | 89.07% (text 92.3, icon 84.8) |
 | SFT, Lightning-rewritten instructions (`sft-lightning`: 18,299 rows, same config and seed) | 86.27% | 88.10% (text 93.0, icon 81.7) |
 | **Final: `sft-lightning` + GRPO round 1 in NeMo Gym** (170 steps, Gym `/verify` point-in-box reward) | **87.00%** | **90.35%** (text 94.2, icon 85.4; vs `sft-lightning`: 34 rows fixed, 6 broken) |
@@ -174,9 +176,9 @@ ScreenSpot-v2-clean it scores 0.97 points below the template, so the rewrite abl
 choose checkpoints on dev only and report both.
 
 **Browser tasks** (Gym `web_agent`, 12 sandbox tasks × 3 repeats, official BF16 Lightning;
-only the grounder changes): verified success 18/36 with `base` vs **22/36** with
+only the grounder changes): verified success 18/36 with `base` vs 22/36 with
 `grounder` = `sft-template`. Failed actions went from 10 to 0, and false success claims
-from 8 to 4. With a strict `mark-all-read` check, tuned is 20/36 (+2): the current check
+from 8 to 4 (FINAL: 11). With a strict `mark-all-read` check, tuned is 20/36 (+2): the current check
 doesn't guard the bell notifications ([BLADE report](docs/blade/agent_base_vs_sft.md)). The
 FINAL grounder (SFT + GRPO) scored 17/36. All three are within noise at n=36. The robust in-agent
 gains are that the tuned grounders always return a usable point (failed actions 10 → 0) and fix
@@ -185,7 +187,7 @@ on the planner's choices and on what the screen description shows
 ([diagnosis](docs/blade/agent_final_vs_sft.md)).
 
 The overnight loop kept a round only if it gained ≥ 0.5 points on dev: round 1 (GRPO) was kept,
-round 2 (−0.11) was not, so round 1 is the final adapter above.
+round 2 (−0.10) was not, so round 1 is the final adapter above.
 
 ## Known limitations & next steps
 
@@ -195,10 +197,11 @@ round 2 (−0.11) was not, so round 1 is the final adapter above.
 - **Small n:** agent success with the three grounders (18, 22 and 17 of 36) is within noise:
   SFT vs base +0.11 mean reward, 95% CI [-0.06, +0.28]; FINAL vs base −0.03, CI [-0.20, +0.14].
   The drop in failed actions is significant.
-- **Still 0/3:** the canvas-chart task and the two scroll-dependent tasks.
+- **Still 0/3 in all three Gym arms:** the two scroll-dependent tasks. The canvas-chart task is 0/3
+  except FINAL's 1/3.
 
 Next steps, ranked by the [BLADE report](docs/blade/agent_base_vs_sft.md). The agent pipeline
-is frozen until Sunday's grounder rerun, so the comparison with Saturday's base arm holds:
+stayed frozen through the FINAL grounder rerun (Sat 22:04), so all three arms compare:
 
 1. **Observation pipeline.** The 2B screen describer drops toggle state and cuts off long grids
    (high-contrast state missing in 6/6 rollouts; the notifications grid cut in 15/15 first
@@ -209,8 +212,8 @@ is frozen until Sunday's grounder rerun, so the comparison with Saturday's base 
    25-step cap without a stuck stop.
 3. **Planner prompt `agent-v5`.** Scroll when the target isn't listed, and stop once a toast
    confirms the result.
-4. **Grounder data and RL.** Add segmented controls and adjacent-option targets (the tuned
-   grounder's "L" hits land 1 px inside the box), and add centre-distance pressure to the GRPO
+4. **Grounder data and RL.** Add segmented controls and adjacent-option targets (`sft-template`'s
+   "L" hits land 1 px inside the box), and add centre-distance pressure to the GRPO
    reward.
 5. **Verifier.** Make the `mark-all-read` check guard the bell notifications, then rerun both
    arms.

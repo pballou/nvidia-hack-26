@@ -1,7 +1,7 @@
 # Best Use of NVIDIA Nemotron Lightning: GUI Assist
 
-> **Status:** draft of Sat 2026-10-17. Numbers marked **TBD** come from Sunday's runs. The Saturday
-> reads are n=1 per task and are labeled that way.
+> **Status:** final, Sun 2026-10-18. The Saturday afternoon reads are n=1 per task and are
+> labeled that way; the headline agent runs are 12 tasks × 3 repeats (§4.3, §5).
 
 ## 1. Summary
 
@@ -63,8 +63,9 @@ positional, about 50/30/20.
 - **Drops:** when no faithful instruction is possible, it returns `keep=false` with a reason.
 - **Settings:** thinking off, temperature 0.7, prompt `v4`. Only the official checkpoint or NVIDIA's
   hosted endpoint may produce published rows.
-- **To be published with (TBD):** `rewrites.jsonl`, `stats.json`, and `METHOD.md` (the verbatim
-  prompt).
+- **Published with:** `rewrites.jsonl`, `stats.json`, and `METHOD.md` (the verbatim prompt), in
+  `lightning_rewrites/` of `patrickballou/gui-assist-data` (uploaded private; public after the
+  ~9:30 Sunday release check, which also decides whether the 8,028 hosted-API rows are included).
 - **Where:** code in `data_prep/rewrite/`, spec in `docs/tasks/T3-lightning-data-engine.md`.
 
 **Rewrite counts** (T3's `train_files.READY.json`, prompt `v4`):
@@ -95,7 +96,8 @@ positional, about 50/30/20.
   removed. So the honest reading is that the rewritten instructions roughly tie with raw labels on
   grounding accuracy, rather than clearly winning.
 
-**TBD (T3 owner):** throughput and tokens for the rewrite run.
+**Throughput and tokens** (`stats.json`, all 5 invocations): 1,015 requests, 3,544,638 tokens
+(3,330,622 prompt, 214,016 completion), 95.2 rows/min over 5,984 s of wall time.
 
 ### 2c. Pre-flight request check
 
@@ -109,8 +111,9 @@ toggle.
 ## 3. Why Lightning
 
 - **Text-only, with tool calls we can check against a schema.** Perception lives in a 2B VLM and
-  reasoning in a text model. Lightning plans from descriptions. Measured so far (n=1 reads): 0
-  invalid of 27 in-loop calls with `tool_choice=required`, 1 of 43 with `auto` (§4.1).
+  reasoning in a text model. Lightning plans from descriptions. Measured over 12 tasks × 3 (§5):
+  ≤ 2.1% invalid calls per arm with `tool_choice=required` (interactive), 2.3-3.9% with `auto`
+  (Gym); the first n=1 reads had 0 of 27 and 1 of 43 (§4.1).
 - **Interactive latency.** It's 30B total but about 3B active (MoE, hybrid Mamba-2). Self-hosted on
   an idle server (short probe), a planner call took a median of about 1.2 s with thinking off and
   2-3 s with it on. In the first real-sandbox read (full prompts, shared server, thinking-retry
@@ -119,11 +122,14 @@ toggle.
 - **Self-hostable official weights.** We serve NVIDIA's BF16 checkpoint
   (`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`) on a Mac with vllm-metal (`:8000`, served
   name `lightning`). Hosted build.nvidia.com measured a p50 of about 26 s per call, max 94 s
-  (thinking off, 17 calls). That is too slow for a user waiting on a loop of up to 12 steps.
+  (thinking off, 17 calls). That is too slow for a user waiting on a multi-step loop.
 - **Per-request thinking switch** (`chat_template_kwargs.enable_thinking`), so we spend reasoning
   only where it helps (§4.3).
 - **Fits the budget:** 30B + 2B + 0.6B (Parakeet, voice input) = 32.6B ≤ 33B by model-card counts
-  (`base` and `grounder` are one model with a LoRA adapter). The H200 stays free for the grounder.
+  (`base` and `grounder` are one model with a LoRA adapter). The Gym evals served the grounder
+  on the H200; the demo runs all three fully local on one M4 Max (128 GB), the grounder in the
+  same vllm-metal instance as `base` (Gate G: 87.0% local vs 87.0% H200 on 200 dev rows, 99%
+  agreement; [local-mac.md](local-mac.md)).
 
 ## 4. How we optimize it
 
@@ -181,7 +187,8 @@ Screen:  PAGE / NAV / MAIN / STATE / OVERLAYS  (≤ 40 lines, ≤ 240 chars each
   found that `agent-v3` used one eval task's own target as an example ("the star next to the
   message from the landlord"), mirrored sandbox rows (a Paid statement with a download icon), and
   that the 2B describer copied the NAV example's items and "red 2 badge" into sandbox
-  descriptions. The Saturday reads below ran on `agent-v3`; Sunday's run on `agent-v4`.
+  descriptions. The Saturday afternoon reads below ran on `agent-v3`; the Saturday-night
+  12 × 3 runs on `agent-v4`.
 
 ### 4.3 Thinking control
 
@@ -301,7 +308,8 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 - **Reward:** the task's check on sandbox state. Only the verifier reads state.
 - **Start screen in the row.** Gym's legacy `/run` drops the `seed_session` response, so the start
   observation is baked into each row, with a staleness flag.
-- **Step budget.** `max_steps: 12` counts model calls, the same as the interactive limit.
+- **Step budget.** `max_steps: 12` counts model calls. That was the interactive limit when the rows
+  were built; the interactive agent now allows 25 with a stuck stop (§4.5), and Gym keeps 12.
 - **VerifyResponse fields:** `reward`, `claimed_success`, `steps`, `n_invalid_calls`,
   `n_failed_actions`, `n_vlm_infra_errors`, per-stage `latency_ms`, `grounder_model`,
   `prompt_version`.
@@ -321,7 +329,7 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 | Read | Grounder | Thinking | Tasks × repeats | Verified | Claimed | Invalid calls | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Sat, first real-sandbox read¹ | `base` (Qwen3.5-2B) | retry | 4 easy × 1 | 3/4 | 2/4 | 0/27 | n=1 |
-| Sat, pilot adapter read² | Kyle's 2k-row pilot LoRA | retry | 4 easy × 1 | 4/4 | 3/4 | TBD | **n=1, NOT FINAL** |
+| Sat, pilot adapter read² | Kyle's 2k-row pilot LoRA | retry | 4 easy × 1 | 4/4 | 3/4 | 0/28 | **n=1, not the final adapter** |
 | Sat, Gym acceptance³ | `base` | off | 5 rows (4 easy + 1 medium) × 1 | 3/5 | 2/5 (1 false claim) | 1/43 | n=1, not final |
 | Sat, interactive, all tasks⁴ | `base` | off | 12 × 1 | 5/12 | 7/12 | 0/109 | n=1 |
 | Sat, interactive, all tasks⁴ | `base` | retry | 12 × 1 | 6/12 | 7/12 | 1/96 | n=1 |
@@ -330,9 +338,10 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 | Sat night, Gym⁶ | `grounder` = FINAL (sft-lightning + GRPO) | off | 12 × 3 | 17/36 | 27/36 (24 match, 11 false) | 6/256 | reportable (`agent-v4`) |
 | Sat night, interactive (§4.3) | `grounder` = sft-template | off / retry / on | 12 × 3 (on: 32) | 20/36 · 22/36 · **26/32** | 28/36 · 32/36 · 30/32 | 6/374 · 7/328 · 0/189 | reportable (`agent-v4`) |
 
-All Saturday reads used prompt `agent-v3` (see §4.2) and the task checks from before sandbox
-`68c7671`, which made the checks stricter (no unrequested payments, messages, reports or autopay;
-every notification row and star pinned). Sunday's runs use `agent-v4` and the stricter checks.
+The Saturday afternoon reads used prompt `agent-v3` (see §4.2) and the task checks from before
+sandbox `68c7671`, which made the checks stricter (no unrequested payments, messages, reports or
+autopay; every notification row and star pinned). The Saturday-night runs use `agent-v4` and the
+stricter checks.
 
 ¹ Sandbox `02a8e1b`, VLM on `:8001`, no oracle (`runs/summary_20261017-160547.json`):
 `AGENT_SANDBOX_URL=http://127.0.0.1:8091 $PY scripts/run_agent_tasks.py --tags easy --lightning local
@@ -342,7 +351,7 @@ every notification row and star pinned). Sunday's runs use `agent-v4` and the st
 `--grounder grounder`; `runs/summary_20261017-163513.json`). The Lightning checkpoint wasn't
 recorded for this read's `text-size-large` run (the `/models` probe hit a connection error); the
 other three runs report the official BF16. `runs/` isn't committed, and neither read is in
-`docs/runs.md` yet (TBD).
+`docs/runs.md`; both are in `docs/results.md` ("First reads").
 
 ³ Logged in `docs/runs.md` (Sat 16:43; artifacts in `results/acceptance_base/` on Patrick's Mac,
 not committed), `reportable=yes`. The false claim was `high-contrast` (reward 0, success claimed).
@@ -353,8 +362,8 @@ no-change actions fell 83 → 45 and failed actions 10 → 0 (CI excludes 0), an
 claims matched the sandbox 31/36 vs 26/36. `gym eval compare`: reward +0.111, 95% CI
 [−0.06, +0.28] (n=36: suggestive, not significant); 3 fail→pass, 1 pass→fail. With a strict
 `mark-all-read` check, tuned is 20/36 (+2), as the current check doesn't guard the bell
-notifications ([BLADE](blade/agent_base_vs_sft.md)); the check stays as-is until after Sunday's
-grounder rerun.
+notifications ([BLADE](blade/agent_base_vs_sft.md)); the check was kept as-is for the FINAL
+grounder rerun (Sat 22:04), so all three Gym arms stay comparable.
 
 ⁶ `docs/runs.md` Sat 22:04: the FINAL grounder arm only, against the same base arm (identical
 rows, planner and thinking). Its 17/36 is within noise of base (reward −0.028, 95% CI
@@ -372,7 +381,7 @@ choices and on what the description shows, which is where thinking on helps (§4
 claim (`sms-billing-off`), and, with thinking off, paying the full balance instead of $50
 (`pay-50`).
 
-**What the Saturday reads showed:**
+**What the Saturday afternoon reads showed:**
 
 - **`text-size-large` failed on the base grounder: a grounding miss.** Lightning asked for the L
   option six times (steps 2, 5, 7 and 9-11), and each click landed at x 1108-1142 (L is at about
@@ -401,8 +410,11 @@ From the first real-sandbox read (base grounder, thinking retry):
 
 All 12 tasks (base grounder, n=1), plan p50/p90: 4.1/5.5 s with thinking off, 4.3/14.5 s with
 retry; wall time per task p50 67 s (off) and 80 s (retry). Idle-server planner: about 1.2 s per
-step with thinking off, 2-3 s with it on. Hosted: p50 about 26 s, max 94 s. **Sunday table: TBD**
-(`agent_metrics.py`).
+step with thinking off, 2-3 s with it on. Hosted: p50 about 26 s, max 94 s. **Saturday night,
+12 × 3** (interactive, `sft-template`): plan p50/p90 6.3/7.7 s off, 5.9/16.7 s retry, 10.9/24.7 s
+on (§4.3). The Gym arms' latency isn't comparable (other GPU jobs shared `:8001`). **Fully local
+on the Mac** (FINAL LoRA, [local-mac.md](local-mac.md)): about 4.3 s to plan with thinking off
+(~13 s with thinking), 1-2 s to ground a click, 3-4.5 s per `base` screen description.
 
 ## 7. Limitations and next steps
 
@@ -414,10 +426,12 @@ step with thinking off, 2-3 s with it on. Hosted: p50 about 26 s, max 94 s. **Su
 - **A 2B describer caps the planner.** In several traces (e.g. `runs/20261017-160547-aad442`,
   `-160900-a66c04`, `-163513-3e51dd`), the base VLM copied the `agent-v3` NAV example's "bell icon with a red
   2 badge" (the sandbox bell shows 3). In `20261017-160547-aad442`, Lightning used a STATE line
-  verbatim as a click target (`Text size "M" is selected`). Next: measure `SUMMARY_MODEL=grounder`.
-- **Small n.** The Saturday reads are n=1 on 4 easy tasks (5 rows in the Gym read). The final set is 12 tasks × 3 repeats
+  verbatim as a click target (`Text size "M" is selected`). `SUMMARY_MODEL=grounder` is no fix: in
+  a Mac spot-check the tuned model wrote one JSON line that the 240-char clip cut, losing the pay
+  dialog, so `base` keeps the role ([local-mac.md](local-mac.md)).
+- **Small n.** The Saturday afternoon reads are n=1 on 4 easy tasks (5 rows in the Gym read). The final set is 12 tasks × 3 repeats
   at temperature 1.0. We report counts, not just percentages.
-- **One app, and our prompts were iterated on it.** The Saturday reads ran on `agent-v3`, whose
+- **One app, and our prompts were iterated on it.** The Saturday afternoon reads ran on `agent-v3`, whose
   planner prompt used an eval task's own target ("the star next to the message from the
   landlord") as an example, so those absolute numbers are optimistic. `agent-v4` replaced every
   example with ones from other apps, and the rows were regenerated. Prompt wording was still tuned

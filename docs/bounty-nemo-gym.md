@@ -24,15 +24,15 @@ where checkpoints are chosen, and where the reward signal for training comes fro
   through a small set of pre-approved knobs.
 
 LoRA SFT on open OS-Atlas data, selected and measured in Gym, takes Qwen3.5-2B from **76.4% to
-86.3% on dev**. The chosen variant used 8,620 instructions rewritten by Lightning, picked on dev.
+86.27% on dev**. The chosen variant used 8,620 instructions rewritten by Lightning, picked on dev.
 The Gym loop then adds one kept GRPO round: **dev 87.0%**.
 
 On held-out **ScreenSpot-v2-clean**, never used to choose a checkpoint, the final adapter scores
 **90.35%**. A second independent T=0 run of the same adapter gave 90.27%, one row apart; we report
 the run that the paired compares use. Against the baselines:
-- **+4.1 points over base** (86.3%).
+- **+4.10 points over base** (86.25%, 1,073 of 1,244 rows; 86.3 rounded).
 - **+2.25 over the loop's own starting adapter** (sft-lightning, the dev pick, 88.10%), with 34
-  tasks fixed and 6 broken on the same 1,244 rows (McNemar exact p ≈ 8 × 10⁻⁶). Every split rose,
+  rows fixed and 6 broken on the same 1,244 rows (McNemar exact p ≈ 8 × 10⁻⁶). Every split rose,
   most on icons (+3.7) and web (+2.7).
 - **+1.29 over template SFT** (89.07%), the stronger SFT on SSv2-clean but not the dev pick: 50
   fixed, 34 broken, p = 0.10, not significant.
@@ -186,7 +186,8 @@ six times, and every base click landed on "M". Details: [bounty-lightning.md](bo
   LoRA adapter switched per request. This keeps the system at 32.6B parameters by model-card
   counts (cap 33B).
 - **Same code as the demo:** every tool route calls the interactive agent's own
-  `AgentSession.execute`, so Gym measures the system we demo, not a copy of it.
+  `AgentSession.execute`, so Gym runs the agent code we demo, not a copy of it. (The demo adds
+  the 25-step cap with a stuck stop and the pre-flight request check; Gym keeps 12 steps.)
 - **Design details:** [`resources_servers/web_agent/README.md`](../resources_servers/web_agent/README.md)
   and [bounty-lightning.md](bounty-lightning.md) §5.
 
@@ -437,7 +438,7 @@ More we hit, one row each (sources: [research-notes.md](research-notes.md) §3, 
 | Gotcha | What happens | What we did |
 | --- | --- | --- |
 | `mask_sample=True` | The rollout leaves every quality metric and shows only in `coverage/*` | Infra failures mask the rollout whatever its reward; model failures (no parsable point) stay scored |
-| `max_steps` counts model calls, checked after that turn's tools | `tool_choice: required` would run every task to `max_steps` | `max_steps: 12` = the interactive budget; `make_tasks.py --check` rejects rows that set `tool_choice` |
+| `max_steps` counts model calls, checked after that turn's tools | `tool_choice: required` would run every task to `max_steps` | `max_steps: 12` (the interactive budget when the rows were built; the interactive agent now allows 25 with a stuck stop); `make_tasks.py --check` rejects rows that set `tool_choice` |
 | Any tool name the model emits is POSTed to `/{name}`; bad-JSON arguments never reach the server | Hallucinated `seed_session` / `close_session` / `verify` hit lifecycle routes; unknown names get a 404 | A catch-all `POST /{tool_name}` registered last; repeat seeds and empty closes do nothing; `scripts/agent_metrics.py` re-validates every call from `response.output` |
 | Gym's HTTP client has no timeout | A hung tool call hangs the rollout | Each tool call is bounded by `tool_timeout_s` (240 s); a timeout returns `ok:false` and masks the rollout |
 | Legacy `/run` never calls `close_session`; `num_workers > 1` splits state | Leaked browser contexts; tool calls land on a worker without the session | Release in `verify`; each seed closes episodes older than 1 h; `num_workers: 1` enforced at startup |
@@ -520,7 +521,7 @@ training/sft_full.sh lightning /home/ubuntu/data/os_atlas_20k/train_lightning.js
 python -m training.gymctl eval --adapter /home/ubuntu/ckpt/sft-lightning/adapter --name sft-lightning --ssv2 --gpu-util 0.35
 
 # The overnight loop, in tmux: profile -> GRPO (Gym /verify reward) -> dev eval + gym eval compare -> keep/revert
-# (runs.md Sat 19:38: default knobs, tonight's extended cutoffs; BLADE edited knobs.json before round 2)
+# (runs.md Sat 19:38: default knobs, the night's extended cutoffs; BLADE edited knobs.json before round 2)
 tmux new-session -d -s night -n loop
 tmux send-keys -t night:loop "training/night_loop.sh --init-adapter /home/ubuntu/ckpt/sft-lightning/adapter \
   --train-file /home/ubuntu/data/os_atlas_20k/train_lightning.jsonl \

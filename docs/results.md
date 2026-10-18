@@ -273,6 +273,13 @@ First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.
   grounder: FINAL 17/36 (Sat 22:04–22:29) vs the Sat 18:45 base arm's 18/36, within
   noise. See "FINAL grounder rerun" above.
 
+## Voice (Parakeet TDT 0.6B v3 on NeMo-Speech.cpp, Patrick's Mac)
+
+- **Sidecar check (Sat):** 94 ms to transcribe a 7 s clip (Metal).
+- **In the console (Sat 22:55, fully local):** a 3.7 s spoken request ("Pay fifty dollars towards
+  my bill.") was transcribed in 56 ms. Run `20261017-225536-276873`; the `voice` event's `latency_ms`
+  field holds the time.
+
 ## Lightning data engine (T3) audit
 
 - **Delivered 18:19 to the box:** `train_lightning.jsonl` and `train_template.jsonl`, 18,299 rows

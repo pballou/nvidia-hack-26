@@ -2,7 +2,7 @@
 
 Team **sherpas** (Patrick, Kyle, Charlie). Fine-Tuned & Specialized track.
 
-Market figures link to their sources. **Illustrative** means our own arithmetic on sourced inputs, with the assumptions stated; it is not a published figure. Our results come from [results.md](results.md) as of Sat 2026-10-17 18:00; the final checkpoint is chosen Sunday on dev.
+Market figures link to their sources. **Illustrative** means our own arithmetic on sourced inputs, with the assumptions stated; it is not a published figure. Our results come from [results.md](results.md) as of Sun 2026-10-18; the final checkpoint (SFT + GRPO round 1) was chosen on dev.
 
 ## 1. One line
 
@@ -84,26 +84,27 @@ Cutaways:
   - It also predicts agentic AI will resolve 80% of common service issues without a human by 2029, cutting operational costs 30%. Its own example is AI agents "navigating websites" to complete tasks ([Gartner][g2029]).
 - **NVIDIA and Red Hat stack:** Lightning plans and also rewrote our training instructions. We built our `gui_grounding` and `web_agent` environments, rewards and evals in NeMo Gym. Parakeet handles voice, vLLM serves the models (vllm-metal on the Mac), and Brev provides the H200.
 - **Where it runs today (measured):**
-  - Lightning and Parakeet run on an M4 Max Mac (128 GB).
-  - The grounder runs on one H200. The fully local Mac check is pending.
-  - Grounding takes 0.73 s per click and planning 4.1–4.8 s per step (both p50; planning p90 reaches ~15–17 s when thinking retries kick in).
+  - Lightning, Parakeet and the grounder (base + final LoRA in one vllm-metal instance) all run on an M4 Max Mac (128 GB). Training and the Gym evals ran on one H200.
+  - Grounding takes 0.73 s per click on the H200 and 1.86 s on the Mac (p50). Fully local, planning takes ~4.3 s per step with thinking off (Saturday's hybrid reads: 4.1–4.8 s p50, p90 ~15–17 s when thinking retries kick in).
 
 ## 7. Proof it works (measured this weekend)
 
-- **Grounding:** the base 2B model scores **86.3%** on ScreenSpot-v2-clean (1,244 rows). We found and excluded 28 contaminated rows. The tuned model scores **89.07%**.
+- **Grounding:** the base 2B model scores **86.3%** on ScreenSpot-v2-clean (1,244 rows). We found and excluded 28 contaminated rows. The final tuned model scores **90.35%**.
 - **Fine-tuning:**
-  - One LoRA epoch on all 18,652 training rows (54 min on one H200) raised dev accuracy from 76.4% to **85.66% (+9.3)**.
-  - On the held-out test, ScreenSpot-v2-clean went from 86.3% to **89.07% (+2.8)**. **Icons went from 78.1% to 84.8% (+6.7)**. Icon-only controls are often the ones a screen reader can't name: WebAIM finds empty buttons on 30.6% of top home pages and empty links on 46.3% ([WebAIM 2026][webaim]).
+  - One LoRA epoch on all 18,652 training rows (54 min on one H200) raised dev accuracy from 76.4% to **85.66% (+9.3)**. The same epoch on 18,299 rows with Lightning-rewritten instructions reached **86.27%** (vs 85.86% for raw labels in the same harness), so we kept that one (picked on dev). The rewrite ablation is mixed: +0.41 on dev, −0.97 on ScreenSpot-v2-clean.
+  - Then GRPO in NeMo Gym (TRL, rewarded by our `gui_grounding` env's `/verify` point-in-box check; 170 steps on 1,282 rows the model sometimes got right) took dev to **87.00%**. That is the final model. A second round, with its data mix set by BLADE failure analysis, was flat (86.89%), so the loop stopped.
+  - On the held-out test, ScreenSpot-v2-clean went from 86.3% to **90.35% (+4.1)**, and +2.25 over the SFT model GRPO started from (34 rows fixed, 6 broken). **Icons went from 78.1% to 85.4% (+7.3)**. Icon-only controls are often the ones a screen reader can't name: WebAIM finds empty buttons on 30.6% of top home pages and empty links on 46.3% ([WebAIM 2026][webaim]).
   - A 5-minute pilot (2,000 rows) had already given +5.0 on dev, and answers got 2x shorter.
-  - Overnight GRPO in NeMo Gym may move these further; the final numbers land Sunday.
   - In a human audit, 97.7% (42/43) of the Lightning rewrites that could be checked were faithful, or 85.7% if "unsure" counts as a failure.
-- **Agent on Acme, verified from the app's state:**
-  - On the easy tasks, the base model verified 3/4 and the pilot **4/4**.
-  - On all 12 tasks, the base model (before tuning) verified 5/12, or **6/12** with thinking on for retries.
-  - 204 of 205 tool calls were valid.
-  - Caveats: each task ran once (n=1), and the planner prompt's examples overlapped some tasks, so the absolute numbers are optimistic. Base vs tuned is still a fair comparison.
+- **Agent on Acme, verified from the app's state** (NeMo Gym `web_agent`, 12 tasks × 3 repeats, thinking off):
+  - Verified success: base 18/36, raw-label SFT 22/36, final 17/36. All three are within noise (final vs base 95% CI [−0.20, +0.14]), so we claim no end-to-end task gain.
+  - What tuning does change: failed actions (no usable click point) went from 10 to **0** (significant), the small adjacent "L" text-size option went from 0/3 to **3/3**, and the final grounder hit **96.5%** (110/114) of hand-labelled well-posed targets vs SFT's 92.6% (not significant). BLADE traces most remaining failures to the planner and the screen summary, not the grounder.
+  - 96–97% of tool calls were valid (base 249/259, SFT 228/234).
+  - Thinking on lifted the interactive agent (SFT grounder) from 19/32 to **26/32** on the same jobs (p = 0.039), at ~11 s per planning call. The demo keeps thinking off.
+  - A pre-flight Lightning check asks when a request is unclear: 0 false asks on 62 clear requests and 22/22 asks on our acceptance set, 5 false asks in 90 on held-out phrasings. It is on in the console and off for evals.
+  - Caveats: 3 repeats per task, with the planner sampling at temperature 1.0, on our own test app.
 - **Known misses:** targets that need scrolling, the canvas chart, dense toggle grids, and one run that paid the full balance instead of $50.
-- **TBD Sunday:** the final grounder's numbers, base vs tuned in Gym `web_agent` with 3 repeats, and a fully local Mac run.
+- **Fully local (measured):** Lightning (official BF16), Parakeet and the grounder (base + final LoRA in one vllm-metal instance; 32.6B by model-card counts) run on one M4 Max Mac (128 GB). The local grounder matches the H200: 87.0% vs 87.0% on 200 dev rows, 99% agreement.
 - **Not measured:** real call deflection. That needs a pilot.
 
 ## 8. Business model and competition
@@ -125,8 +126,8 @@ Cutaways:
   - **A one-tap hand-off to a human.** 64% of customers would prefer companies not use AI for service ([Gartner][g64]), and the CFPB warns that blocking access to humans can break the law ([CFPB][cfpb]).
   - **Confirmation before any money moves.**
   - **GRPO in NeMo Gym** on our failure clusters.
-  - **A fully local Mac build.**
-- **Open:** the model and data go public on Hugging Face on Sunday.
+  - **A packaged fully local install** (today's Mac setup is manual, [local-mac.md](local-mac.md)).
+- **Open:** the model and data go public on Hugging Face Sunday ~9:30, after the release check.
 
 ## 10. 60-second video script
 
@@ -134,11 +135,12 @@ Cutaways:
 > "Only fourteen percent of customer-service problems get solved through self-service, and the top reason is that people can't find what they need. So they call. An agent contact costs about thirteen fifty, against under two dollars for self-service. More than one in four US adults has a disability, and ninety-six percent of the top million home pages fail automated accessibility checks. GUI assist closes that gap. You say what you want, and it does it on the real website, from the screen alone."
 
 **Segment 5, so what (~25 s).** Caption: *illustrative, assumptions in docs/pitch.md*.
-> "For a two-million-customer utility, moving twenty to forty percent of calls to self-service is worth about four to eight million dollars a year. GUI assist needs no API, and one hour of fine-tuning took icon clicks from seventy-eight to eighty-five percent [update if GRPO moves it]. It fits on one GPU [say 'runs on this Mac' only if the check passed], so screens never leave the building. We're looking for one utility, credit union or benefits agency to pilot it."
+> "For a two-million-customer utility, moving twenty to forty percent of calls to self-service is worth about four to eight million dollars a year. GUI assist needs no API, and about two hours of fine-tuning took icon clicks from seventy-eight to eighty-five percent. It runs on this Mac, so screens never leave the building. We're looking for one utility, credit union or benefits agency to pilot it."
 
 **Don't say:**
 - "ADA compliant" or "EAA compliant".
 - That 20–40% is measured.
+- That fine-tuning raised end-to-end task success (agent success is within noise). Say what it fixed: failed clicks 10 → 0, the small "L" option 0/3 → 3/3.
 - Wells Fargo "$1B". Use the sourced, illustrative ~$100–200M upper bound.
 
 [g14]: https://www.gartner.com/en/newsroom/press-releases/2024-08-19-gartner-survey-finds-only-14-percent-of-customer-service-issues-are-fully-resolved-in-self-service

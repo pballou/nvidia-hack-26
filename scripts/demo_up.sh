@@ -32,7 +32,7 @@
 #   --skip-models     don't check the VLM / Lightning
 # Env: SANDBOX_PORT (8090), CONSOLE_PORT (8095), LIGHTNING_LOCAL_URL (http://127.0.0.1:8000/v1, what
 #      --lightning local checks), PYTHON (.venv-gym/bin/python).
-# Fully local (Mac): scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder \
+# Fully local (Mac): scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model base \
 #                      --vlm-label "Mac (vllm-metal)"
 # Logs: runs/demo_logs/{sandbox,console}.log
 set -euo pipefail
