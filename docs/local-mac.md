@@ -161,3 +161,108 @@ HF_HUB_OFFLINE=1 vllm serve ~/models/grounder-merged --served-model-name grounde
   run `preprocess_screenshot` client-side.
 - **Pause Gym evals** on the H200 while recording, so the grounder isn't contended.
 - **Only say "runs locally on a MacBook" about what actually ran there.**
+
+## Gate G results
+
+Scripts: [scripts/gate_g_merge.py](../scripts/gate_g_merge.py) (merge),
+[scripts/run_local_grounder.sh](../scripts/run_local_grounder.sh) (serve, §3b),
+[scripts/gate_g_watch.py](../scripts/gate_g_watch.py) (watchdog),
+[scripts/gate_g.py](../scripts/gate_g.py) (rows, requests, verdict). Artifacts are in
+`~/models/gate_g/` on Patrick's Mac.
+
+### Attempt 1: Sat 2026-10-17, 19:15–19:40 EDT (T4). Not run: stopped on memory pressure
+
+**Merge (done, reusable):**
+- **Inputs:**
+  - Base `Qwen/Qwen3.5-2B@15852e8c`. That's the Hub's latest commit (2026-03-02), so it's
+    the same snapshot the H200 downloaded.
+  - Adapter `/home/ubuntu/ckpt/sft-template/adapter`, copied with scp only.
+    `adapter_model.safetensors` sha256 `63b4dcd1…`. r16/α32 on 186 modules: q/k/v/o,
+    MLP, and GDN `in_proj_qkv/z/a/b` + `out_proj`.
+- **Command:** `~/.venv-merge/bin/python scripts/gate_g_merge.py --adapter
+  ~/models/adapters/sft-template --out ~/models/grounder-merged-sft-template`. It ran on
+  CPU in 14 s with torch 2.13.0, transformers 5.17.0 and peft 0.21.2.
+- **Output:** weights sha256 `b8460afd…`.
+  - Only the 186 targeted tensors differ from base. Everything else is bit-identical:
+    vision tower, `mtp.*`, and every config, tokenizer and template file.
+  - peft's float32 merge equals the manual `W + 2·B·A` exactly (max diff 0.0).
+- **Memory:** the script never holds the whole model. A first version that loaded the
+  model in fp32 pushed pressure to yellow for ~8 s (19:22:21–27) before its own guard
+  aborted it.
+
+**Serving attempt** (`GPU_UTIL=0.05`, port 8011, mm processor cache off, watchdog armed first),
+started after the orchestrator's GO (T2's eval had finished at ~19:30):
+
+| Time | What happened |
+| --- | --- |
+| 19:32:09 | Watchdog baseline: Lightning probe median 0.157 s, ITL 42 ms, prefill 1,026 tok/s, 23% free, pressure normal |
+| 19:33:18 | vllm-metal resolved `Qwen3_5ForConditionalGeneration`, loaded the merge through MLX-VLM (0.76 s), and set up hybrid GDN paged attention |
+| 19:33:24 | The startup profile ran a dummy 8,192-token text forward (no vision pass: vllm-metal only profiles encoders for adapters with `profile_features`, i.e. Gemma 4). Then KV sizing failed with `model_memory=4.43GB, overhead=6.59GB, kv_budget=-5.24GB`. Pressure turned yellow during the profile; the watchdog sent SIGTERM |
+| 19:33:44 | Two EngineCore children ignored SIGTERM and were SIGKILLed. Lightning (PGID 38782) was not touched |
+| 19:37:18 | The first Lightning request afterwards took 4.0 s (warm: 0.16 s). The kernel had compressed Lightning's idle memory (compressor 21 → 60 GB, 4.2 GB to swap). After that request: normal pressure, compressor 20 GB, 23% free. Lightning's counters show no team requests in that window |
+
+**Findings:**
+- **vllm-metal 0.31.0 loads Qwen3.5-2B and runs its text stack.** The hybrid GDN +
+  attention layers executed on Metal during the profile.
+  - The vision tower loaded (MLX-VLM) but hasn't run yet. Its activations for a 2 MP image
+    (8,100 patches) also aren't in the util budget, so the first image request adds memory
+    on top of it.
+  - Preprocessing goes through upstream vLLM's HF `Qwen3VLProcessor` (read from the
+    source), so `--mm-processor-kwargs` applies exactly as on the H200.
+  - No request was served, so image support, prompt-token identity and accuracy are
+    still unmeasured.
+- **Memory is the blocker, not model support.**
+  - `--gpu-memory-utilization` multiplies Metal's working set (115.45 GB). For this hybrid
+    model, the whole budget is allocated at startup.
+  - The budget must hold the weights (4.43 GB), the profile overhead, and the KV cache.
+    The overhead was 6.59 GB at the default `max_num_batched_tokens=8192`; most of it is
+    the dummy forward's logits (8,192 × 248k vocab).
+  - So 0.12 (13.9 GB) would start; 0.05 can't.
+- **The real headroom is ~8–10 GB, and the grounder needs ~9–11 GB plus the first
+  image's vision pass.**
+  - With Lightning's memory wired, the Mac has ~23% free.
+  - macOS turned yellow near 15–16% free, and once at 43% "free" during the fast
+    allocation.
+- **MLX unwires Lightning's ~80 GB a few seconds after its last request.**
+  `memory_pressure` then reads ~80% free. A new allocation makes the kernel compress
+  Lightning, and Lightning's next request pays for it. Measure headroom only right after
+  a Lightning request; the launcher now does this.
+- **§2's "a local grounder at 0.12 still fits" no longer holds** with Chrome, VS Code and
+  Teams open. It's true of Metal's budget arithmetic, not of this Mac's physical memory.
+
+**Retry (only on the orchestrator's GO, after Teams and most Chrome tabs are closed):**
+
+```bash
+python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 \
+  --log ~/models/gate_g/watch.jsonl &                     # arm first: it baselines Lightning, then waits
+GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # warms Lightning, refuses below 26% free
+~/.venv-merge/bin/python scripts/gate_g.py run --manifest <os_atlas_final>/manifest.jsonl \
+  --out ~/models/gate_g/sft-template --endpoint local=http://127.0.0.1:8011/v1
+~/.venv-merge/bin/python scripts/gate_g.py compare ~/models/gate_g/sft-template --a local --b h200
+```
+
+- **`--max-num-batched-tokens 2560`** cuts the profile's logits from ~4 GB to ~1.3 GB. A
+  2 MP image (2,025 tokens) plus the prompt still fits in one prefill chunk, as on the
+  H200. Serving still projects full-vocabulary logits for every prefill row, so each image
+  request adds ~1 GB of transient memory.
+- **Expect some numeric drift that isn't vllm-metal being wrong:** merge rounding
+  (bf16(W + 2·B·A) vs. runtime LoRA), mlx-vlm rounding RMSNorm's `1 + w` to bf16, bf16
+  GDN gates, and the H200's own batch nondeterminism. If agreement misses 90%, comparing
+  base against base (the base snapshot here vs. :8001 `base`) separates backend
+  numerics from the merge.
+- **33B cap:** the Mac copy and the H200 `grounder` coexist only for this offline check.
+  The fully local demo uses the Mac grounder alone, with no H200 grounder in the loop.
+- **Rows:** 200 of the 969 `dev` rows in the finalized manifest (sha256
+  `4ceb7ea3d7ac8e85…`; local copy in T3's worktree `data/os_atlas_final/`), sampled with
+  `random.Random(0)`. Each is sent as a `preprocess_screenshot` PNG with the qwen3_5
+  prompt, temperature 0.
+- **The H200 half is already collected** (19:46–19:50, sequential; `/v1/models` showed
+  `grounder` = `/home/ubuntu/ckpt/sft-template/adapter`, recorded in `selection.json`):
+  - 200/200 answered and parsed. Hit rate **85.0%** (desktop 85.3 on 68 rows, mobile 86.0
+    on 50, web 84.1 on 82), in line with sft-template's 85.66% on the full dev split.
+  - p50 0.75 s through the tunnel.
+  - `prompt_tokens` = image tokens + 52–59 text tokens.
+- **If the retry can't happen,** stay hybrid. The video then says "Lightning and voice run
+  on this Mac; the 2B grounder runs on one H200".
+- **After GRPO, merge the FINAL adapter in the morning** (FINAL.json in the 3am copy at
+  `~/models/gui-assist/`) and re-run Gate G against a :8001 that serves that same adapter.
