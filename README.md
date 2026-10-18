@@ -270,7 +270,7 @@ stayed frozen through the FINAL grounder rerun (Sat 22:04), so all three arms co
 
 ## License
 
-Code in this repo: [Apache License 2.0](LICENSE). Vendored NeMo Gym skills under `.agents/skills/` keep
+Code in this repo: [Apache License 2.0](LICENSE). Copyright 2026 Patrick Ballou, Kyle O'Donnell and Charlie Arleth ([NOTICE](NOTICE)). Vendored NeMo Gym skills under `.agents/skills/` keep
 their own license ([LICENSE-NeMo-Gym](.agents/skills/LICENSE-NeMo-Gym)).
 
 Models and data carry their own licenses, which are recorded on each Hugging Face card: the base

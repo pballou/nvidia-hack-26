@@ -1,0 +1,10 @@
+GUI Assist
+Copyright 2026 Patrick Ballou, Kyle O'Donnell and Charlie Arleth (team sherpas)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party components keep their own licenses:
+- NeMo Gym agent skills vendored under .agents/skills/ (see .agents/skills/LICENSE-NeMo-Gym).
+- Models and data are not part of this repository; their licenses are listed on the
+  Hugging Face cards (patrickballou/gui-assist-grounder: Apache-2.0;
+  patrickballou/gui-assist-data: CC BY 4.0).
