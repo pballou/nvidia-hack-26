@@ -200,6 +200,28 @@ Scripts: [scripts/gate_g_merge.py](../scripts/gate_g_merge.py) (merge),
 [scripts/gate_g.py](../scripts/gate_g.py) (rows, requests, verdict). Artifacts are in
 `~/models/gate_g/` on Patrick's Mac.
 
+### FINAL adapter (round-1 GRPO): H200 half captured, local half pending
+
+The night loop finished at 22:02 with FINAL = round 1 GRPO,
+`/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/adapter` (dev 87.00).
+
+- **H200 half** (Sat 22:04–22:07, sequential, same 200 rows; `selection.json` records
+  :8001 `grounder` = that adapter): 200/200 answered and parsed.
+  - Hit rate **87.0%**: desktop 91.2 (68 rows), mobile 84.0 (50), web 85.4 (82).
+  - p50 0.64 s. :8001 was shared with T2's agent eval, so latency isn't comparable.
+  - Results are in `~/models/gate_g/night-20261017-193859-round_1-grpo/`.
+- **Merge** (CPU, 25.5 s, pressure normal):
+  - Adapter `~/models/gui-assist/night-20261017-193859-round_1-grpo/`, copied from the
+    box; `adapter_model.safetensors` sha256 `54ce9389…`.
+  - Output `~/models/grounder-merged-night-20261017-193859-round_1-grpo`, weights sha256
+    `cd120bc0…`.
+  - 186 modules; peft's merge equals the manual `W + 2·B·A` (max diff 0.0).
+- **Local half:** waits until Patrick has closed Teams and Chrome. Then run
+  `MODEL=~/models/grounder-merged-night-20261017-193859-round_1-grpo` with
+  [the procedure below](#how-to-run-gate-g-attempt-2s-exact-procedure), using
+  `--endpoint local=…` only and `--out ~/models/gate_g/night-20261017-193859-round_1-grpo`.
+  `compare` then pairs it with the H200 half already captured.
+
 ### Attempt 2: Sat 2026-10-17, 20:15–20:22 EDT (T4). PASS
 
 **Setup:**
