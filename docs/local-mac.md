@@ -10,7 +10,7 @@ tunnel (§3a) have run the agent evals and are the demo setup; §3b / Gate G is 
 | Mode | Lightning (planner) | Grounder | When |
 | --- | --- | --- | --- |
 | **Hybrid (primary)** | Mac, `vllm serve` via **vllm-metal**, **official NVIDIA BF16** | H200 vLLM, base + LoRA (gpu-box.md §3), via a tunnel on 8001 | If Gate L passes |
-| Fully local | Mac, vllm-metal | Mac, vllm-metal, **merged** tuned checkpoint for both roles | Only if Gate G also passes |
+| Fully local | Mac, vllm-metal | Mac, vllm-metal, **merged** tuned checkpoint for both roles, on :8011 | Only if Gate G also passes |
 | All-H200 (fallback) | H200, official BF16 + #61603 patch (gpu-box.md §2) | H200 (gpu-box.md §3) | If Gate L fails |
 
 **Why hybrid:**
@@ -93,19 +93,33 @@ ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 pe
 # On the box: gpu-box.md §3 with the adapter (served names base + grounder). No Lightning container needed.
 ```
 
-## 3b. Fully local grounder on :8001 (only after Gate G passes)
+## 3b. Fully local grounder on :8011 (only after Gate G passes)
+
+:8001 is the H200 tunnel (§3a). The local grounder uses :8011, so both can be up at once,
+which Gate G needs.
 
 ```bash
-source ~/.venv-vllm-metal/bin/activate
-export GROUNDER_MAX_PIXELS=2073600 GROUNDER_MIN_PIXELS=65536   # = common/grounding.py (2 MP, frozen at gate D1)
-HF_HUB_OFFLINE=1 vllm serve ~/models/grounder-merged --served-model-name grounder \
-  --host 127.0.0.1 --port 8001 --max-model-len 16384 --max-num-seqs 1 --gpu-memory-utilization 0.12 \
-  --limit-mm-per-prompt '{"image": 1, "video": 0}' \
-  --mm-processor-kwargs "{\"size\": {\"longest_edge\": ${GROUNDER_MAX_PIXELS}, \"shortest_edge\": ${GROUNDER_MIN_PIXELS}}}" \
-  --default-chat-template-kwargs '{"enable_thinking": false}' --no-enable-prefix-caching
-# No --reasoning-parser. For Qwen3-VL-2B: drop --default-chat-template-kwargs and send temperature 0.
-# In this mode the app's summary_model is "grounder" (one instance for both roles).
+# Merge once (CPU, streaming): base Qwen3.5-2B + the adapter -> one bf16 checkpoint
+~/.venv-merge/bin/python scripts/gate_g_merge.py --adapter <adapter dir> --out ~/models/grounder-merged-<name>
+# Watchdog first (it stops the grounder on memory pressure or a Lightning slowdown), then the server
+python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 \
+  --log ~/models/gate_g/watch.jsonl &
+MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh
 ```
+
+- **[scripts/run_local_grounder.sh](../scripts/run_local_grounder.sh) pins the flags:**
+  - served name `grounder`;
+  - the frozen 2 MP `--mm-processor-kwargs` (read from `common/grounding.py`);
+  - `--max-num-seqs 1`, `--max-num-batched-tokens 2560`;
+  - multimodal processor cache off, `enable_thinking` off, no prefix caching;
+  - no reasoning parser and no speculative decoding.
+- **It refuses to start** without a live watchdog, or with less than 26% free (measured
+  after warming Lightning).
+- **Don't use util 0.12 with the default 8,192 batched tokens.** Next to Lightning, that
+  setup turned memory pressure yellow ([Gate G results](#gate-g-results), attempt 1).
+- **One instance does both roles:** in this mode the app's `summary_model` is `grounder`.
+  For the console and recording, see
+  [Fully local mode for the video](#fully-local-mode-for-the-video).
 
 ## Gates
 
