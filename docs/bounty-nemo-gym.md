@@ -36,7 +36,8 @@ the run that the paired compares use. Against the baselines:
   p = 0.73).
 - **+2.25 over the loop's own starting adapter** (sft-lightning, the dev pick, 88.10%), with 34
   rows fixed and 6 broken on the same 1,244 rows (McNemar exact p ≈ 8 × 10⁻⁶). Every split rose,
-  most on icons (+3.7) and web (+2.7).
+  most on icons (+3.7, 22 fixed vs 2 broken, the one split significant on its own after a Holm
+  correction) and web (+2.7).
 - **+1.29 over template SFT** (89.07%), the stronger SFT on SSv2-clean but not the dev pick: 50
   fixed, 34 broken, p = 0.10, not significant.
 
@@ -101,19 +102,26 @@ fixed vs broken rows; Holm-adjusted over the 11 slice tests):
 
 **Where the Gym loop's gain is** (SSv2-clean, same 1,244 rows; the loop started from sft-lightning):
 
-| Split (rows) | Template SFT | Loop start (sft-lightning) | Final | Δ vs loop start | Δ vs template |
+| Split (rows) | Template SFT | Loop start (sft-lightning) | Final | Δ vs loop start (fixed / broken; p, Holm p) | Δ vs template (fixed / broken; p, Holm p) |
 | --- | --- | --- | --- | --- | --- |
-| All (1,244) | 89.07 | 88.10 | **90.35** | **+2.25** (34 fixed, 6 broken) | +1.29 (50 fixed, 34 broken) |
-| Mobile (501) | 92.22 | 91.22 | 93.21 | +2.00 | +1.00 |
-| Desktop (306) | 89.54 | 86.93 | 88.89 | +1.96 | −0.65 |
-| Web (437) | 85.13 | 85.35 | 88.10 | +2.75 | +2.97 |
-| Text (704) | 92.33 | 93.04 | 94.18 | +1.14 | +1.85 |
-| Icon (540) | 84.81 | 81.67 | 85.37 | +3.70 | +0.56 |
+| All (1,244) | 89.07 | 88.10 | **90.35** | **+2.25** (34 / 6; p ≈ 8 × 10⁻⁶) | +1.29 (50 / 34; p = 0.10) |
+| Mobile (501) | 92.22 | 91.22 | 93.21 | +2.00 (11 / 1; 0.006, 0.06) | +1.00 (15 / 10; 0.42, 1) |
+| Desktop (306) | 89.54 | 86.93 | 88.89 | +1.96 (8 / 2; 0.11, 0.44) | −0.65 (11 / 13; 0.84, 1) |
+| Web (437) | 85.13 | 85.35 | 88.10 | +2.75 (15 / 3; 0.008, 0.07) | +2.97 (24 / 11; 0.041, 0.41) |
+| Text (704) | 92.33 | 93.04 | 94.18 | +1.14 (12 / 4; 0.077, 0.44) | +1.85 (25 / 12; 0.047, 0.42) |
+| Icon (540) | 84.81 | 81.67 | 85.37 | **+3.70** (22 / 2; 4 × 10⁻⁵, **0.0004**) | +0.56 (25 / 22; 0.77, 1) |
 
-- **Every split rose against the loop's start.** The per-split moves aren't tested on their own.
-  Much of the icon and desktop gain recovers the Lightning SFT's deficit there: against template,
-  icon is only +0.6 and desktop is −0.7. Web is the consistent gain on SSv2-clean, but FineWeb
-  fell 1.7 on dev in the same round, so the slice story isn't stable.
+- **Every split rose against the loop's start, but only icons is significant on its own** after
+  correcting for the 11 slice tests: 22 fixed vs 2 broken, Holm p = 0.0004. Mobile (11 vs 1) and
+  web (15 vs 3) are close, at Holm p 0.06–0.07. Exact McNemar per slice, Holm-adjusted over the 11
+  slices, from `scripts/mcnemar_slices.py` on the paired compare reports
+  ([vs loop start](eval_results/compare_ssv2_sft-lightning_vs_final/compare_report.md),
+  [vs template](eval_results/compare_ssv2_sft-template_vs_final/compare_report.md)).
+- **Much of the icon gain recovers the Lightning SFT's deficit there.** Against template, icons
+  are even (25 fixed vs 22 broken, p = 0.77) and desktop is −0.7 (11 vs 13). Web is the
+  consistent gain on SSv2-clean: against template, web text survives the correction (16 vs 3,
+  Holm p = 0.049). But FineWeb fell 1.7 on dev in the same round, so the slice story isn't
+  stable.
 - **On dev, round 1's own gain was suggestive, not significant:** 22 fixed, 15 broken,
   p = 0.32 ([BLADE round 1](blade/round_1_r0_vs_r1.md)). The held-out pair against the loop's
   start is the significant result.
