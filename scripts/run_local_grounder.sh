@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Serve the merged grounder on this Mac via vllm-metal (docs/local-mac.md §3b, Gate G).
 #
-#   scripts/run_local_grounder.sh             # Gate G: port 8011 (8001 is the H200 tunnel)
-#   PORT=8001 scripts/run_local_grounder.sh   # fully local demo: only after Gate G passes, tunnel down
+#   MODEL=~/models/grounder-merged-<name> scripts/run_local_grounder.sh   # merged, port 8011
+#   LORA=~/models/gui-assist/<name> scripts/run_local_grounder.sh         # base + LoRA, port 8011
+# (8001 is the H200 tunnel.)
 #
 # Runs in the foreground (use tmux) and exec's vllm, so the PID in $PIDFILE is the server's.
 # scripts/gate_g_watch.py uses that file to stop this server (and only this server) if memory
 # pressure leaves normal or Lightning on :8000 slows down. Never touches :8000.
 #
-# Env: MODEL (merged checkpoint dir, from scripts/gate_g_merge.py), PORT, GPU_UTIL (<= 0.12:
-# Lightning holds 0.68 of Metal memory), VENV (the vllm-metal venv), LOGDIR, PIDFILE.
+# Two modes, one model instance either way (one 2B under the parameter cap):
+#   merged (default): MODEL = a merged checkpoint (scripts/gate_g_merge.py), served as `grounder`.
+#   LoRA:   LORA=<PEFT adapter dir> serves the base snapshot as `base` plus the adapter as
+#           `grounder` (adapter switched per request), exactly like the H200 (gpu-box.md §3).
+# Env: MODEL, LORA, PORT, GPU_UTIL (<= 0.12: Lightning holds 0.68 of Metal memory), VENV (the
+# vllm-metal venv), LOGDIR, PIDFILE.
 # No extra args: vLLM's argparse is last-wins, so they could override the pinned flags or turn
 # on speculative decoding (--spec-*, --config), which AGENTS.md forbids.
 #
@@ -18,7 +23,15 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-MODEL=${MODEL:-$HOME/models/grounder-merged-sft-template}
+LORA=${LORA:-}
+BASE_SNAPSHOT=$HOME/.cache/huggingface/hub/models--Qwen--Qwen3.5-2B/snapshots/15852e8c16360a2fea060d615a32b45270f8a8fc
+if [ -n "$LORA" ]; then
+  MODEL=${MODEL:-$BASE_SNAPSHOT}
+  SERVED=base
+else
+  MODEL=${MODEL:-$HOME/models/grounder-merged-sft-template}
+  SERVED=grounder
+fi
 PORT=${PORT:-8011}
 GPU_UTIL=${GPU_UTIL:-0.08}
 # vllm-metal's startup profile runs a dummy forward of max_num_batched_tokens tokens and keeps
@@ -42,6 +55,13 @@ GROUNDER_MIN_PIXELS=$(sed -nE 's/^MIN_PIXELS: int = ([0-9_]+).*/\1/p' "$REPO/com
   || die "pixel cap in common/grounding.py is $GROUNDER_MAX_PIXELS/$GROUNDER_MIN_PIXELS, expected the frozen 2073600/65536"
 
 [ -f "$MODEL/config.json" ] || die "no checkpoint at $MODEL (run scripts/gate_g_merge.py)"
+LORA_ARGS=()
+if [ -n "$LORA" ]; then
+  [ -f "$LORA/adapter_config.json" ] && [ -f "$LORA/adapter_model.safetensors" ] \
+    || die "LORA=$LORA has no adapter_config.json + adapter_model.safetensors"
+  # Rank cap as on the H200 (it must be >= the trained rank, 16 tonight).
+  LORA_ARGS=(--enable-lora --max-lora-rank 64 --lora-modules "grounder=$LORA")
+fi
 ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || die "port $PORT is already in use"
 level=$(sysctl -n kern.memorystatus_vm_pressure_level)
 [ "$level" = 1 ] || die "memory pressure level is $level (1 = normal); not starting"
@@ -71,12 +91,13 @@ export HF_HUB_OFFLINE=1
 # Lightning's engine is also titled VLLM::EngineCore; this one becomes VLLM_GROUNDER::EngineCore.
 # Still never stop anything by name: stop the PID in $PIDFILE and its children.
 export VLLM_PROCESS_NAME_PREFIX=VLLM_GROUNDER
-echo "run_local_grounder: pid $$, $MODEL on 127.0.0.1:$PORT, gpu util $GPU_UTIL, cap $GROUNDER_MAX_PIXELS/$GROUNDER_MIN_PIXELS"
+echo "run_local_grounder: pid $$, $MODEL as $SERVED${LORA:+ + LoRA grounder=$LORA} on 127.0.0.1:$PORT, gpu util $GPU_UTIL, cap $GROUNDER_MAX_PIXELS/$GROUNDER_MIN_PIXELS"
 # No --reasoning-parser for Qwen3.5 (it would move the answer into `reasoning`; gpu-box.md §3).
 # vllm-metal allocates GPU_UTIL x Metal's working set (115.45 GB) up front for this hybrid model,
 # and the multimodal processor cache (default 4 GiB) sits in both the API and engine processes:
 # turn it off, since every screenshot is new anyway.
-exec vllm serve "$MODEL" --served-model-name grounder \
+# ${arr[@]+...}: an empty array is an error under set -u in macOS's bash 3.2.
+exec vllm serve "$MODEL" --served-model-name "$SERVED" ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
   --host 127.0.0.1 --port "$PORT" --max-model-len 16384 --max-num-seqs 1 --gpu-memory-utilization "$GPU_UTIL" \
   --max-num-batched-tokens "$MAX_BATCHED" --mm-processor-cache-gb 0 --limit-mm-per-prompt '{"image": 1, "video": 0}' \
   --mm-processor-kwargs "{\"size\": {\"longest_edge\": ${GROUNDER_MAX_PIXELS}, \"shortest_edge\": ${GROUNDER_MIN_PIXELS}}}" \
