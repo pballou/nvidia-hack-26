@@ -80,7 +80,7 @@ The README skeleton has a section for each:
 - [ ] **Datasets / synthetic data + provenance**: OS-Atlas subsets used and excluded (and why), Lightning-rewritten instructions (published plus method), ScreenSpot-v2 (eval only)
 - [ ] **Known limitations & next steps**
 - [ ] **Deployed URL or a short screen capture** of the working app
-- [ ] **Team roster**: names, roles and contacts. The README is public, so use contacts you're happy to publish (e.g. GitHub handles or work emails).
+- [x] **Team roster**: names, roles and contacts (README, Sat 20:40). The README is public, so use contacts you're happy to publish (e.g. GitHub handles or work emails).
 
 ## Publishing (required for this track: "publish it openly so others can reuse it")
 

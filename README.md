@@ -180,9 +180,9 @@ points on dev), then one ScreenSpot-v2-clean eval of the final adapter.
 
 | Name | Role | Contact |
 | --- | --- | --- |
-| Patrick | Agent and Lightning integration, `web_agent` env, sandbox app, demo | TBD |
-| Kyle | Training and serving (TRL, vLLM, GPU budget) | TBD |
-| Charlie | Data and evaluation (data prep, `gui_grounding` env, ScreenSpot eval, BLADE) | TBD |
+| Patrick | Agent and Lightning integration, `web_agent` env, sandbox app, demo | pballou@sherpa6.com |
+| Kyle | Training and serving (TRL, vLLM, GPU budget) | kodonnell@sherpa6.com |
+| Charlie | Data and evaluation (data prep, `gui_grounding` env, ScreenSpot eval, BLADE) | carleth@sherpa6.com |
 
 ## Docs
 
