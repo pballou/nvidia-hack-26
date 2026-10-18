@@ -66,6 +66,43 @@ screens. `gym eval compare`: 3 fail→pass, 1 pass→fail.
   if 3 more make no progress). Replayed on the 47 real runs, it would have stopped none of the
   29 that succeeded.
 
+### Thinking off / retry / on (Sat 20:34–22:01, interactive agent, reportable)
+
+Interactive agent (25-step cap + stuck stop), all 12 tasks × 3 repeats per arm, arms run one after
+another, concurrency 2. Grounder `grounder` = `sft-template` (pinned, checked before and after every
+run), `base` screen descriptions, official BF16 Lightning, sandbox `68c7671`, `agent-v4`. Arm *on*
+has 32 clean runs of 36. At 22:01 the night loop re-served `:8001` with the final adapter: two
+runs in flight across the swap (star-landlord-message r3, pay-50 r3, both failed) are excluded,
+and the last two jobs never started. None were rerun on a different grounder. The table compares
+the same 32 (task, repeat) jobs in all three arms.
+
+| Same 32 jobs | thinking off | thinking retry | thinking on |
+| --- | --- | --- | --- |
+| Verified success | 19/32 (59%) | 21/32 (66%) | **26/32 (81%)** |
+| Claim matches verified | 20/32 | 23/32 | **28/32** |
+| False success claims | 9 | 9 | **4** |
+| No-change actions | 72 | 54 | **38** |
+| 25-step cap hits / stuck stops | 6 / 0 | 2 / 0 | 0 / 1 |
+| Mean steps | 10.4 | 9.0 | **5.9** |
+| Plan (one Lightning call) p50 / p90 | 6.3 / 7.7 s | 5.9 / 16.7 s | 10.9 / 24.7 s |
+| Wall-clock per task p50 / p90 | 65 / 220 s | 68 / 279 s | **53** / 293 s |
+| Thinking tokens per run | 0 | 616 | 1,502 |
+
+- **Significance (paired, same jobs):** on vs off, on won 8 jobs and off won 1: exact McNemar
+  p = 0.039. On vs retry: 7 vs 2, p = 0.18. Retry vs off: 4 vs 2, p = 0.69. Full arms: off 20/36,
+  retry 22/36, on 26/32.
+- **Where thinking on wins:** the hardest tasks (off → on, same jobs). `max-usage-month` (canvas
+  chart) 0/3 → 2/3, `star-landlord-message` (needs a scroll) 0/2 → 2/2, and
+  `message-support-meter` (multi-step form) 0/2 → 2/2. In the full off arm both of the latter
+  were 0/3.
+- **Cost:** each planning call is about 1.7× slower, but runs take about half as many steps, so
+  the median task finishes sooner. The p90 is about the same as retry.
+- **Recommendation for the demo default: `thinking: on`.** It solves more tasks, makes fewer
+  false claims and finishes the median task fastest. The UI should show that Lightning is
+  thinking during the longer per-step pauses. Gym evals stay thinking-off, so the reported
+  base-vs-tuned numbers stay comparable. (The default in `configs/agent.yaml` is still `retry`
+  until Patrick decides; the agent pipeline is frozen until Sunday's rerun.)
+
 ### First reads (Sat afternoon, prompt `agent-v3`, checks before `68c7671`; absolute numbers optimistic)
 
 First read on 2026-10-17. n=1 per task, sequential, 4 easy tasks.

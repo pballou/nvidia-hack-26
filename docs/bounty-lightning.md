@@ -178,8 +178,27 @@ Screen:  PAGE / NAV / MAIN / STATE / OVERLAYS  (≤ 40 lines, ≤ 240 chars each
 | Plan p50 / p90 | 4.1 / 5.5 s | 4.3 / 14.5 s |
 
   Reasoning only after a problem step mostly improves Lightning's self-assessment (its done claims
-  match the sandbox more often) and cuts wasted clicks, for a heavier latency tail. **Sunday: TBD**
-  with the final grounder and repeats.
+  match the sandbox more often) and cuts wasted clicks, for a heavier latency tail.
+
+- **Saturday night, off vs retry vs on** (all 12 tasks × 3 repeats, tuned grounder `sft-template`,
+  `agent-v4`, interactive agent; `docs/runs.md` Sat 20:34). The on arm has 32 of 36 runs because
+  the grounder was swapped at 22:01, so this compares the same 32 jobs:
+
+| Same 32 jobs | off | retry | on |
+| --- | --- | --- | --- |
+| Verified success | 19/32 | 21/32 | **26/32** |
+| False success claims | 9 | 9 | **4** |
+| No-change actions | 72 | 54 | **38** |
+| Mean steps | 10.4 | 9.0 | **5.9** |
+| Plan p50 / p90 per call | 6.3 / 7.7 s | 5.9 / 16.7 s | 10.9 / 24.7 s |
+| Wall-clock per task p50 / p90 | 65 / 220 s | 68 / 279 s | **53** / 293 s |
+| Thinking tokens per run | 0 | 616 | 1,502 |
+
+  Thinking on every call wins on the hardest tasks (same jobs): the canvas chart 0/3 → 2/3 and
+  the scroll-only message 0/2 → 2/2. On vs off, paired: on won 8 jobs and off won 1 (exact McNemar
+  p = 0.039); on vs retry p = 0.18. Each call is slower, but runs need half the steps, so the
+  median task finishes sooner. **Recommended demo default: thinking on.** Gym evals stay off, so
+  the reported base-vs-tuned comparison is unchanged.
 
 ### 4.4 Context budget
 
@@ -254,7 +273,7 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 | Sat night, Gym⁵ | `base` | off | 12 × 3 | 18/36 | 24/36 (26 match, 8 false) | 10/259 | reportable (`agent-v4`) |
 | Sat night, Gym⁵ | `grounder` = sft-template | off | 12 × 3 | **22/36** | 25/36 (31 match, 4 false) | 6/234 | reportable (`agent-v4`) |
 | Sun, Gym (if the overnight adapter beats sft-template on dev) | `grounder` (final) | off | 12 × 3 | TBD | TBD | TBD | final |
-| Sun, interactive | `grounder` | off vs retry | 12 × TBD | TBD | TBD | TBD | thinking ablation |
+| Sat night, interactive (§4.3) | `grounder` = sft-template | off / retry / on | 12 × 3 (on: 32) | 20/36 · 22/36 · **26/32** | 28/36 · 32/36 · 30/32 | 6/374 · 7/328 · 0/189 | reportable (`agent-v4`) |
 
 All Saturday reads used prompt `agent-v3` (see §4.2) and the task checks from before sandbox
 `68c7671`, which made the checks stricter (no unrequested payments, messages, reports or autopay;
