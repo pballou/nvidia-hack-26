@@ -164,7 +164,7 @@ log with per-platform splits: [docs/results.md](docs/results.md); commands: [doc
 | Base | 76.4% | 86.3% (text 92.5, icon 78.1) |
 | SFT, raw labels (`sft-template`: LoRA r16, 1 epoch on 18,652 rows) | 85.66% | 89.07% (text 92.3, icon 84.8) |
 | SFT, Lightning-rewritten instructions (`sft-lightning`: 18,299 rows, same config and seed) | 86.27% | 88.10% (text 93.0, icon 81.7) |
-| **Final: `sft-lightning` + GRPO round 1 in NeMo Gym** (170 steps, Gym `/verify` point-in-box reward) | **87.00%** | **90.27%** (text 94.2, icon 85.2) |
+| **Final: `sft-lightning` + GRPO round 1 in NeMo Gym** (170 steps, Gym `/verify` point-in-box reward) | **87.00%** | **90.35%** (text 94.2, icon 85.4; vs `sft-lightning`: 34 rows fixed, 6 broken) |
 
 `sft-lightning` won the round-0 pick on dev (the template scored 85.86% in the same harness;
 dev run-to-run noise is about 0.2 points), so the overnight loop starts from it. On the held-out

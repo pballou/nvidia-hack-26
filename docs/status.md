@@ -10,7 +10,7 @@ If this page disagrees with them, they win.
 | --- | --- | --- |
 | Rewritten-data SFT (`train_lightning.jsonl`, same config and seed as `sft-template`) | Kyle | **Done 19:33** (`/home/ubuntu/ckpt/sft-lightning`, 572 steps) |
 | Pick the round-0 adapter on dev | Kyle | **Done:** `sft-lightning` 86.27 vs `sft-template` 85.86 (same harness) |
-| Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | **Done 22:02.** Round 1 GRPO kept (dev 87.00); round 2 not kept (86.89), so the loop stopped. **FINAL = round 1: ScreenSpot-v2-clean 90.27%.** `:8001` `grounder` = FINAL |
+| Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | **Done 22:02.** Round 1 GRPO kept (dev 87.00); round 2 not kept (86.89), so the loop stopped. **FINAL = round 1: ScreenSpot-v2-clean 90.35%.** `:8001` `grounder` = FINAL |
 | Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36** (20/36 with a strict check); see below |
 | Thinking off / retry / on comparison: interactive agent, 12 tasks × 3 each, `grounder` | T2 | Running since 20:35 (~2 h); pauses for the dry run |
 | Agent step cap: the interactive agent now allows 25 steps. With no progress (4 no-change actions, or the same action 3×), it first warns Lightning and turns thinking on, then stops as `stuck` if 3 more actions make no progress. That cut off 0 of today's successes in replay. The Gym eval stays at 12 with no stuck stop | T2 (b179fcd); T1 for the console | **Done** (console display pending) |
@@ -64,7 +64,7 @@ If this page disagrees with them, they win.
   | Base | 76.4% | 86.3% |
   | SFT template (one epoch on 18,652 raw-label rows) | 85.66% (85.86 in the loop harness) | 89.07% |
   | SFT rewritten-data (18,299 rows, Lightning-rewritten instructions) | 86.27% (loop harness) | 88.10% |
-  | **FINAL: + GRPO round 1 in NeMo Gym** (170 steps, `/verify` reward) | **87.00%** | **90.27%** (icon 85.2, text 94.2) |
+  | **FINAL: + GRPO round 1 in NeMo Gym** (170 steps, `/verify` reward) | **87.00%** | **90.35%** (icon 85.4, text 94.2) |
 
   The Lightning-rewrite ablation is mixed: +0.41 on dev, which picks the round-0 checkpoint per protocol, but −0.97
   on ScreenSpot-v2-clean (icons 81.7 vs 84.8). The overnight loop starts from `sft-lightning`.
