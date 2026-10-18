@@ -210,6 +210,11 @@ async def amain(args: argparse.Namespace) -> int:
                 async with sem:
                     if aborted:
                         return
+                    if args.pause_file and Path(args.pause_file).exists():
+                        print(f"=== {args.pause_file} exists: holding before the next run", flush=True)
+                        while Path(args.pause_file).exists():
+                            await asyncio.sleep(10)
+                        print("=== pause file removed: resuming", flush=True)
                     if args.pause_on_memory_pressure:
                         await wait_for_memory()
                     if adapter is not None and (now := await served_root(http, cfg, cfg.grounder_model)) != adapter:
@@ -266,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="record the grounder's served adapter (VLM /v1/models) and abort (exit 3) if it changes")
     p.add_argument("--pause-on-memory-pressure", action="store_true",
                    help="macOS: wait before each run while memory pressure is warn (yellow) or worse")
+    p.add_argument("--pause-file", help="hold before each run while this file exists (runs in flight finish)")
     add_model_args(p)
     args = p.parse_args(argv)
     if args.repeats < 1 or args.concurrency < 1:
