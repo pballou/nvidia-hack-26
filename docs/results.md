@@ -50,6 +50,12 @@ screens. `gym eval compare`: 3 fail→pass, 1 pass→fail.
 - **Latency:** not comparable; Kyle's SFT shared the GPU during the grounder run.
 - **Artifacts (T2's Mac):** `results/agent_v4_sft_template/` (rollouts, aggregate metrics,
   run_info, `agent_compare/compare_report.md`). BLADE: TBD.
+- **Step budget:** the Gym eval keeps `max_steps` 12 (this table and Sunday's grounder rerun,
+  `BASELINE=` in `scripts/agent_eval.sh` reuses this base arm). Since Sat ~19:40 the
+  *interactive* agent (console, demo) uses `max_steps` 25 plus a "stuck" stop
+  (`agent/progress.py`: warn after 4 no-progress actions or 3 repeats of the same action, stop
+  if 3 more make no progress). Replayed on the 47 real runs, it would have stopped none of the
+  29 that succeeded.
 
 ### First reads (Sat afternoon, prompt `agent-v3`, checks before `68c7671`; absolute numbers optimistic)
 

@@ -203,6 +203,13 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
     Lightning doesn't repeat it and flip a toggle back.
 - **Timeouts.** Lightning 180 s per call, VLM 45 s (one retry), navigation 15 s, Gym tool call
   240 s.
+- **Stuck stop instead of a tight step cap** (interactive agent; `agent/progress.py`). After 4
+  actions in a row with no progress, or the same action 3 times with no change (same target, or
+  a click within 12 px), Lightning is told it is stuck and to change approach. If 3 more actions
+  make no progress, the run ends as `stuck` with a summary of what it tried and a question for
+  the user. The cap is 25 steps. Replayed on Saturday's 47 real runs, an immediate stop would have
+  cut off 2 of the 29 successes (both recovered after 5-6 no-change clicks); warn-then-stop cut
+  off none. Gym runs keep `max_steps` 12 and no stuck stop, so reported numbers stay comparable.
 - **Rate limits.** A 429 waits (`Retry-After`, else 15-60 s backoff, up to 4 times) without
   spending a step. A 5xx gets one retry, and two Lightning errors in a row end the run.
 - **Infra errors are masked, not scored.**

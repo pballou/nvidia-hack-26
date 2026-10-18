@@ -4,6 +4,9 @@
 #
 #   scripts/agent_eval.sh                               # base then grounder, local Lightning on :8000
 #   GROUNDERS=base REPEATS=1 scripts/agent_eval.sh      # one grounder
+#   GROUNDERS=grounder OUT_DIR=results/agent_final \
+#     BASELINE=results/agent_v4_sft_template/agent_base.jsonl scripts/agent_eval.sh
+#                                                       # rerun only the grounder arm, compare to an earlier base
 #   THINKING=on scripts/agent_eval.sh                   # thinking-on variant (results agent_<g>_thinking.*)
 #   LIGHTNING=hosted scripts/agent_eval.sh              # build.nvidia.com (NVIDIA_API_KEY from .env; 25-80 s/call)
 #
@@ -13,7 +16,9 @@
 #   HEAD_PORT (11000), READY_TIMEOUT_S (2400), OVERWRITE=1 (replace results in OUT_DIR),
 #   REINSTALL=1 (rebuild server venvs), FORCE=1 (allow placeholder rows or a local Lightning other than the
 #   official checkpoint: plumbing runs, never reported), EXTRA_START_ARGS (more `gym env start` overrides;
-#   not for thinking: use THINKING), GYM (gym CLI), ENV_FILE (.env, hosted only).
+#   not for thinking: use THINKING), GYM (gym CLI), ENV_FILE (.env, hosted only), BASELINE (an earlier
+#   agent_base*.jsonl to compare against instead of OUT_DIR's; refused unless its run_info shows the same
+#   rows sha256, Lightning checkpoint and thinking mode).
 #   The sandbox URL, VLM URL and model family come from configs/agent.yaml (AGENT_* env overrides it).
 # Needs: the sandbox, the VLM serving `base` and `grounder` from ONE vLLM process (AGENTS.md), and
 #   Lightning. Reported runs: rows with real VLM start screens (make_tasks.py without
@@ -176,6 +181,12 @@ sha256() { "$PY" -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1],
 
 mkdir -p "$OUT_DIR"
 TASKS_SHA="$(sha256 "$TASKS")"
+if [[ -n "${BASELINE:-}" ]]; then  # an earlier base arm is only comparable on the same rows: check before running
+  BINFO="${BASELINE%.jsonl}_run_info.txt"
+  [[ -f "$BASELINE" && -f "$BINFO" ]] || die "BASELINE=$BASELINE or its run_info ($BINFO) is missing"
+  grep -q "sha256=$TASKS_SHA " "$BINFO" || die "BASELINE used different rows than $TASKS (sha256 mismatch, see $BINFO)"
+  [[ " $GROUNDERS " != *" base "* ]] || warn "BASELINE is set, so this run's own base arm is not used in the compare"
+fi
 FAILED=()
 for GROUNDER in $GROUNDERS; do
   STEM="$OUT_DIR/agent_$GROUNDER$SUFFIX"
@@ -228,8 +239,16 @@ for GROUNDER in $GROUNDERS; do
 done
 
 # --- base vs grounder ----------------------------------------------------------------------------
-BASE="$OUT_DIR/agent_base$SUFFIX.jsonl"
+BASE="${BASELINE:-$OUT_DIR/agent_base$SUFFIX.jsonl}"
 CAND="$OUT_DIR/agent_grounder$SUFFIX.jsonl"
+if [[ -n "${BASELINE:-}" && -f "${CAND%.jsonl}_run_info.txt" ]]; then  # same planner build and thinking mode
+  CINFO="${CAND%.jsonl}_run_info.txt"
+  for pat in 'lightning=[^)]*)' 'thinking=[^ ]*' 'max_output_tokens=[^ ]*'; do
+    [[ "$(grep -o "$pat" "$BINFO" | head -1)" == "$(grep -o "$pat" "$CINFO" | head -1)" ]] ||
+      die "BASELINE differs from this run in '${pat%%=*}' (compare $BINFO and $CINFO); not comparable"
+  done
+  echo "comparing against BASELINE=$BASELINE (same rows sha256 $TASKS_SHA, same Lightning and thinking)"
+fi
 if [[ -f "${BASE%.jsonl}_aggregate_metrics.json" && -f "${CAND%.jsonl}_aggregate_metrics.json" ]]; then
   "$GYM" eval compare --baseline "$BASE" --candidates "$CAND" --agent "$AGENT_NAME" \
     --output-dir "$OUT_DIR/agent_compare$SUFFIX" || warn "gym eval compare failed"
