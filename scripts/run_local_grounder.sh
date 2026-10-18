@@ -32,6 +32,9 @@ else
   MODEL=${MODEL:-$HOME/models/grounder-merged-sft-template}
   SERVED=grounder
 fi
+# SERVED_NAME=base with MODEL=<base snapshot> and no LORA serves plain base (for A/B checks).
+SERVED=${SERVED_NAME:-$SERVED}
+case "$SERVED" in base|grounder) ;; *) echo "run_local_grounder: SERVED_NAME must be base or grounder" >&2; exit 1 ;; esac
 PORT=${PORT:-8011}
 GPU_UTIL=${GPU_UTIL:-0.08}
 # vllm-metal's startup profile runs a dummy forward of max_num_batched_tokens tokens and keeps

@@ -254,6 +254,17 @@ summaries.
 `base` summaries took 2.9–4.5 s each. So the agent's `summary_model` is `base` in fully
 local mode too.
 
+**No LoRA leakage into `base`** (Sun 03:25–03:35, `~/models/gate_g/leak-test/`):
+- Two of T1's screenshots (pay form and dashboard), `base` summaries at T=0, in four legs:
+  1. a fresh base + LoRA server, before any `grounder` request;
+  2. alternating `grounder` → `base`, the agent's pattern;
+  3. after a 200-request `grounder` burst, Gate G's load;
+  4. a plain base server without `--enable-lora` (`SERVED_NAME=base`).
+- All four are byte-identical on both images, and identical to what T1's 02:50 session
+  logged. So `base` on the LoRA server is plain base, whatever the request history.
+- That session's weaker pay-form descriptions came from its inputs: a headed browser
+  renders fonts differently from the headless one everything was measured with.
+
 ### FINAL adapter (round-1 GRPO): Sat 22:04–22:22 EDT (T4). PASS
 
 The night loop finished at 22:02 with FINAL = round 1 GRPO,
@@ -477,14 +488,19 @@ python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.p
   --log ~/models/gate_g/watch-video.jsonl --probe-every 30 --probe-margin-s 1.5
 LORA=~/models/gui-assist-mlx-keys/night-20261017-193859-round_1-grpo \
   GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # FINAL LoRA; healthy in ~45 s
-# 2. The console with the real agent: clicks from `grounder` (the default), summaries from `base`.
-scripts/demo_up.sh --agent real --headed --vlm-url http://127.0.0.1:8011/v1 \
+# 2. The console with the real agent, headless: clicks from `grounder` (the default),
+#    summaries from `base`.
+scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 \
   --summary-model base --vlm-label "Mac (vllm-metal)"
 #    Same thing as env vars (a flag beats its env var):
 #    AGENT_VLM_BASE_URL=http://127.0.0.1:8011/v1 AGENT_GROUNDER_MODEL=grounder AGENT_SUMMARY_MODEL=base \
-#      scripts/demo_up.sh --agent real --headed
+#      scripts/demo_up.sh --agent real
 # 3. Record with Cmd+Shift+5 (macOS screen recording), not Zoom.
 ```
+
+- **No `--headed`:** headed Chromium renders fonts differently from the headless browser
+  everything was measured with (~85k pixels differ on the pay dialog). Those pixels are
+  unmeasured, and pay-50 went 1/4 headed vs 8/8 headless (2026-10-18).
 
 - **What to check:** `demo_up.sh` checks that :8011 serves both names. The console's
   Grounder toggle switches between `base` and `grounder` in this one instance, and its
@@ -504,5 +520,5 @@ scripts/demo_up.sh --agent real --headed --vlm-url http://127.0.0.1:8011/v1 \
 ```bash
 kill -TERM "$(cat ~/models/logs/local-grounder-8011.pid)"   # or Ctrl-C in its pane; the watchdog exits by itself
 ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 permanent-tan-marmot   # §3a
-scripts/demo_up.sh --agent real --headed      # no --vlm-url / AGENT_* overrides: configs/agent.yaml points at :8001
+scripts/demo_up.sh --agent real      # headless; no --vlm-url / AGENT_* overrides: configs/agent.yaml points at :8001
 ```
