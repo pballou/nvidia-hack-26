@@ -51,6 +51,36 @@ Condensed from the organizers' bounty slides. "Open" is what a judge could push 
 | **Demonstrate:** performance, efficiency, throughput, latency, scalability or reliability | 32,000 Gym replies in ~7 min; grounding p50 0.64–0.75 s; Gate G parity between CUDA and Metal runtime LoRA (87.0 vs 87.0); GRPO log-probs match (§4) | No controlled benchmark (`vllm bench serve`). Latencies come from real runs, several on a shared GPU |
 | **Submit:** how vLLM fits, how we configured and optimized it, measurable results; depth over breadth | bounty-vllm.md §2–§4; form text below | We'd planned it as checkbox-only. Check whether the form has a text box |
 
+## Final submission checklist (Sun 2026-10-18; submit by 10:30, deadline 11:00)
+
+- [ ] **Video:** recorded, uploaded to YouTube as **Unlisted**, link pasted into the README and the form (Charlie).
+- [x] **GitHub repo** public: https://github.com/pballou/nvidia-hack-26
+- [x] **HF model** public: https://huggingface.co/patrickballou/gui-assist-grounder
+- [ ] **HF data** public: https://huggingface.co/datasets/patrickballou/gui-assist-data (going public at ~10:20)
+- [ ] **Airtable form**, using the values below. Paste the description, then the three bounty boxes from §Form text.
+  - Project / team: **GUI assist** / **sherpas**
+  - Members: Patrick (pballou@sherpa6.com), Kyle (kodonnell@sherpa6.com), Charlie (carleth@sherpa6.com)
+  - Track: **Fine-Tuned & Specialized**
+  - Bounties: ☑ Nemotron Lightning ☑ NeMo Gym ☑ Red Hat vLLM
+  - AI models: NVIDIA Nemotron 3.5 Lightning 30B-A3B (official BF16); our grounder `patrickballou/gui-assist-grounder` (Qwen3.5-2B + LoRA, SFT + GRPO); NVIDIA Parakeet TDT 0.6B v3. 32.6B total by model-card counts
+  - Tools: NeMo Gym 0.7.0 (envs, rollouts, profile/compare, BLADE), vLLM 0.31 (+ vllm-metal on the Mac), TRL 1.16 (SFT, GRPO), NVIDIA Brev (H200), NeMo-Speech.cpp, Playwright
+- [ ] After submitting: confirm the form receipt, and revoke any HF tokens you don't need.
+
+**Submission description** (paste-ready):
+
+> GUI assist lets people do things on any website just by saying what they want. It's an
+> accessibility and self-service layer that works from pixels alone, with no API, DOM or site
+> changes. Only 14% of customer-service issues get resolved in self-service today, and a call costs
+> $13.50 against $1.84. NVIDIA Nemotron 3.5 Lightning plans each step from a text description of
+> the screen and calls our fine-tuned 2B grounder (Qwen3.5-2B + LoRA), which turns "the download
+> icon in the September row" into a click. NVIDIA Parakeet handles voice, and Lightning asks a
+> short question when a request is unclear. We fine-tuned the grounder on OS-Atlas data, with
+> instructions rewritten by Lightning, then improved it with GRPO in NeMo Gym. On the held-out
+> ScreenSpot-v2-clean test, it went from 86.25% to 90.35% (icons 78.1% to 85.4%), and in the agent
+> it cut failed actions from 10 to 0. All three models (32.6B by model-card counts) run fully
+> locally on one MacBook through vllm-metal, so screens never leave the device. The model, the
+> data (with the exact rewrite prompt) and the code are all open.
+
 ## Form text (paste-ready drafts)
 
 Short versions of the bounty write-ups for the form's explanation boxes. Keep them consistent
