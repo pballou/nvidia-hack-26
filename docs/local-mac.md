@@ -349,17 +349,19 @@ instance does both clicks and screen summaries. Prerequisites:
 python3 -I scripts/gate_g_watch.py --pidfile ~/models/logs/local-grounder-8011.pid --port 8011 \
   --log ~/models/gate_g/watch-video.jsonl --probe-every 30 --probe-margin-s 1.5
 GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PCT=26 scripts/run_local_grounder.sh   # healthy in ~45 s
-# 2. The console with the real agent, pointed at the Mac grounder for clicks and summaries.
-AGENT_VLM_BASE_URL=http://127.0.0.1:8011/v1 AGENT_GROUNDER_MODEL=grounder AGENT_SUMMARY_MODEL=grounder \
-  scripts/demo_up.sh --agent real --headed
-#    Equivalent with T1's console flags, once they ship:
-#    scripts/demo_up.sh --agent real --headed --vlm-url http://127.0.0.1:8011/v1 \
-#      --summary-model grounder --vlm-label "Mac (vllm-metal)"
+# 2. The console with the real agent, pointed at the Mac grounder for clicks and summaries
+#    (--grounder defaults to grounder):
+scripts/demo_up.sh --agent real --headed --vlm-url http://127.0.0.1:8011/v1 \
+  --summary-model grounder --vlm-label "Mac (vllm-metal)"
+#    Same thing as env vars (a flag beats its env var):
+#    AGENT_VLM_BASE_URL=http://127.0.0.1:8011/v1 AGENT_GROUNDER_MODEL=grounder AGENT_SUMMARY_MODEL=grounder \
+#      scripts/demo_up.sh --agent real --headed
 # 3. Record with Cmd+Shift+5 (macOS screen recording), not Zoom.
 ```
 
-- **`demo_up.sh` warns "served name 'base' missing".** That's expected: fully local
-  serves only `grounder`.
+- **What to check:** `demo_up.sh` checks that :8011 serves `grounder` for both roles.
+  The console disables the `base` option, and its header reads "VLM: Mac (vllm-metal) ·
+  127.0.0.1:8011 · serves grounder", so the video shows where the grounder runs.
 - **The H200 isn't needed.** Close the 8001 tunnel, so no H200 grounder is in the loop.
 - **Expect per step:** ~4.3 s to plan (thinking off; ~13 s when a thinking retry kicks
   in), ~1 s to ground a click, ~6 s for each screen summary.
@@ -370,5 +372,5 @@ AGENT_VLM_BASE_URL=http://127.0.0.1:8011/v1 AGENT_GROUNDER_MODEL=grounder AGENT_
 ```bash
 kill -TERM "$(cat ~/models/logs/local-grounder-8011.pid)"   # or Ctrl-C in its pane; the watchdog exits by itself
 ssh -N -o ControlPath=none -o ExitOnForwardFailure=yes -L 8001:localhost:8001 permanent-tan-marmot   # §3a
-scripts/demo_up.sh --agent real --headed      # no AGENT_* overrides: configs/agent.yaml points at :8001
+scripts/demo_up.sh --agent real --headed      # no --vlm-url / AGENT_* overrides: configs/agent.yaml points at :8001
 ```
