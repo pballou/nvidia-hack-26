@@ -1,5 +1,5 @@
 ---
-license: apache-2.0  # base model is Apache-2.0; TBD: team to confirm before the repo goes public (see "Licenses")
+license: apache-2.0  # same as the base model (Qwen/Qwen3.5-2B); training-data attributions in "Licenses"
 base_model: Qwen/Qwen3.5-2B
 library_name: transformers  # merged bf16 weights at the repo root; the PEFT adapter is in adapter/
 pipeline_tag: image-text-to-text
@@ -525,8 +525,10 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
 ## Licenses
 
 - **This model:** Apache-2.0, the same as the base model
-  ([`Qwen/Qwen3.5-2B`](https://huggingface.co/Qwen/Qwen3.5-2B): Apache-2.0 per its card).
-  **TBD:** team to confirm before Patrick makes the repo public (~9:30 Sunday).
+  ([`Qwen/Qwen3.5-2B`](https://huggingface.co/Qwen/Qwen3.5-2B): Apache-2.0 per its card). The weights
+  derive from it, so its license and NOTICE carry over (LICENSE at the repo root). Confirmed by the team, Sun 2026-10-18.
+- **Training data** is released separately under CC BY 4.0 (its most restrictive source, the
+  UIBert expressions). Attribution for the data this model learned from:
 - **Training data:**
   - OS-Atlas-data is Apache-2.0 per its card.
   - The UIBert expressions are CC BY 4.0 per the UIBert repo, and are attributed here and in

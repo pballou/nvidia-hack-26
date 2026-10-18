@@ -1,5 +1,5 @@
 ---
-license: apache-2.0  # proposed (matches OS-Atlas-data); team to confirm. UIBert-derived annotations: see "Sources and licenses"
+license: cc-by-4.0  # the most restrictive source license we include (UIBert expressions, CC BY 4.0); OS-Atlas-derived parts are also Apache-2.0. See "Sources and licenses"
 pretty_name: "GUI assist grounding data: OS-Atlas slice + Nemotron Lightning instructions"
 language:
 - en
@@ -203,6 +203,13 @@ to RGB and does an aspect-preserving resize to at most 2,073,600 pixels, with si
 multiples of 32. Boxes here are in original pixels, so they don't depend on that resize.
 
 ## Sources and licenses
+
+**This dataset is released under CC BY 4.0**, the most restrictive license among the sources
+we include: the UIBert expressions are CC BY 4.0, and everything else is Apache-2.0
+(OS-Atlas-data) or has no restrictions on outputs (Lightning, OpenMDW-1.1). CC BY 4.0 requires
+attribution: cite OS-Atlas, UIBert and this dataset (citations below). Images aren't included;
+they stay with their sources (Rico screenshots are under research terms, and FineWeb pages
+belong to their sites).
 
 | Source | What we use | License |
 | --- | --- | --- |
