@@ -1,6 +1,6 @@
 # Team status (living doc)
 
-**Updated:** Sat 2026-10-17 20:30 EDT by the orchestrator thread. This is the team-facing
+**Updated:** Sat 2026-10-17 20:25 EDT by the orchestrator thread. This is the team-facing
 "where is everything" page. Numbers come from [results.md](results.md) and [runs.md](runs.md).
 If this page disagrees with them, they win.
 
@@ -14,7 +14,7 @@ If this page disagrees with them, they win.
 | Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36**; see below |
 | Agent step cap: the interactive agent now allows 25 steps. With no progress (4 no-change actions, or the same action 3×), it first warns Lightning and turns thinking on, then stops as `stuck` if 3 more actions make no progress. That cut off 0 of today's successes in replay. The Gym eval stays at 12 with no stuck stop | T2 (b179fcd); T1 for the console | **Done** (console display pending) |
 | Console `/logs` page (325848f) + review fixes | T1 | Fix pass in progress |
-| Fully local grounder on the Mac (Gate G, [local-mac.md](local-mac.md)) | T4 | Attempt 1 stopped safely on memory pressure (the model loads fine). One retry after the video dry run, once ~10 GB is freed; otherwise we stay hybrid |
+| Fully local grounder on the Mac (Gate G, [local-mac.md](local-mac.md)) | T4 | **PASS 20:22:** 200 dev rows, local vllm-metal 86.0% vs H200 85.0%; 99% of hit/miss decisions agree; prompt tokens identical; local p50 1.77 s per click (H200 0.75 s). Needs Teams/Chrome closed. Fully local end-to-end check next |
 | BLADE base vs SFT on dev, plus the overnight BLADE runbook (`docs/blade/`) | Orchestrator | Running |
 | HF dataset and model cards (`docs/hf/`), private data upload | Orchestrator | Tonight |
 | Video script ([demo-video-script.md](demo-video-script.md)), pitch segments from [pitch.md](pitch.md) §10 | Charlie | Updating numbers; dry run after ~19:45 |
