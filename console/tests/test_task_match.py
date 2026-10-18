@@ -80,6 +80,7 @@ TASK_VARIANTS = {
     ],
     "pay-50": [
         "Could you pay fifty dollars toward my bill?",  # polite question = a request
+        "Allocate fifty dollars towards my bill.", "Put $50 toward my bill.", "Apply 50 dollars to my bill",  # money verbs + amount
         "pay fifty dollars towards my bill", "Pay fifty dollars towards my bill.", "pay 50 dollars toward my bill",
         "Pay $50 toward my bill please", "make a payment of fifty dollars toward my bill",
         "can you pay fifty bucks toward my bill",
@@ -104,6 +105,7 @@ NEAR_MISSES = [
     "Did I report an outage in Riverside?", "Is autopay turned on?",
     "Pay my bill",                                    # no amount
     "Pay $60 toward my bill.", "Pay fifteen dollars toward my bill.", "Pay $500 toward my bill.",  # another amount
+    "Allocate $60 toward my bill.", "Put the text on large",  # money verb, wrong amount / no amount
     "Pay $50 toward my bill twice.", "Pay $50 toward my bill every month",
     "Download my August statement",                   # another month
     "Download my September and August statements", "Open my September statement",

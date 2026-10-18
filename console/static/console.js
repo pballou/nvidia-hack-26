@@ -790,6 +790,9 @@
       + 'faulty|malfunctioning|not functioning'), ' broken '],
     [W('(?:every|each) (month|week|day)'), (_, unit) => ` ${unit === 'day' ? 'daily' : `${unit}ly`} `],
     [W('make a payment(?: of)?|payment of'), ' pay '],
+    // money verbs only when an amount follows ("allocate 50 toward my bill", Lightning's restatement tonight);
+    // "put the text on large" stays as it is
+    [/ (?:allocate|apply|put|contribute) (?=(?:[\p{L}]+ )?\d)/gu, ' pay '],
     [W('switch|flip'), ' turn '],
     [W('enable|activate|set up|sign up for|start using'), ' turn on '],
     [W('disable|deactivate|unsubscribe(?: me)?(?: from)?|opt out(?: of)?|cancel|no more'), ' turn off '],
