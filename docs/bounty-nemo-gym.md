@@ -65,6 +65,40 @@ SSv2-clean happened to favor template (89.07 vs 88.10). The pick followed the de
 didn't run because round 2 wasn't kept. The dev number for the final adapter is a selection
 number: it was the best on dev across rounds, and re-runs gave 87.00 and 86.89.
 
+**Base → final, by slice, with significance** (SSv2-clean, same 1,244 rows; exact McNemar on
+fixed vs broken rows; Holm-adjusted over the 11 slice tests):
+
+| Slice (rows) | Base → final | Both pass / both fail | Fixed / broken | McNemar p | Holm p |
+| --- | --- | --- | --- | --- | --- |
+| **All (1,244)** | 86.25 → 90.35 | 1,035 / 82 | **89 / 38** | **7 × 10⁻⁶** | — |
+| Mobile (501) | 91.42 → 93.21 | 446 / 22 | 21 / 12 | 0.16 | 0.49 |
+| Desktop (306) | 83.99 → 88.89 | 251 / 28 | 21 / 6 | 0.006 | **0.047** |
+| Web (437) | 81.92 → 88.10 | 338 / 32 | 47 / 20 | 0.001 | **0.013** |
+| Text (704) | 92.47 → 94.18 | 635 / 25 | 28 / 16 | 0.10 | 0.38 |
+| Icon (540) | 78.15 → 85.37 | 400 / 57 | 61 / 22 | 2 × 10⁻⁵ | **0.0002** |
+| Mobile text (290) | 97.59 → 96.90 | 278 / 4 | 3 / 5 | 0.73 | 1 |
+| Mobile icon (211) | 82.94 → 88.15 | 168 / 18 | 18 / 7 | 0.043 | 0.22 |
+| Desktop text (180) | 90.56 → 91.67 | 159 / 11 | 6 / 4 | 0.75 | 1 |
+| Desktop icon (126) | 74.60 → 84.92 | 92 / 17 | 15 / 2 | 0.002 | **0.021** |
+| Web text (234) | 87.61 → 92.74 | 198 / 10 | 19 / 7 | 0.029 | 0.19 |
+| Web icon (203) | 75.37 → 82.76 | 140 / 22 | 28 / 13 | 0.028 | 0.19 |
+
+- **McNemar uses only the rows that changed.** Rows both models get right (or both get wrong)
+  say nothing about which is better. If base and final were equally good, each changed row would
+  be a coin flip between "fixed" and "broken". 89 vs 38 out of 127 would happen about 7 times in
+  a million.
+- **What holds up after correcting for 11 slice tests:** icons (p_Holm = 0.0002), web (0.013),
+  desktop icons (0.021) and desktop (0.047). Mobile (p = 0.16) and text (0.10) aren't
+  significant even before the correction. The mobile-icon, web-text and web-icon gains (raw p
+  0.03–0.04) are suggestive on their own but don't survive it. Mobile text is the one slice that
+  fell (3 fixed vs 5 broken, p = 0.73: noise).
+- **The test treats each model's T=0 answers as fixed.** Our evals move about 0.2 points between
+  launches (§5), which matters for close pairs, not for 89 vs 38.
+- **Reproduce:** `python3 -I scripts/mcnemar_slices.py --report
+  docs/eval_results/compare_ssv2_base_vs_final/compare_report.json --raw <SSv2 annotation JSONs @
+  5efbb1f1b5>`. It maps each flip's `task_index` to its slice using `gym_rows.py`'s row order, and
+  checks every slice against the report's own accuracies.
+
 **Where the Gym loop's gain is** (SSv2-clean, same 1,244 rows; the loop started from sft-lightning):
 
 | Split (rows) | Template SFT | Loop start (sft-lightning) | Final | Δ vs loop start | Δ vs template |
