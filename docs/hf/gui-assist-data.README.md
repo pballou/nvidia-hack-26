@@ -47,7 +47,7 @@ a 2B GUI click-grounding model: given a screenshot and an instruction, it return
 click. We built the data for the GUI assist accessibility agent at the NVIDIA x Red Hat Small
 Models Hack (October 2026). Code: <https://github.com/pballou/nvidia-hack-26>.
 
-The repo contains three things:
+The repo contains four things:
 
 1. **A cleaned slice of [OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data):**
    19,621 click targets from Linux, macOS, AndroidWorld, UIBert and FineWeb screenshots.
@@ -58,11 +58,17 @@ The repo contains three things:
 3. **Two training files with the same rows in the same order (18,299 rows each).**
    `train_lightning.jsonl` mixes Lightning rewrites with raw labels; `train_template.jsonl`
    has raw labels only. They are for an ablation.
+4. **The GRPO prompt pool of the released model** (`grpo/round_1_pool.jsonl`, 1,282 train
+   rows). See [GRPO prompt pool](#grpo-prompt-pool).
+
+The released grounder was trained with LoRA SFT on `train_lightning.jsonl`, then one round of
+GRPO (TRL, rewarded by the NeMo Gym `gui_grounding` environment's point-in-box check) on
+`grpo/round_1_pool.jsonl`. It scores **90.35%** on ScreenSpot-v2-clean
+(base model: 86.25%) and 87.00% on `dev`. Details are on the
+[model card](https://huggingface.co/patrickballou/gui-assist-grounder).
 
 **Images are not re-hosted.** Each row refers to its OS-Atlas screenshot by source file name.
 See [Getting the images](#getting-the-images).
-
-> Draft card. Items marked **TBD** are filled in at release.
 
 ## At a glance
 
@@ -74,49 +80,52 @@ See [Getting the images](#getting-the-images).
 | Lightning rewrites | 9,384 train targets selected. 8,620 rewritten and kept (8,498 differ from the raw label; for 122, Lightning returned the label unchanged), 411 model drops kept with the raw label, 353 removed by a numeric-label rule |
 | Lightning endpoints | NVIDIA-hosted API `nvidia/nemotron-3.5-lightning-30b-a3b`: 8,028 rows. Official `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` on vllm-metal (Mac): 1,003 rows |
 | Human audit (random sheet) | 42/43 = 97.7% faithful among cards that could be checked; 42/49 = 85.7% if "unsure" counts as not faithful |
+| GRPO prompt pool (released model) | 1,282 train rows, from round 1 (the only GRPO round in the released model) |
 | Held-out test it was built for | ScreenSpot-v2-clean: ScreenSpot-v2 (revision `5efbb1f1b5`) minus 28 desktop rows, 1,244 rows. **No ScreenSpot-v2 images or boxes are in this repo**, only the file names and instructions of the 28 excluded rows |
 
 ## Files
 
-The upload is staged in `/home/ubuntu/data/release` on the GPU box and uploaded from there
-(docs/submission.md "Publishing"). Some files exist only on Patrick's Mac, so they must be
-copied to the box first.
+| Path in this repo | Rows | sha256 (prefix) | What it is |
+| --- | --- | --- | --- |
+| `README.md` | — | — | This card |
+| `manifest.jsonl` | 19,621 | `4ceb7ea3d7ac8e85` | The slice: every target, raw label, pixel box, split |
+| `dev.jsonl` | 969 | `a63416c399422811` | Dev rows (raw labels), same columns as the training files. Made from `manifest.jsonl` with the command in [Splits](#splits) |
+| `train_lightning.jsonl` | 18,299 | `7039f73114f1e35e` | Train rows; 8,620 Lightning instructions, of which 8,498 differ from the raw label |
+| `train_template.jsonl` | 18,299 | `93bee7ca56a266c4` | Same rows and order, raw labels |
+| `train_files.READY.json` | — | — | sha256 of the two training files at delivery |
+| `screenspot_v2_excluded_rows.json` | 28 | — | The ScreenSpot-v2 rows excluded from our test set, and why |
+| `lightning_rewrites/rewrites.jsonl` | 9,384 | `390c46db50b13fb1` | One record per selected target: original, rewrite or drop reason, style, model, time |
+| `lightning_rewrites/METHOD.md` | — | — | Full method: verbatim prompt, few-shot examples, validation rules, every invocation's command, counts |
+| `lightning_rewrites/stats.json` | — | — | All rewrite counts, sampling settings, per-invocation commands and token usage |
+| `lightning_rewrites/apply_stats.json` | — | — | How the rewrites were applied to make the two training files |
+| `lightning_rewrites/review_verdicts_v4_seed0.json` | 66 cards | — | Human audit verdicts |
+| `build/sampler_stats.json` | — | — | Sampler arguments and per-source filter counts |
+| `build/overlay_flagged.json` | 13 images | — | Linux screenshots with burned-in annotation overlays (dropped) |
+| `build/manifest.stats.json` | — | — | Overlay drop, ScreenSpot-v2 pHash dedup (every match and distance), dev/train split counts; 20,000 input rows → 19,621 |
+| `build/blank_dedup_recheck.json` | 79 images | — | Second check of the 79 near-blank ScreenSpot-v2 images that the pHash step skips, against the manifest's 4,339 screenshots: exact MD5, thumbnail pixel difference and SSIM, with each image's 3 nearest manifest screenshots. Results in [How it was built](#how-it-was-built), step 3 |
+| `grpo/round_1_pool.jsonl` | 1,282 | `cc4458e6d8a6357d` | The GRPO prompt pool of the released model's round (round 1) |
+| `grpo/round_1_pool_stats.json` | — | — | Per-source profile of the 4,000 profiled rows (always / sometimes / never solved) and the pool's per-source counts |
 
-"Local" paths are on Patrick's Mac. `<T3>` stands for
-`/Users/pballou/projects/nvidia-hack-26/.claude/worktrees/t3-data-engine/data`, and `repo:`
-means the file is committed in the GitHub repo.
+`lightning_rewrites/METHOD.md`, `stats.json`, `apply_stats.json` and
+`review_verdicts_v4_seed0.json` are also in the GitHub repo under
+`data_prep/rewrite/runs/os_atlas_final_v4/`, and `screenspot_v2_excluded_rows.json` is
+`benchmarks/screenspot_v2/excluded_rows.json` there.
 
-| Path in this repo | Rows | Current location | sha256 (prefix) | What it is |
-| --- | --- | --- | --- | --- |
-| `manifest.jsonl` | 19,621 | box `/home/ubuntu/data/os_atlas_20k/manifest.jsonl`; local `<T3>/os_atlas_final/manifest.jsonl` | `4ceb7ea3d7ac8e85` | The slice: every target, raw label, pixel box, split |
-| `dev.jsonl` | 969 | **TBD: create** from `manifest.jsonl` (command in [Splits](#splits)) | expected `a63416c399422811` (the command run on the local manifest, Python 3.12) | Dev rows (raw labels), same columns as the training files |
-| `train_lightning.jsonl` | 18,299 | box `/home/ubuntu/data/os_atlas_20k/train_lightning.jsonl`; local `<T3>/os_atlas_final/train_lightning.jsonl` | `7039f73114f1e35e` | Train rows; 8,620 Lightning instructions, of which 8,498 differ from the raw label |
-| `train_template.jsonl` | 18,299 | box `/home/ubuntu/data/os_atlas_20k/train_template.jsonl`; local `<T3>/os_atlas_final/train_template.jsonl` | `93bee7ca56a266c4` | Same rows and order, raw labels |
-| `train_files.READY.json` | — | box `/home/ubuntu/data/os_atlas_20k/train_files.READY.json` | — | sha256 of the two training files at delivery |
-| `lightning_rewrites/rewrites.jsonl` | 9,384 | local `<T3>/os_atlas_final/rewrite_v4/rewrites.jsonl` (**Mac only**) | `390c46db50b13fb1` | One record per selected target: original, rewrite or drop reason, style, model, time |
-| `lightning_rewrites/METHOD.md` | — | `repo: data_prep/rewrite/runs/os_atlas_final_v4/METHOD.md` | — | Full method: verbatim prompt, few-shot examples, validation rules, every invocation's command, counts |
-| `lightning_rewrites/stats.json` | — | `repo: data_prep/rewrite/runs/os_atlas_final_v4/stats.json` | — | All rewrite counts, sampling settings, per-invocation commands and token usage |
-| `lightning_rewrites/apply_stats.json` | — | `repo: data_prep/rewrite/runs/os_atlas_final_v4/apply_stats.json` | — | How the rewrites were applied to make the two training files |
-| `lightning_rewrites/review_verdicts_v4_seed0.json` | 66 cards | `repo: data_prep/rewrite/runs/os_atlas_final_v4/review_verdicts_v4_seed0.json` | — | Human audit verdicts |
-| `lightning_rewrites/cache.sqlite` (optional) | — | local `<T3>/os_atlas_final/rewrite_v4/cache.sqlite` (**Mac only**) | TBD | Request cache. Rerunning the command against it reproduces `rewrites.jsonl` byte for byte. It holds per-row records, per-request stats with a reply excerpt, and each run's command. A scan of the local copy (Sat ~20:00) found no API keys or auth headers, and no hosts other than `integrate.api.nvidia.com` and `127.0.0.1`; **re-scan the copy you upload** |
-| `build/sampler_stats.json` | — | local `<T3>/os_atlas_20k/stats.json`; box `/home/ubuntu/data/os_atlas_20k/stats.json` (TBD: confirm) | — | Sampler arguments and per-source filter counts |
-| `build/overlay_flagged.json` | 13 images | local `<T3>/os_atlas_20k/overlay_flagged.json`; box `/home/ubuntu/data/os_atlas_20k/overlay_flagged.json` (TBD: confirm) | — | Linux screenshots with burned-in annotation overlays (dropped) |
-| `build/manifest.stats.json` | — | local `<T3>/os_atlas_final/manifest.stats.json` (checked: 20,000 → 19,621 rows); box `/home/ubuntu/data/os_atlas_20k/manifest.stats.json` (TBD: confirm) | — | Overlay drop, ScreenSpot-v2 pHash dedup (every match and distance), dev/train split counts |
-| `build/blank_dedup_recheck.json` | — | box `/home/ubuntu/data/os_atlas_20k/blank_dedup_recheck.json` (**TBD: confirm it was run**) | — | Second check for the low-detail ScreenSpot-v2 images that the pHash step skips |
-| `screenspot_v2_excluded_rows.json` | 28 | `repo: benchmarks/screenspot_v2/excluded_rows.json` | — | The ScreenSpot-v2 rows excluded from our test set, and why |
-| `grpo/` | TBD | box `/home/ubuntu/night/round_<r>/pool.jsonl`, `pool_stats.json` (**TBD after the overnight run**) | — | GRPO prompt pools picked by `gym eval profile`. Ship only for rounds that went into the released model |
-| `rs_sft/` | TBD | box, under `/home/ubuntu/night/round_<r>/` (**only if the final model used the rejection-sampled SFT fallback**) | — | Reward=1 rollouts used as SFT targets, with the command that made them |
+**Not included:**
 
-The upload excludes `review.html`, the audit contact sheet. It embeds 180 images cut from
-the screenshots (for each of the 66 cards, a crop and a thumbnail of the whole screenshot,
-plus 48 zooms), and we don't re-host images.
+- `cache.sqlite`, the Lightning request cache.
+- `review.html`, the audit contact sheet. It embeds 180 images cut from the screenshots (for
+  each of the 66 cards, a crop and a thumbnail of the whole screenshot, plus 48 zooms), and we
+  don't re-host images.
+- Any images.
+- `rs_sft/`. The rejection-sampled SFT fallback of the GRPO loop wasn't used.
 
 ## Splits
 
 | Split | Rows | Instructions | Use |
 | --- | --- | --- | --- |
-| `train` (manifest) | 18,652 | Raw labels (UIBert: natural) | The `sft-template` round-0 adapter trained on all 18,652 |
-| `train` (release training files) | 18,299 | `lightning`: 8,620 Lightning instructions (8,498 changed, 122 identical to the label) + 6,813 raw + 2,866 natural. `template`: all raw/natural | SFT and the GRPO pools |
+| `train` (manifest) | 18,652 | Raw labels (UIBert: natural) | The `sft-template` adapter (raw-label SFT, a round-0 candidate not used in the released model) trained on all 18,652 |
+| `train` (release training files) | 18,299 | `lightning`: 8,620 Lightning instructions (8,498 changed, 122 identical to the label) + 6,813 raw + 2,866 natural. `template`: all raw/natural | SFT; the GRPO pool was drawn from `train_lightning.jsonl` |
 | `dev` | 969 | Raw labels (UIBert: natural); **never rewritten** | Checkpoint selection |
 
 Train rows by source (manifest → training files): AndroidWorld 2,861 → 2,676; FineWeb
@@ -130,8 +139,10 @@ suffix removed (Linux, macOS, AndroidWorld), the page (FineWeb) or the Rico id (
 There is no test split. Our held-out test is ScreenSpot-v2-clean, which isn't redistributed
 here (see [Contamination](#contamination-handling-screenspot-v2)).
 
-`dev.jsonl` (**TBD: create before upload**) has the manifest's dev rows, with the three extra
-columns the training files carry, so all splits in a config share one schema:
+`dev.jsonl` has the manifest's dev rows, with `instruction_style` filled in and the two extra
+columns the training files carry (`instruction_original`, `lightning_drop_reason`), so all
+splits in a config share one schema. It was made with this command (Python
+3.12; sha256 prefix `a63416c399422811`):
 
 ```bash
 python3 - <<'EOF'
@@ -164,15 +175,19 @@ JSON object per click target:
 | `bbox` | [float ×4] | `[x1, y1, x2, y2]` in **pixels** of the original screenshot (OS-Atlas's normalized `[left, top, right, bottom]` × width/height, rounded to 0.1 px) |
 | `platform` | string | `desktop`, `mobile` or `web` |
 | `data_type` | string or null | OS-Atlas's **control type** from the accessibility tree (`push-button`, `AXStaticText`, `android.widget.TextView`, ...). Null for UIBert and FineWeb. **Not** ScreenSpot's text/icon label |
-| `instruction_style` | string or null | Training files: `functional`, `descriptive`, `positional` (Lightning rewrite), `raw` or `natural`. Null in the manifest |
+| `instruction_style` | string or null | Training files: `functional`, `descriptive`, `positional` (Lightning rewrite), `raw` or `natural`. Dev: `raw` or `natural`. Null in the manifest |
 | `group` | string | Screenshot group used for the split |
 | `split` | string | `train` or `dev` |
 | `instruction_original` | string | Training files and dev: the raw manifest label |
-| `lightning_drop_reason` | string | Present on the 411 rows Lightning dropped and that we kept with the raw label: `unintelligible` (264), `numeric` (68), `needs_screen` (29), `duplicate_neighbor` (26), `llm_error` (24) |
+| `lightning_drop_reason` | string or null | Training files: set on the 411 rows Lightning dropped and that we kept with the raw label: `unintelligible` (264), `numeric` (68), `needs_screen` (29), `duplicate_neighbor` (26), `llm_error` (24); absent on the other rows (null when loaded). Dev: null on every row |
 
 `lightning_rewrites/rewrites.jsonl` fields are `id`, `source`, `original`, `rewritten` (null
 when dropped), `style`, `keep`, `drop_reason`, `prompt_version` (`v4`), `model` (the model
 that produced the row, or `rule:is_numeric_label`) and `ts`. METHOD.md documents each one.
+
+`grpo/round_1_pool.jsonl` rows have `id`, `source`, `instruction`, `platform`, `data_type`,
+`bbox`, `img_w` and `img_h` with the same meaning as above, plus `responses_create_params`,
+the NeMo Gym request (see [GRPO prompt pool](#grpo-prompt-pool)).
 
 ## Getting the images
 
@@ -218,7 +233,7 @@ belong to their sites).
 | OS-Atlas AndroidWorld | Sampled by OS-Atlas from the [AndroidWorld](https://github.com/google-research/android_world) environment | Released in OS-Atlas-data (Apache-2.0). The AndroidWorld code repo is Apache-2.0. For the screenshots' app content, see source |
 | [UIBert](https://github.com/google-research-datasets/uibert) (Bai et al., 2021), on [Rico](https://interactionmining.org/rico) screenshots | Natural referring expressions (UIBert rows: 2,866 train, 134 dev). We filtered them and normalized them (Unicode NFKC, collapsed whitespace); otherwise they are unchanged | The UIBert README says its datasets are licensed under [**CC BY 4.0**](https://creativecommons.org/licenses/by/4.0/). Credit: Bai et al., UIBert (citation below). Rico images: the [Rico copyright notice](http://interactionmining.org/archive/rico/copyright.txt) says the screenshots "may contain copyrighted work" and gives them out under research terms, not an open license. We don't re-host them |
 | OS-Atlas FineWeb web | Pages crawled by OS-Atlas from URLs in [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) | FineWeb (the URL and text corpus) is ODC-By 1.0, and its card adds CommonCrawl's Terms of Use. That covers the corpus, not the pages. For the rendered page content and its labels, **see source**: the rights belong to the respective sites |
-| NVIDIA Nemotron 3.5 Lightning outputs (`lightning_rewrites/`, `instruction` in `train_lightning.jsonl`) | Rewritten instructions, keep/drop decisions | **Local BF16 checkpoint (1,003 rows):** the `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` card gives OpenMDW-1.1. The license text says it "does not impose any restrictions or obligations with respect to any use, modification, or sharing of any outputs". **NVIDIA-hosted API (8,028 rows):** the build.nvidia.com page says "The trial service is governed by the NVIDIA API Trial Terms of Service", and the model by OpenMDW-1.1. Those terms say you own the Generated Content unless the model's license says otherwise (§6.3). They also grant access "for limited trial purposes only and without use of the API Service or Generated Content in production" (§1.2), and, without a paid subscription, "only for internal testing and evaluation purposes" (§1.4). **Team to confirm** that publishing these rows fits those terms |
+| NVIDIA Nemotron 3.5 Lightning outputs (`lightning_rewrites/`, `instruction` in `train_lightning.jsonl`) | Rewritten instructions, keep/drop decisions | **Local BF16 checkpoint (1,003 rows):** the `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` card gives OpenMDW-1.1. The license text says it "does not impose any restrictions or obligations with respect to any use, modification, or sharing of any outputs". **NVIDIA-hosted API (8,028 rows):** the build.nvidia.com page says "The trial service is governed by the NVIDIA API Trial Terms of Service", and the model by OpenMDW-1.1. Those terms say you own the Generated Content unless the model's license says otherwise (§6.3). They also grant access "for limited trial purposes only and without use of the API Service or Generated Content in production" (§1.2), and, without a paid subscription, "only for internal testing and evaluation purposes" (§1.4). The team decided on Sun 2026-10-18 to publish these rows: we own the generated content (§6.3), the model license puts no restrictions on outputs, and the hackathon requires publishing model-generated training data. Each row records which endpoint produced it |
 | [ScreenSpot-v2](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2) | **Not included.** Used only to dedup our training images, and as the held-out test | Apache-2.0 (dataset card) |
 
 Not used: ScreenSpot v1/v2 data for training, GroundUI-18K and Wave-UI (both contain
@@ -246,14 +261,22 @@ All code is in the GitHub repo. The Lightning step's exact commands are in
    Linux.
 3. **Dedup against ScreenSpot-v2** (`data_prep/finalize_manifest.py`). We compute a 64-bit
    perceptual hash (`imagehash.phash`) of every training screenshot and compare it with every
-   ScreenSpot-v2 image. We drop any screenshot within Hamming distance 8. Near-blank
-   ScreenSpot-v2 images (grayscale std < 25; 79 images) are skipped as match targets,
-   because pHash collides on them. `data_prep/recheck_blank_dedup.py` checks those separately
-   with MD5, pixel-difference and SSIM (**TBD:** confirm it was run on this manifest and ship
-   its output). Result: 36 training screenshots (281 rows) dropped: Linux 17, macOS 17,
-   FineWeb 2
-   <!-- TBD-commit: 36/281 come from build/manifest.stats.json, which is not in git yet -->.
-   Every match and its distance is in `build/manifest.stats.json`.
+   ScreenSpot-v2 image. We drop any screenshot within Hamming distance 8. Result: 36 training
+   screenshots (281 rows) dropped: Linux 17, macOS 17, FineWeb 2. Every match and its distance
+   is in `build/manifest.stats.json`.
+
+   Near-blank ScreenSpot-v2 images (grayscale std < 25; 79 images) are skipped as match
+   targets, because pHash collides on them. `data_prep/recheck_blank_dedup.py` checks those 79
+   separately against all 4,339 screenshots of the final manifest (train and dev). Its output
+   is `build/blank_dedup_recheck.json`:
+   - **Exact MD5** of the file bytes and of the decoded pixels: no matches.
+   - **Similarity flags:** mean absolute difference of 32×32 grayscale thumbnails (flag
+     ≤ 0.03) and a single-window SSIM (flag ≥ 0.9), over each image's 3 nearest manifest
+     screenshots. 65 of the 79 images have at least one flagged neighbor: 190 flagged pairs
+     over 72 manifest screenshots. All 190 are flagged on pixel difference; 6 of them also
+     have SSIM ≥ 0.9 (highest 0.959).
+   - The file records flags only. The 72 flagged screenshots are still in this release:
+     278 manifest rows (273 train, 5 dev), 264 of them in each training file.
 4. **Split** by screenshot group, 5% dev per source → 19,621 rows (train 18,652 / dev 969).
 5. **Rewrite with Lightning** (train split only; `data_prep/rewrite/rewrite.py`, prompt `v4`,
    code `d0d9d625`). Details are in the next section.
@@ -261,6 +284,8 @@ All code is in the GitHub repo. The Lightning step's exact commands are in
    `train_template.jsonl` with the same 18,299 rows in the same order. Only the deterministic
    numeric-label rule removes rows (353). Rows Lightning dropped stay in both files with
    their raw label.
+7. **GRPO prompt pool** (`training/night_loop.py`, round 1). See
+   [GRPO prompt pool](#grpo-prompt-pool).
 
 ## Lightning-rewritten instructions
 
@@ -315,10 +340,10 @@ pass through unchanged.
 | Drop rate, all drops except llm_error | 7.9% (gate < 25%: met) |
 | Requests / total tokens, all invocations | 1,015 / 3,544,638 |
 
-**Reproduce:** run the `rewrite.py` command in METHOD.md "Reproduce". With the same
-`cache.sqlite` it sends no requests and rewrites `rewrites.jsonl` byte for byte. Without the
-cache, sampling at temperature 0.7 gives different rewrites, so `rewrites.jsonl` is the
-artifact. Then run `apply.py`, which is deterministic.
+**Reproduce:** run the `rewrite.py` command in METHOD.md "Reproduce". Its request cache
+(`cache.sqlite`) is not published, so a rerun sends new requests, and sampling at temperature
+0.7 gives different rewrites. `rewrites.jsonl` is therefore the artifact. Then run `apply.py`,
+which is deterministic.
 
 **One stale line in METHOD.md:** its "Validation, retries and drops" section still says
 `apply.py` removes every `keep=false` row. That was the rule before the audit. The released
@@ -347,6 +372,29 @@ box, the raw label and the rewrite. Verdicts are in
 - **Scope:** the audit covered hosted-API rows only. The 1,003 rows from the local BF16
   checkpoint weren't audited separately.
 
+## GRPO prompt pool
+
+`grpo/round_1_pool.jsonl` holds the prompts of the released model's only GRPO round (round 1
+of `training/night_loop.py`). A second round ran but wasn't kept, so its pool isn't
+published.
+
+- **Profile:** a random 4,000-row sample of the train rows of `train_lightning.jsonl` (seed 1;
+  never dev or ScreenSpot). The starting model, the LoRA SFT adapter trained on
+  `train_lightning.jsonl`, answered each row 8 times at temperature 1.0 through the
+  `gui_grounding` NeMo Gym environment (reward 1 when the predicted point is inside the box),
+  followed by `gym eval profile`.
+- **Pool:** the rows it solved sometimes but not always (0 < pass rate < 1): 1,282 of the
+  4,000. FineWeb 472, Linux 230, UIBert 220, AndroidWorld 183, macOS 177. The per-source
+  always / sometimes / never counts are in `grpo/round_1_pool_stats.json`.
+- **Instructions** are the rows' instructions in `train_lightning.jsonl`; 566 of the 1,282
+  differ from the raw label. The Lightning terms in [Sources and licenses](#sources-and-licenses)
+  apply to them.
+- **`responses_create_params`** is the Gym request as the loop wrote it: the grounding prompt,
+  temperature 0, at most 32 output tokens. Its `image_url` is a `file://` path to a
+  pre-resized copy of the screenshot (at most 2,073,600 pixels) on our training machine.
+  Point it at your own copy. `bbox`, `img_w` and `img_h` are in original-screenshot pixels,
+  as in the manifest.
+
 ## Contamination handling (ScreenSpot-v2)
 
 - **Never trained on:** ScreenSpot v1 or v2, GroundUI-18K, or Wave-UI's ScreenSpot rows.
@@ -354,6 +402,9 @@ box, the raw label and the rewrite. Verdicts are in
   and `training/sft.py` refuses ScreenSpot rows.
 - **Perceptual-hash dedup:** every training screenshot is checked against ScreenSpot-v2
   (step 3 above).
+- **Near-blank ScreenSpot-v2 images:** the pHash step skips the 79 near-blank images (pHash
+  collides on them), so `build/blank_dedup_recheck.json` checks them separately (step 3 above). It found no exact
+  copies. Its similarity flags weren't used to drop anything.
 - **28 ScreenSpot-v2 rows excluded from the test set instead.** ScreenSpot-v2 added 28 new
   desktop screenshots (20 Ubuntu at 2560×1440, 8 macOS at 2880×1800). They were captured on
   the same machines and desktop setups as OS-Atlas's Linux and macOS data, 1–3 weeks later:
@@ -371,7 +422,7 @@ box, the raw label and the rewrite. Verdicts are in
     Linux/macOS and reports ScreenSpot-v2 desktop numbers is affected.
 - **FineWeb:** the web share is covered only by the same pHash dedup, which dropped 2 FineWeb
   screenshots. We didn't run the planned instruction-text plus box-IoU check against
-  ScreenSpot-v2 web targets (docs/research-notes.md §5). **TBD:** run it, or keep this caveat.
+  ScreenSpot-v2 web targets (`docs/research-notes.md` §5 in the GitHub repo).
 
 ## Intended use
 
@@ -415,20 +466,29 @@ box, the raw label and the rewrite. Verdicts are in
 
 ## Reproduce
 
+`RAW` holds the OS-Atlas files from [Getting the images](#getting-the-images) and the
+ScreenSpot-v2 images; `WORK` is a scratch directory. The paths are placeholders.
+
 ```bash
-# 1. sample (on the GPU box; the archives are range-read from HF if they aren't under --raw)
-python data_prep/sample_os_atlas.py --raw /home/ubuntu/data/raw/os_atlas --out /home/ubuntu/data/os_atlas_20k
-# 2. overlay scan (the recorded command, run on a copy of the 20k manifest on the Mac)
-python data_prep/rewrite/overlay_scan.py --manifest data/os_atlas_20k/manifest.jsonl --workers 14
-# 3-4. overlay drop + pHash dedup vs ScreenSpot-v2 + split
-python data_prep/finalize_manifest.py --manifest /home/ubuntu/data/os_atlas_20k/manifest.jsonl \
-    --screenspot-images /home/ubuntu/data/raw/screenspot_v2/screenspotv2_image \
-    --overlay-flagged /home/ubuntu/data/os_atlas_20k/overlay_flagged.json
+# 1. sample (the archives are range-read from HF if they aren't under --raw)
+python data_prep/sample_os_atlas.py --raw $RAW/os_atlas --out $WORK/os_atlas_20k
+# 2. overlay scan
+python data_prep/rewrite/overlay_scan.py --manifest $WORK/os_atlas_20k/manifest.jsonl --workers 14
+# 3-4. overlay drop + pHash dedup vs ScreenSpot-v2 + split (rewrites --manifest in place, after a .bak copy)
+python data_prep/finalize_manifest.py --manifest $WORK/os_atlas_20k/manifest.jsonl \
+    --screenspot-images $RAW/screenspot_v2/screenspotv2_image \
+    --overlay-flagged $WORK/os_atlas_20k/overlay_flagged.json
+# 3b. blank-image recheck (the script's documented usage) -> blank_dedup_recheck.json
+python data_prep/recheck_blank_dedup.py --manifest $WORK/os_atlas_20k/manifest.jsonl \
+    --screenspot-images $RAW/screenspot_v2/screenspotv2_image \
+    --stats $WORK/os_atlas_20k/manifest.stats.json
 # 5. Lightning rewrites: the exact command of each invocation is in lightning_rewrites/METHOD.md
+#    (its data/os_atlas_final/ is the manifest's directory, here $WORK/os_atlas_20k)
 # 6. apply. Reconstructed from the inputs and settings in lightning_rewrites/apply_stats.json;
-#    the command line itself wasn't recorded
-python data_prep/rewrite/apply.py --manifest data/os_atlas_final/manifest.jsonl \
-    --rewrites data/os_atlas_final/rewrite_v4/rewrites.jsonl --splits train
+#    the command line itself wasn't recorded. Writes the training files next to the manifest
+python data_prep/rewrite/apply.py --manifest $WORK/os_atlas_20k/manifest.jsonl \
+    --rewrites $WORK/os_atlas_20k/rewrite_v4/rewrites.jsonl --splits train
+# 7. GRPO pool: the profile and pool steps of round 1 of training/night_loop.py
 ```
 
 **Code versions:**
@@ -441,16 +501,14 @@ python data_prep/rewrite/apply.py --manifest data/os_atlas_final/manifest.jsonl 
   haven't changed since `39e1eca`.
 - **Rewrite (step 5).** The code is `d0d9d625`.
 
-**TBD:**
-
-- Confirm steps 1 and 3 match the invocations that produced `manifest.jsonl` (sha256
-  `4ceb7ea3d7ac8e85…`), including the sampler commit. The sampler's arguments are recorded
-  in `build/sampler_stats.json`, and the finalize step's in `build/manifest.stats.json`.
+**Checking a rerun:** compare it with `manifest.jsonl` (sha256 `4ceb7ea3d7ac8e85…`). The
+sampler arguments of the original run are recorded in `build/sampler_stats.json`, and the
+settings and results of steps 2–4 in `build/manifest.stats.json`.
 
 ## Citation
 
 If you use this data, please cite OS-Atlas and the datasets it builds on (UIBert, Rico,
-AndroidWorld, FineWeb):
+AndroidWorld, FineWeb), and this dataset:
 
 ```bibtex
 @article{wu2024atlas,
@@ -466,6 +524,12 @@ AndroidWorld, FineWeb):
   eprint        = {2107.13731},
   archivePrefix = {arXiv},
   primaryClass  = {cs.CV}
+}
+@misc{guiassist2026data,
+  title        = {GUI assist grounding data: OS-Atlas slice + Nemotron Lightning instructions},
+  author       = {{GUI assist team (sherpas)}},
+  year         = {2026},
+  howpublished = {\url{https://huggingface.co/datasets/patrickballou/gui-assist-data}}
 }
 ```
 

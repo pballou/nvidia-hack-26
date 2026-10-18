@@ -178,7 +178,7 @@ adapter turned off (one 2B model plus an adapter).
 | Data | Use | License / notes |
 | --- | --- | --- |
 | [OS-Atlas-data](https://huggingface.co/datasets/OS-Copilot/OS-Atlas-data): Linux, macOS, AndroidWorld, UIBert, FineWeb subsets | Training | Apache-2.0 (dataset card). The Linux/macOS desktop data was captured on the same machines as 28 ScreenSpot-v2 desktop screenshots, so those 28 rows are excluded from our test set (see below). |
-| Lightning-rewritten instructions | Training (`sft-lightning`, the overnight loop's starting point) | Synthetic; prompt, script and method in [data_prep/rewrite/](data_prep/rewrite/) (run record `data_prep/rewrite/runs/os_atlas_final_v4/`); data in [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data) (public from Sunday ~9:30) |
+| Lightning-rewritten instructions | Training (`sft-lightning`, the overnight loop's starting point) | Synthetic; prompt, script and method in [data_prep/rewrite/](data_prep/rewrite/) (run record `data_prep/rewrite/runs/os_atlas_final_v4/`); data in [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data) |
 | [ScreenSpot-v2](https://huggingface.co/datasets/OS-Copilot/ScreenSpot-v2) (revision `5efbb1f1b5`) | **Held-out test only**, as **SSv2-clean**: 1,244 of 1,272 rows. The excluded 28 are listed in `benchmarks/screenspot_v2/excluded_rows.json`. | Apache-2.0 |
 
 ## Results

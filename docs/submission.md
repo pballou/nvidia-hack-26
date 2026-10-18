@@ -56,7 +56,7 @@ Condensed from the organizers' bounty slides. "Open" is what a judge could push 
 - [ ] **Video:** recorded, uploaded to YouTube as **Unlisted**, link pasted into the README and the form (Charlie).
 - [x] **GitHub repo** public: https://github.com/pballou/nvidia-hack-26
 - [x] **HF model** public: https://huggingface.co/patrickballou/gui-assist-grounder
-- [ ] **HF data** public: https://huggingface.co/datasets/patrickballou/gui-assist-data (going public at ~10:20)
+- [x] **HF data** public: https://huggingface.co/datasets/patrickballou/gui-assist-data (10:27)
 - [ ] **Airtable form**, using the values below. Paste the description, then the three bounty boxes from §Form text.
   - Project / team: **GUI assist** / **sherpas**
   - Members: Patrick (pballou@sherpa6.com), Kyle (kodonnell@sherpa6.com), Charlie (carleth@sherpa6.com)
@@ -176,8 +176,8 @@ Patrick publishes under the Hugging Face account **`patrickballou`**.
 - The original plan, uploading from the Brev box with a fine-grained token scoped to the two repos, wasn't needed.
   Never run `hf auth login` on the shared box.
 
-Both repos are uploaded and still **private** (data Sat 20:55, model Sun 04:28). Patrick makes
-both public at release, Sun ~9:30, after his release check.
+Both repos are **public** (model Sun 10:15, data Sun 10:27), after Patrick's release check: model Apache-2.0,
+data CC BY 4.0, hosted-API rewrites published.
 
 Upload commands as run (on the Mac, with `set -a; source .env; set +a`):
 
