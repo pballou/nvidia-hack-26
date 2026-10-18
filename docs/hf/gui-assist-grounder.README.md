@@ -1,7 +1,7 @@
 ---
 license: apache-2.0  # base model is Apache-2.0; TBD: team to confirm before the repo goes public (see "Licenses")
 base_model: Qwen/Qwen3.5-2B
-library_name: transformers  # TBD (orchestrator, at upload): right only if the merged model goes at the repo root as planned; if only adapter/ is uploaded, change to peft
+library_name: transformers  # merged bf16 weights at the repo root; the PEFT adapter is in adapter/
 pipeline_tag: image-text-to-text
 language:
 - en
@@ -34,16 +34,13 @@ from a text description of the screen and calls this model to turn the target de
 pixels. The agent never reads the app's DOM or code. Code, envs and eval logs:
 <https://github.com/pballou/nvidia-hack-26>.
 
-The model is a LoRA adapter on `Qwen/Qwen3.5-2B`'s language model; the vision encoder is frozen.
-Training was LoRA SFT on an OS-Atlas slice with Nemotron-Lightning-rewritten instructions
-(`sft-lightning`). An overnight loop then ran GRPO rounds (up to 3), with a NeMo Gym environment's
-`/verify` endpoint as the reward. A round was kept only if it improved dev by at least 0.5 points.
-Round 1 was kept (dev 86.27 → 87.00). Round 2 was flat (86.89), so it was reverted and the loop
-stopped. **The released model is `sft-lightning` + GRPO round 1.**
-
-> Before upload: the remaining **TBD**s are upload choices for the orchestrator (`library_name`,
-> which `training/` and `eval/` files ship) and the license confirmations. Delete this note and
-> the TBDs once they're resolved.
+The model is a LoRA fine-tune of `Qwen/Qwen3.5-2B`'s language model; the vision encoder is
+frozen. This repo ships it two ways: merged into full bf16 weights at the repo root, and as the
+PEFT adapter in `adapter/`. Training was LoRA SFT on an OS-Atlas slice with
+Nemotron-Lightning-rewritten instructions (`sft-lightning`). An overnight loop then ran GRPO
+rounds (up to 3), with a NeMo Gym environment's `/verify` endpoint as the reward. A round was kept
+only if it improved dev by at least 0.5 points. Round 1 was kept (dev 86.27 → 87.00). Round 2 was
+flat (86.89), so it was reverted and the loop stopped. **The released model is `sft-lightning` + GRPO round 1.**
 
 ## At a glance
 
@@ -51,20 +48,30 @@ stopped. **The released model is `sft-lightning` + GRPO round 1.**
 | --- | --- |
 | Base model | [`Qwen/Qwen3.5-2B`](https://huggingface.co/Qwen/Qwen3.5-2B), revision `15852e8c16`, Apache-2.0 |
 | Parameters | 2B (model-card count; HF safetensors total 2.27B). The LoRA adapter adds about 16.8M (16,819,200, computed for r = 16 from the base weight shapes; PEFT loads an adapter of this config as ~16.8M trainable parameters in 372 tensors) |
-| Released checkpoint | `sft-lightning` (round 0, picked on dev: 86.27 vs `sft-template`'s 85.86 in the same harness) + **GRPO round 1** (kept on dev: 86.27 → 87.00). Round 2 was reverted. Loop launch `20261017-193859`, adapter `night/20261017-193859/round_1/grpo/adapter` (`FINAL.json`: best round 1) |
-| Input | One screenshot (any aspect ratio, resized to ≤ 2,073,600 px) + one instruction |
+| Released checkpoint | `sft-lightning` (round 0, picked on dev: 86.27 vs `sft-template`'s 85.86 in the same harness) + **GRPO round 1** (TRL, rewarded by the NeMo Gym env's `/verify` point-in-box check; 170 steps, 1,282-row pool; kept on dev: 86.27 → 87.00). Round 2 was reverted (86.89). Loop launch `20261017-193859`, adapter `night/20261017-193859/round_1/grpo/adapter` (`FINAL.json`: best round 1) |
+| Formats | Merged bf16 weights at the repo root (Transformers, vLLM, vllm-metal); PEFT LoRA adapter in `adapter/` (r = 16, alpha = 32, 186 modules) |
+| Input | One screenshot (aspect ratio up to 200:1, resized to ≤ 2,073,600 px) + one instruction |
 | Output | `{"point_2d": [x, y]}`, integers on a 0–1000 grid relative to the image |
 | Held-out test | ScreenSpot-v2-clean: 1,244 of ScreenSpot-v2's 1,272 rows. **28 rows excluded**, see [below](#the-28-row-screenspot-v2-exclusion) |
-| Headline (base → released) | SSv2-clean **86.3% → 90.35%** (+4.1; never used for selection); icons **78.1% → 85.4%**; dev 76.4% → 87.0%. Agent tasks verified (12 × 3): base 18/36, released 17/36, `sft-template` 22/36, all within noise |
+| Headline (base → released) | SSv2-clean **86.25% → 90.35%** (+4.10; never used for selection); icons **78.1% → 85.4%**; dev 76.4% → 87.0%. Agent tasks verified (12 × 3): base 18/36, released 17/36, `sft-template` 22/36, all within noise |
 
 ## Files in this repo
 
-| Path | What | Source (GPU box, now stopped; the orchestrator's copy is on Patrick's Mac) |
-| --- | --- | --- |
-| `adapter/` | PEFT LoRA adapter (`adapter_config.json`, weights), for vLLM `--lora-modules` or `PeftModel` | Box `/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/adapter`; Mac copy `~/models/gui-assist/night-20261017-193859-round_1-grpo/`. `adapter_model.safetensors` sha256 `54ce9389…` |
-| `/` (root) | The same model with the adapter merged into the base weights (for runtimes without LoRA, e.g. vllm-metal on a Mac). Merged with [`scripts/gate_g_merge.py`](https://github.com/pballou/nvidia-hack-26/blob/main/scripts/gate_g_merge.py) (peft's merge, equal to `W + 2·B·A`); it passed Gate G (see [Serve](#serve-with-vllm-base-and-grounder-in-one-process)) | Mac `~/models/grounder-merged-night-20261017-193859-round_1-grpo` (weights sha256 `cd120bc0…`) |
-| `training/` (**TBD**, orchestrator at upload: which files ship; drop this row if none) | SFT: `args.json`, `run.json`, `summary.json`, `train.log`. GRPO round 1: `grpo_summary.json`, `log_history.json`, the round's `summary.json`, `knobs_used.json` and `pool_stats.json`. The loop's `FINAL.json`. Round 2 (reverted) is optional, for the record | Box `/home/ubuntu/ckpt/sft-lightning/`, `/home/ubuntu/ckpt/night/20261017-193859/round_1/grpo/`, `/home/ubuntu/night/round_1/`, `/home/ubuntu/night/FINAL.json`. The Mac copy has the summaries; anything not in it needs the box restarted |
-| `eval/` (**TBD**, same decision) | Gym eval metrics for dev and SSv2-clean (base, `sft-template`, `sft-lightning`, released), and the paired `gym eval compare` reports | Box `/home/ubuntu/night/evals/{sft-template,sft-lightning,final-round1-grpo}/`, `/home/ubuntu/night/evals/compare_ssv2_{sft-lightning,sft-template}_vs_final/`; base runs `results/{dev,ssv2_clean}_base_qwen35*` in Kyle's checkout on the box |
+| Path | What |
+| --- | --- |
+| `/` (root) | **The released model, merged:** the LoRA folded into the base weights as one bf16 `Qwen3_5ForConditionalGeneration` checkpoint in Transformers format (as in the base, the 36 GDN `A_log` / norm tensors stay float32; weights sha256 `cd120bc0cd6f642f85537c503922fa9c3c6a9348defd643136da81ed784cef2f`). For Transformers, for vLLM without `--enable-lora`, and for vllm-metal. Made with [`scripts/gate_g_merge.py`](https://github.com/pballou/nvidia-hack-26/blob/main/scripts/gate_g_merge.py) (peft 0.21.2, transformers 5.17.0, on CPU): each of the 186 targeted weights becomes bf16(W + 2·B·A), merged in float32 by peft (identical to a manual merge, max difference 0.0). Every other tensor and file (vision tower, embeddings, tokenizer, chat template, processor configs) is the base at revision `15852e8c16`, bit for bit. It passed Gate G (see [Running on a Mac](#running-on-a-mac-vllm-metal)) |
+| `adapter/` | **The same model as a PEFT LoRA adapter**, with its original PEFT keys (`model.language_model.layers.*`): `adapter_config.json` and `adapter_model.safetensors` (sha256 `54ce9389bec28af4278fadb527824e01d8d75132c7cb35fe8a9935e655bf41e8`). r = 16, alpha = 32, 186 modules. For vLLM `--lora-modules` (base and tuned from one process, below) or `PeftModel`. It is the adapter the H200 served as `grounder` in the released model's Gym evals |
+| `training/` | The release round's record from the overnight loop, five files. Round 1: `grpo_command.txt` (the exact GRPO command), `knobs_used.json`, `pool_stats.json` (profile and pool by source) and `round_1_summary.json` (pool, steps, rewards, gate D2, `/verify` calls, dev before and after). `round_0_summary.json`: the starting `sft-lightning` adapter's dev eval. Paths inside are the training box's (`/home/ubuntu/...`) |
+
+Eval metrics, the paired comparisons and every run's command and config are in
+[docs/results.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/results.md) and
+[docs/runs.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/runs.md) on GitHub.
+
+Transformers 5.17 loads the root with `AutoModelForImageTextToText`. PEFT 0.21 loads the adapter
+with `PeftModel.from_pretrained(base, "patrickballou/gui-assist-grounder", subfolder="adapter")`.
+Every accuracy and agent number on this card was measured with vLLM. The H200 runs applied the
+adapter at runtime (`--lora-modules`). The merged root was checked against that adapter only
+through Gate G (200 dev rows on vllm-metal: 87.0% vs 87.0%, 99.0% agreement).
 
 ## Results
 
@@ -78,7 +85,7 @@ was evaluated on it after the loop had picked it.
 
 | Model | Dev (969) | SSv2-clean (1,244) | Mobile | Desktop | Web | Text | Icon |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qwen3.5-2B base | 76.4 | 86.3 | 91.4 | 84.0 | 81.9 | 92.5 | 78.1 |
+| Qwen3.5-2B base | 76.4 | 86.25 | 91.4 | 84.0 | 81.9 | 92.5 | 78.1 |
 | SFT, raw labels (`sft-template`, round-0 candidate) | 85.66 | 89.07 | 92.22 | 89.54 | 85.13 | 92.33 | 84.81 |
 | SFT, Lightning instructions (`sft-lightning`, round 0, picked on dev) | 86.27 | 88.10 | 91.22 | 86.93 | 85.35 | 93.04 | 81.67 |
 | **Released: `sft-lightning` + GRPO round 1** (kept on dev; round 2 reverted) | **87.00** | **90.35** | **93.21** | **88.89** | **88.10** | **94.18** | **85.37** |
@@ -86,14 +93,15 @@ was evaluated on it after the loop had picked it.
 - **Dev numbers:** `sft-lightning`'s 86.27 is from the loop harness, where `sft-template` scored
   85.86 (85.66 in its first launch). The released 87.00 is a selection number, the best on dev
   across rounds. Re-runs gave 87.00 and 86.89.
-- **SSv2-clean, two runs of the released adapter:** 90.35 is Kyle's eval (`final-round1-grpo`),
-  which the paired comparisons below use. A second, independent T=0 run by the orchestrator
-  (`night-r1`) gave **90.27**, one row apart. Neither was used for any selection.
+- **SSv2-clean, two runs of the released adapter:** 90.35 is Kyle's one-time eval
+  (`final-round1-grpo`), the canonical number, which the paired comparisons below use. It rounds
+  to mobile 93.2 / desktop 88.9 / web 88.1 and text 94.2 / icon 85.4. A second, independent T=0
+  run (`night-r1`) gave **90.27**, one row apart. Neither was used for any selection.
 - **Paired comparisons on SSv2-clean** (same 1,244 rows, McNemar exact on fixed vs broken rows):
   - vs `sft-lightning`, the loop's starting adapter: **+2.25**, 34 fixed / 6 broken,
     p ≈ 8 × 10⁻⁶;
   - vs `sft-template`: +1.29, 50 fixed / 34 broken, p = 0.10, **not significant**;
-  - vs base: +4.10 (this pair wasn't McNemar-tested).
+  - vs base (86.25; 86.3 rounded): +4.10 (this pair wasn't McNemar-tested).
 - **Released, by platform and type** (text / icon): mobile 96.90 / 88.15, desktop 91.67 / 84.92,
   web 92.74 / 82.76. Base: mobile 97.6 / 82.9, desktop 90.6 / 74.6, web 87.6 / 75.4.
 
@@ -168,9 +176,9 @@ re-eval (in parentheses where they differ). Round 1's deltas are against the re-
 Sources: [docs/results.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/results.md)
 and [docs/runs.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/runs.md), which has
 the command, config and output path of every run. The released adapter's SSv2-clean eval and
-paired compares are Kyle's Sat 22:04 row in runs.md, and the duplicate run is the Sat 22:08 row.
-The agent table is in results.md ("Agent") and in runs.md (the Sat 18:45 row, and Patrick's Sat
-22:04 row). Failure analyses are in
+paired compares are runs.md's "Final adapter, one-time SSv2-clean eval" row (Kyle, Sat 22:04),
+and the duplicate run is the Sat 22:08 row. The agent table is in results.md ("Agent") and in
+runs.md (the Sat 18:45 row, and Patrick's Sat 22:04 row). Failure analyses are in
 [docs/blade/](https://github.com/pballou/nvidia-hack-26/tree/main/docs/blade):
 `round_1_r0_vs_r1.md` for the GRPO round, `agent_final_vs_sft.md` for the agent arms.
 
@@ -244,7 +252,8 @@ is resized twice.
 
 This is adapted from the command we serve with on the H200
 ([docs/gpu-box.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/gpu-box.md) §3,
-`scripts/serve_vlm.sh`). Only the volume mounts and the adapter path differ. It uses the pinned
+`scripts/serve_vlm.sh`). Only the volume mounts, the adapter path and two box-only settings
+(`HF_HUB_OFFLINE=1`, and `--allowed-local-media-path` for `file://` images) differ. It uses the pinned
 image vLLM v0.31.0. One process serves two names:
 
 - `base`: Qwen3.5-2B with the adapter off;
@@ -275,10 +284,11 @@ curl -s localhost:8001/v1/models   # expect "base" and "grounder"
   answer as `reasoning` with `content: null` (vLLM #53284).
 - **Pinning the base:** our evals served `Qwen/Qwen3.5-2B` at revision `15852e8c16`. Add
   `--revision 15852e8c16360a2fea060d615a32b45270f8a8fc` to pin it.
-- **Without LoRA support** (e.g. vllm-metal): serve the merged weights at the repo root
-  instead. They were made with `scripts/gate_g_merge.py`, and passed our Gate G check on 200
-  dev rows: vllm-metal on a Mac vs the H200's runtime-LoRA `grounder` had identical
-  `prompt_tokens` on all 200, a hit rate of 87.0% vs 87.0%, and 99.0% agreement on hit/miss.
+- **Without LoRA:** serve the merged weights at the repo root
+  (`--model patrickballou/gui-assist-grounder --served-model-name grounder`, the other flags as
+  above minus the three LoRA ones). That process serves only the tuned model, with no
+  adapter-off `base`.
+- **On a Mac:** see [Running on a Mac](#running-on-a-mac-vllm-metal) below.
 
 ### Query it
 
@@ -301,6 +311,43 @@ if pt is not None:
 
 Send `model="base"` to the same server to get the untuned model. The agent uses `base` for its
 screen descriptions.
+
+### Running on a Mac (vllm-metal)
+
+The model also runs on Apple silicon under vllm-metal 0.31.0 (which tracks vLLM 0.31.0, like the
+H200). It passed our **Gate G** check in both forms. On the same 200 dev rows, the grounder on
+vllm-metal was compared with the H200's runtime-LoRA `grounder` serving the same adapter. To pass,
+`prompt_tokens` must match on every row, hit rates within 2 points, and hit/miss agreement
+≥ 90%:
+
+| Form on the Mac | `prompt_tokens` identical | Hit rate, Mac vs H200 | Hit/miss agreement |
+| --- | --- | --- | --- |
+| Merged checkpoint (repo root), serves `grounder` only | 200/200 | 87.0% vs 87.0% | 99.0% |
+| Base + LoRA in **one** vllm-metal instance (`base` and `grounder`, adapter per request) | 200/200 | 87.0% vs 87.0% | 99.0% (local p50 1.86 s) |
+
+- **vllm-metal needs the adapter's keys renamed.** vllm-metal 0.31 wraps the language model's
+  layers under mlx-vlm's names (`model.layers.N.…`), while PEFT names them
+  `model.language_model.layers.N.…`. The adapter as published fails at startup with "matched 0
+  wrapped modules".
+  - `adapter/` keeps the original PEFT keys, which vLLM on CUDA and `PeftModel` expect.
+  - [`scripts/gate_g_lora_keys.py`](https://github.com/pballou/nvidia-hack-26/blob/main/scripts/gate_g_lora_keys.py)
+    writes a re-keyed copy for vllm-metal (`model.language_model.layers.*` → `model.layers.*`).
+    The tensors are identical, and the 186 modules map one to one.
+- **For an agent, prefer base + LoRA.** The merged checkpoint has no `base`. When the tuned model
+  also wrote the screen descriptions, it put them on one long JSON line, which the agent's
+  summary clipping cut; that hid a payment-confirmation dialog from the planner. Use `base` for
+  descriptions and `grounder` for clicks, as on the H200.
+- **Render screenshots headless.** Every measured agent run (the Gym `web_agent` evals and the
+  agent harness) rendered the sandbox in headless Chromium. Headed Chromium rasterizes fonts differently: about 85k pixels of the
+  sandbox's pay dialog changed, and on those pixels the describer dropped the selected-option
+  cue (pay-50 passed 1/4 headed vs 8/8 headless). A headed browser is an unmeasured input for
+  both the describer and the grounder.
+- **Memory:** next to the BF16 Lightning planner on the same Mac (a 128 GB M4 Max), the grounder
+  only fit at `--gpu-memory-utilization 0.08 --max-num-batched-tokens 2560`, with other large
+  apps closed.
+- Setup, the serve script (`scripts/run_local_grounder.sh`) and the full Gate G record:
+  [docs/local-mac.md](https://github.com/pballou/nvidia-hack-26/blob/main/docs/local-mac.md)
+  ("Gate G results").
 
 ## Training
 
@@ -384,15 +431,17 @@ a cleaned OS-Atlas slice (Linux, macOS, AndroidWorld, UIBert, FineWeb).
   show +0.73 / −0.11, because they subtract accuracies already rounded to two decimals. The keep
   decisions are the same.
 
-Sources: `round_<r>/summary.json`, `pool_stats.json`, `knobs_used.json`, `grpo_summary.json` and
-`FINAL.json`, logged in runs.md (Sat 19:38–22:02 rows).
+Sources: round 1's `grpo_command.txt`, `knobs_used.json`, `pool_stats.json` and
+`round_1_summary.json`, and round 0's `round_0_summary.json`, ship in this repo's `training/`.
+Round 2 and the loop's `FINAL.json` (best round 1, dev 87.0) are logged in runs.md (Sat
+19:38–22:02 rows).
 
 ### Software and hardware
 
 - **Hardware:** 1× NVIDIA H200 on NVIDIA Brev. The merge for the root weights ran on a Mac's
-  CPU.
+  CPU (torch 2.13.0, transformers 5.17.0, peft 0.21.2).
 - **Software:** vLLM 0.31.0 (image pinned by digest), torch 2.13.0+cu130, transformers 5.17.0,
-  TRL 1.16.0, peft 0.21.2, NeMo Gym 0.7.0.
+  TRL 1.16.0, peft 0.21.2, NeMo Gym 0.7.0. On the Mac: vllm-metal 0.31.0.
 
 ## NeMo Gym environments
 
@@ -487,8 +536,9 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
     - The 1,003 rows from the downloaded BF16 checkpoint fall under its OpenMDW-1.1 license,
       which places no restrictions on outputs.
     - The 8,028 rows from NVIDIA's hosted API fall under the NVIDIA API Trial Terms of Service,
-      which limit trial use to non-production. **TBD:** Patrick's ~9:30 release check decides
-      whether these rows are published or only the local rows are; see the dataset card.
+      which limit trial use to non-production. **TBD (open question for the dataset card):**
+      Patrick's ~9:30 release check decides whether these rows are published or only the local
+      rows are.
   - Details and the open questions are in the dataset card.
 
 ## Citation
