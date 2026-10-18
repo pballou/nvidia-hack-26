@@ -1,0 +1,1289 @@
+{
+ "about": "Labelled phrasings for the clarify pre-flight (agent/clarify.py). task: the 12 sandbox task requests (sandbox/tasks.json). spec: the ask cases named in the feature request (\"Allors towards my bill.\" is a real clipped voice take). variant / hard_proceed / ask: written by a Claude workflow on 2026-10-17 (three writers: spoken task variants, near-boundary proceed cases, ask cases; then an independent judge labelled every phrasing against the rules and agreed with all 70 labels). The writers never saw the clarify prompt. Replies are recorded by scripts/clarify_eval.py --record.",
+ "rules": "Ask only if (a) unintelligible or garbled, (b) it would move money or change account/security settings and a required detail is missing (\"pay my bill\" = the full balance, clear), or (c) it is ambiguous between clearly different actions. Otherwise proceed.",
+ "cases": [
+  {
+   "text": "Make the text bigger, I can't read this.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "text-size-large",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Make the text bigger"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Make the text bigger",
+   "live_latency_ms": 2123.0
+  },
+  {
+   "text": "Download my September statement.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "download-september-statement",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Download my September statement"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Download my September statement",
+   "live_latency_ms": 1486.3
+  },
+  {
+   "text": "Mark all my messages as read.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "mark-all-read",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Mark all my messages as read"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Mark all my messages as read",
+   "live_latency_ms": 1542.5
+  },
+  {
+   "text": "I keep forgetting to pay. Turn on autopay.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "turn-on-autopay",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Turn on autopay"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Turn on autopay",
+   "live_latency_ms": 1476.8
+  },
+  {
+   "text": "Turn on high contrast.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "high-contrast",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Turn on high contrast"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Turn on high contrast",
+   "live_latency_ms": 1492.9
+  },
+  {
+   "text": "Turn off SMS for billing alerts.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "sms-billing-off",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Turn off SMS for billing alerts"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Turn off SMS for billing alerts",
+   "live_latency_ms": 1523.6
+  },
+  {
+   "text": "Which month did I use the most power? Open it.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "max-usage-month",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Which month did I use the most power? Open it."
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Which month did I use the most power? Open it.",
+   "live_latency_ms": 1659.4
+  },
+  {
+   "text": "Report an outage in the Riverside district.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "report-outage-riverside",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Report an outage in the Riverside district"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Report an outage in the Riverside district",
+   "live_latency_ms": 1598.1
+  },
+  {
+   "text": "Star the message from the landlord.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "star-landlord-message",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Star the message from the landlord"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Star the message from the landlord",
+   "live_latency_ms": 1573.3
+  },
+  {
+   "text": "Pay $50 toward my bill.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Pay $50 toward my bill."
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Pay $50 toward my bill.",
+   "live_latency_ms": 1576.8
+  },
+  {
+   "text": "Send a message to support saying my meter is broken.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "message-support-meter",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Send a message to support saying my meter is broken"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Send a message to support saying my meter is broken",
+   "live_latency_ms": 1645.1
+  },
+  {
+   "text": "Stop sending me promotions. No emails, no texts, no push notifications.",
+   "expect": "proceed",
+   "source": "task",
+   "task_id": "stop-promotions",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Stop sending me promotions. No emails, no texts, no push notifications."
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Stop sending me promotions. No emails, no texts, no push notifications.",
+   "live_latency_ms": 1726.6
+  },
+  {
+   "text": "Allors towards my bill.",
+   "expect": "ask",
+   "source": "spec",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like to do with your bill?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like to do with your bill?",
+   "live_latency_ms": 1521.5
+  },
+  {
+   "text": "Pay something toward my bill",
+   "expect": "ask",
+   "source": "spec",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "How much would you like to pay toward your bill?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "How much would you like to pay toward your bill?",
+   "live_latency_ms": 1576.3
+  },
+  {
+   "text": "turn it off",
+   "expect": "ask",
+   "source": "spec",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to turn off?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to turn off?",
+   "live_latency_ms": 1550.2
+  },
+  {
+   "text": "um the writing is way too small can you make the text bigger",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "text-size-large",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "make the text bigger"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "make the text bigger",
+   "live_latency_ms": 1521.7
+  },
+  {
+   "text": "Could you please make the text larger? I can't read it.",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "text-size-large",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "make the text larger"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "make the text larger",
+   "live_latency_ms": 1523.0
+  },
+  {
+   "text": "hey everything on here is tiny i cant read it make the letters bigger",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "text-size-large",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "make the letters bigger"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "make the letters bigger",
+   "live_latency_ms": 1530.6
+  },
+  {
+   "text": "can you download my september statment",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "download-september-statement",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "download September statement"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "download September statement",
+   "live_latency_ms": 1486.0
+  },
+  {
+   "text": "Uh, I'd like to download my statement from September.",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "download-september-statement",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "download statement from September"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "download statement from September",
+   "live_latency_ms": 1518.1
+  },
+  {
+   "text": "mark all my messages as read please",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "mark-all-read",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "mark all my messages as read"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "mark all my messages as read",
+   "live_latency_ms": 1540.6
+  },
+  {
+   "text": "so I want to mark all of my messages as read",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "mark-all-read",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "mark all messages as read"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "mark all messages as read",
+   "live_latency_ms": 1548.9
+  },
+  {
+   "text": "hey can you go into my messages and mark them all read",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "mark-all-read",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "go into my messages and mark them all read"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "go into my messages and mark them all read",
+   "live_latency_ms": 1616.9
+  },
+  {
+   "text": "i keep forgetting to pay my bill so turn on auto pay",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "turn-on-autopay",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn on auto pay"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn on auto pay",
+   "live_latency_ms": 1473.7
+  },
+  {
+   "text": "Please turn on autopay.",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "turn-on-autopay",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn on autopay"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn on autopay",
+   "live_latency_ms": 1503.4
+  },
+  {
+   "text": "could you please set up autopay for me i always forget to pay",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "turn-on-autopay",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "set up autopay"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "set up autopay",
+   "live_latency_ms": 1475.0
+  },
+  {
+   "text": "can you turn on high contrast mode",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "high-contrast",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn on high contrast mode"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn on high contrast mode",
+   "live_latency_ms": 1517.3
+  },
+  {
+   "text": "um please switch on the high contrast setting",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "high-contrast",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "switch on the high contrast setting"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "switch on the high contrast setting",
+   "live_latency_ms": 1555.1
+  },
+  {
+   "text": "turn off s m s for billing alerts",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "sms-billing-off",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn off sms for billing alerts"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn off sms for billing alerts",
+   "live_latency_ms": 1557.6
+  },
+  {
+   "text": "i dont want text messages for my billing alerts anymore can you turn off sms for those",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "sms-billing-off",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn off sms for billing alerts"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn off sms for billing alerts",
+   "live_latency_ms": 1518.4
+  },
+  {
+   "text": "which month did i use the most electricity and open that month",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "max-usage-month",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Which month did the user use the most electricity and open that month"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Which month did the user use the most electricity and open that month",
+   "live_latency_ms": 1658.9
+  },
+  {
+   "text": "Hey, can you find the month where I used the most power and open it?",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "max-usage-month",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Find the month where I used the most power and open it"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Find the month where I used the most power and open it",
+   "live_latency_ms": 1635.3
+  },
+  {
+   "text": "I want to report an outage in the Riverside district.",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "report-outage-riverside",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "I want to report an outage in the Riverside district."
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "I want to report an outage in the Riverside district.",
+   "live_latency_ms": 1655.3
+  },
+  {
+   "text": "uh the power is out in river side district can you report an outage",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "report-outage-riverside",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "report power outage in river side district"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "report power outage in river side district",
+   "live_latency_ms": 1596.1
+  },
+  {
+   "text": "please report a power outage for the riverside district",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "report-outage-riverside",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "report a power outage for the riverside district"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "report a power outage for the riverside district",
+   "live_latency_ms": 1662.1
+  },
+  {
+   "text": "star the message from my landlord",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "star-landlord-message",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "star the message from my landlord"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "star the message from my landlord",
+   "live_latency_ms": 1564.0
+  },
+  {
+   "text": "can you put a star on the message from the land lord",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "star-landlord-message",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "put a star on the message from the landlord"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "put a star on the message from the landlord",
+   "live_latency_ms": 1601.7
+  },
+  {
+   "text": "pay fifty dollars towards my bill",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay fifty dollars towards my bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay fifty dollars towards my bill",
+   "live_latency_ms": 1557.2
+  },
+  {
+   "text": "can you pay 50 bucks toward my bill",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay 50 toward bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay 50 toward bill",
+   "live_latency_ms": 1572.9
+  },
+  {
+   "text": "Um, I'd like to pay $50 towards my bill, please.",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay $50 towards bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay $50 towards bill",
+   "live_latency_ms": 1581.9
+  },
+  {
+   "text": "so i want to make a fifty dollar payment toward my bill",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "make a fifty dollar payment toward my bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "make a fifty dollar payment toward my bill",
+   "live_latency_ms": 1566.5
+  },
+  {
+   "text": "send a message to support saying my meter's broken",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "message-support-meter",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "send a message to support saying my meter's broken"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "send a message to support saying my meter's broken",
+   "live_latency_ms": 1665.2
+  },
+  {
+   "text": "hey could you message support and tell them my meter is broken",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "message-support-meter",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "message support and tell them my meter is broken"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "message support and tell them my meter is broken",
+   "live_latency_ms": 1588.9
+  },
+  {
+   "text": "stop sending me promotions no emails no texts no push notifications",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "stop-promotions",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "stop sending me promotions no emails no texts no push notifications"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "stop sending me promotions no emails no texts no push notifications",
+   "live_latency_ms": 1701.5
+  },
+  {
+   "text": "please stop sending me promos no promo emails no promo texts and no push notifications either",
+   "expect": "proceed",
+   "source": "variant",
+   "task_id": "stop-promotions",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "stop all promotional emails, texts, and push notifications"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "stop all promotional emails, texts, and push notifications",
+   "live_latency_ms": 1667.0
+  },
+  {
+   "text": "pay my bill",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay my bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay my bill",
+   "live_latency_ms": 1525.2
+  },
+  {
+   "text": "uh pay the full balance",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay the full balance"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay the full balance",
+   "live_latency_ms": 1535.4
+  },
+  {
+   "text": "just pay everything i owe",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay everything owed"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay everything owed",
+   "live_latency_ms": 1529.4
+  },
+  {
+   "text": "pay fifty dollars too my bill",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "pay fifty dollars to my bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "pay fifty dollars to my bill",
+   "live_latency_ms": 1532.8
+  },
+  {
+   "text": "Pay something toward my bill (clarified: fifty dollars)",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "pay-50",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Pay fifty dollars toward my bill"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Pay fifty dollars toward my bill",
+   "live_latency_ms": 1626.0
+  },
+  {
+   "text": "turn on paperless billing",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn on paperless billing"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn on paperless billing",
+   "live_latency_ms": 1550.2
+  },
+  {
+   "text": "turn off autopay",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn off autopay"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn off autopay",
+   "live_latency_ms": 1552.9
+  },
+  {
+   "text": "how much do i owe",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "how much do i owe"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "how much do i owe",
+   "live_latency_ms": 1564.3
+  },
+  {
+   "text": "when is my bill due",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "when is my bill due"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "when is my bill due",
+   "live_latency_ms": 1560.5
+  },
+  {
+   "text": "this stupid text is way too tiny make it bigger already",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "text-size-large",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "make the text bigger"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "make the text bigger",
+   "live_latency_ms": 1575.4
+  },
+  {
+   "text": "bigger text",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "text-size-large",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "increase text size"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "increase text size",
+   "live_latency_ms": 1566.8
+  },
+  {
+   "text": "high contrast on",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "high-contrast",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "high contrast on"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "high contrast on",
+   "live_latency_ms": 1538.0
+  },
+  {
+   "text": "autopay on",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "turn-on-autopay",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "autopay on"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "autopay on",
+   "live_latency_ms": 1557.1
+  },
+  {
+   "text": "mark all my massages as read",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "mark-all-read",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "mark all my messages as read"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "mark all my messages as read",
+   "live_latency_ms": 1603.2
+  },
+  {
+   "text": "turn on high contrast and make the text bigger too",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "high-contrast",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "turn on high contrast and make the text bigger"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "turn on high contrast and make the text bigger",
+   "live_latency_ms": 1680.9
+  },
+  {
+   "text": "ich month did i use the most power open it",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "max-usage-month",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "Which month did I use the most power? Open it."
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "Which month did I use the most power? Open it.",
+   "live_latency_ms": 1682.3
+  },
+  {
+   "text": "report an outage in river side",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "report-outage-riverside",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "report an outage in river side"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "report an outage in river side",
+   "live_latency_ms": 1609.0
+  },
+  {
+   "text": "tell support my meter is broke",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "message-support-meter",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "tell support my meter is broke"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "tell support my meter is broke",
+   "live_latency_ms": 1625.7
+  },
+  {
+   "text": "quit spamming me with promotions no emails no texts no push",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "stop-promotions",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "quit spamming me with promotions no emails no texts no push"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "quit spamming me with promotions no emails no texts no push",
+   "live_latency_ms": 1739.6
+  },
+  {
+   "text": "could you maybe grab my september statement for me thanks",
+   "expect": "proceed",
+   "source": "hard_proceed",
+   "task_id": "download-september-statement",
+   "reply": {
+    "name": "proceed",
+    "arguments": {
+     "normalized_request": "grab september statement"
+    }
+   },
+   "live_action": "proceed",
+   "live_said": "grab september statement",
+   "live_latency_ms": 1521.3
+  },
+  {
+   "text": "ty dollars towards my bill",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "How much would you like to pay?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "How much would you like to pay?",
+   "live_latency_ms": 1531.7
+  },
+  {
+   "text": "make a payment of dollars on my account",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "How much would you like to pay?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "How much would you like to pay?",
+   "live_latency_ms": 1622.5
+  },
+  {
+   "text": "pay my",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like to pay?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like to pay?",
+   "live_latency_ms": 1555.2
+  },
+  {
+   "text": "can you turn off the",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to turn off?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to turn off?",
+   "live_latency_ms": 1602.4
+  },
+  {
+   "text": "the usage blue auto window paid the",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like to do with the usage blue auto window?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like to do with the usage blue auto window?",
+   "live_latency_ms": 1636.4
+  },
+  {
+   "text": "ments for the outage thing",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to do for the outage thing?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to do for the outage thing?",
+   "live_latency_ms": 1645.9
+  },
+  {
+   "text": "turn autopay on off",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "Do you want to turn autopay on or off?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "Do you want to turn autopay on or off?",
+   "live_latency_ms": 1671.8
+  },
+  {
+   "text": "hmm what about the uh",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like to do?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like to do?",
+   "live_latency_ms": 1566.2
+  },
+  {
+   "text": "Put a bit toward my balance.",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "How much would you like to put toward your balance?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "How much would you like to put toward your balance?",
+   "live_latency_ms": 1639.5
+  },
+  {
+   "text": "pay part of my bill today",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "How much would you like to pay?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "How much would you like to pay?",
+   "live_latency_ms": 1576.8
+  },
+  {
+   "text": "just pay whatever i can this month",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "How much would you like to pay this month?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "How much would you like to pay this month?",
+   "live_latency_ms": 1590.4
+  },
+  {
+   "text": "change my password to",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What is the new password?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What is the new password?",
+   "live_latency_ms": 1567.1
+  },
+  {
+   "text": "Update my email address.",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What is the new email address?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What is the new email address?",
+   "live_latency_ms": 1557.8
+  },
+  {
+   "text": "change the phone number on my account",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What is the new phone number?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What is the new phone number?",
+   "live_latency_ms": 1554.3
+  },
+  {
+   "text": "switch off the bill thing",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What bill thing would you like to switch off?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What bill thing would you like to switch off?",
+   "live_latency_ms": 1667.8
+  },
+  {
+   "text": "Do that again.",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to do again?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to do again?",
+   "live_latency_ms": 1610.7
+  },
+  {
+   "text": "delete it",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to delete?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to delete?",
+   "live_latency_ms": 1583.8
+  },
+  {
+   "text": "change it back",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to change back?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to change back?",
+   "live_latency_ms": 1566.3
+  },
+  {
+   "text": "cancel it",
+   "expect": "ask",
+   "source": "ask",
+   "task_id": "",
+   "reply": {
+    "name": "ask_user",
+    "arguments": {
+     "question": "What would you like me to cancel?"
+    }
+   },
+   "live_action": "ask",
+   "live_said": "What would you like me to cancel?",
+   "live_latency_ms": 1573.6
+  }
+ ],
+ "prompt_version": "clarify-v4",
+ "prompt_sha": "c1adfb0587",
+ "sampling": {
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "max_tokens": 256
+ },
+ "lightning": {
+  "base_url": "http://127.0.0.1:8000/v1",
+  "model": "lightning",
+  "root": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+ },
+ "recorded_at": "2026-10-17T23:41:58-0400",
+ "command": "scripts/clarify_eval.py --record --repeats 2",
+ "confusion": {
+  "ask->ask": 22,
+  "proceed->proceed": 62
+ },
+ "latency_ms": {
+  "p50": 1567.1,
+  "p90": 1663.0,
+  "mean": 1581.6
+ }
+}

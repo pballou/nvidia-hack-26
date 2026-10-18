@@ -370,6 +370,8 @@ class WebAgentResourcesServer(SimpleResourcesServer):
             overrides["vlm"] = {"base_url": c.vlm_base_url}
         if c.headless is not None:
             overrides["browser"] = {"headless": c.headless}
+        # The interactive pre-flight (agent/clarify.py) is not part of the Gym loop; keep it off here too.
+        overrides["clarify"] = False
         return load_config(c.agent_config_path, overrides=overrides)
 
     def setup_webserver(self) -> FastAPI:

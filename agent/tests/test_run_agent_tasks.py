@@ -32,6 +32,7 @@ def harness(tmp_path, monkeypatch):
     state = {"in_flight": 0, "max_in_flight": 0, "calls": []}
 
     async def fake_run_one(task, cfg, sandbox, http, pool, quiet):
+        state.setdefault("cfgs", []).append(cfg)
         state["in_flight"] += 1
         state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
         state["calls"].append(task["id"])
@@ -74,6 +75,14 @@ def test_repeats_and_concurrency(harness):
     assert [r["repeat"] for r in s["tasks"]] == [0, 0, 0, 1, 1, 1, 2, 2, 2]
     assert [r["task_id"] for r in s["tasks"][:3]] == ["t0", "t1", "t2"]
     assert harness["max_in_flight"] == 2
+
+
+def test_clarify_is_forced_off(harness, monkeypatch):
+    """The harness measures the browser loop on the fixed phrasings: no pre-flight ask (agent/clarify.py)."""
+    monkeypatch.setenv("AGENT_CLARIFY", "on")
+    code, _ = harness["run"]()
+    assert code == 0 and harness["cfgs"] and all(c.clarify is False for c in harness["cfgs"])
+    assert _summary(harness["tmp"])["config"]["clarify"] is False
 
 
 def test_adapter_change_aborts_the_arm(harness, monkeypatch):

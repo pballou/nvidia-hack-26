@@ -198,6 +198,7 @@ class LightningPlanner:
         self.client = client
         self.send_parallel_tool_calls = True  # dropped for the session if the server rejects it
         self.tool_choice = cfg.tool_choice     # "required" by default; "auto" if the server rejects it
+        self.required_rejected = False         # set on that fallback; complete() then sends "auto" too
         self.request: str = ""
         self.initial_observation: str = ""
         self.records: list[_Record] = []
@@ -271,9 +272,10 @@ class LightningPlanner:
             if self.send_parallel_tool_calls and "parallel_tool_calls" in str(e):
                 self.send_parallel_tool_calls = False
                 kwargs.pop("parallel_tool_calls", None)
-            elif self.tool_choice != "auto" and "tool_choice" in str(e):
-                log.warning("server rejected tool_choice=%r; using 'auto' for this run", self.tool_choice)
+            elif kwargs.get("tool_choice") != "auto" and "tool_choice" in str(e):
+                log.warning("server rejected tool_choice=%r; using 'auto' for this run", kwargs["tool_choice"])
                 self.tool_choice = kwargs["tool_choice"] = "auto"
+                self.required_rejected = True
             else:
                 raise
             return await self.client.chat.completions.create(**kwargs)
@@ -316,6 +318,24 @@ class LightningPlanner:
             t_wait = time.perf_counter()
             await asyncio.sleep(wait)
             waited += _ms(t_wait)
+
+    async def complete(self, messages: list[dict], tools: list[dict], *, temperature: float, top_p: float,
+                       max_tokens: int) -> PlanResult:
+        """One tool-calling reply outside the step loop (agent/clarify.py): thinking off and
+        tool_choice "required", with the same server fallbacks as propose() but no retries or
+        rate-limit waits. Never raises."""
+        t0 = time.perf_counter()
+        kwargs: dict[str, Any] = dict(
+            model=self.cfg.lightning.model, messages=messages, tools=tools,
+            tool_choice="auto" if self.required_rejected else "required",
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+        if self.send_parallel_tool_calls:
+            kwargs["parallel_tool_calls"] = False
+        try:
+            return self._parse(await self._create(kwargs), False, _ms(t0))
+        except Exception as e:
+            return self._error(e, False, t0, 0.0)
 
     def _error(self, e: Exception, thinking: bool, t0: float, waited: float) -> PlanResult:
         return PlanResult(tool_calls=[], content="", reasoning=None, thinking=thinking, latency_ms=_ms(t0) - waited,

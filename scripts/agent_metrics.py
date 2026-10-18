@@ -86,7 +86,7 @@ class Episode:
     tags: list[str] = field(default_factory=list)
     verified: bool | None = None       # None: no verifier result (no summary row, harness error, masked)
     claimed: bool | None = None
-    excluded: str | None = None        # masked | dropped | incomplete | stopped | infra_error | adapter_changed | no_reward
+    excluded: str | None = None        # masked | dropped | incomplete | stopped | needs_input | infra_error | adapter_changed | no_reward
     end_reason: str | None = None      # done | max_steps | error | no_tool_call | ...
     steps: int | None = None
     n_lightning_calls: int = 0
@@ -314,6 +314,8 @@ def interactive_episode(run_id: str, events: list[dict], summary: dict | None, t
             ep.wall_s = round(float(done["ts"]) - float(start["ts"]), 3)
         if ep.end_reason == "stopped":
             ep.excluded = "stopped"
+        elif ep.end_reason == "needs_input":  # the clarify step asked first: no attempt at the task
+            ep.excluded = "needs_input"
         elif ep.end_reason == "error":  # Lightning unreachable (agent/core.py), like Gym's masked outages
             ep.excluded = "infra_error"
     else:

@@ -16,6 +16,11 @@ Thinking: `on` thinks on every call; `retry` thinks on the call after a problem 
 of a reply without a tool call (a thinking reply cut off at the token limit would otherwise
 keep thinking on until max_steps).
 
+Pre-flight (cfg.clarify, interactive only; agent/clarify.py): before the browser opens, one
+Lightning call decides whether the request is clear enough to act on. If not, the run ends with
+done reason "needs_input" and the question; the follow-up run's request carries the answer and
+its start event the `parent_run_id`.
+
 The start event's config.lightning also gets `root`: the checkpoint the endpoint reports
 serving (vLLM /v1/models), since the URL and served name don't identify the build.
 
@@ -36,7 +41,7 @@ Done-event stats:
   n_api_errors      Lightning calls that failed (after the planner's retries and rate-limit waits)
   n_stuck_warnings  times Lightning was told it was stuck (agent/progress.py)
   n_stuck_stops     1 if the run ended as "stuck"
-  latency_ms        {stage: [ms, ...]} for plan, ground, act, settle, screenshot, summary
+  latency_ms        {stage: [ms, ...]} for clarify, plan, ground, act, settle, screenshot, summary
                     (plan excludes rate-limit waits; the plan event's wait_ms has them)
 
 Vision-only: nothing here touches the DOM or the sandbox state.
@@ -53,6 +58,7 @@ from typing import Any
 
 from PIL import Image
 
+from agent.clarify import clarify
 from agent.config import AgentConfig
 from agent.observation import Observation
 from agent.planner import NOT_EXECUTED, LightningPlanner, PlanResult, ToolCall
@@ -148,6 +154,8 @@ class _Run:
         self.steps = 0
         self.reason = "max_steps"
         self.error: str | None = None
+        self.question: str | None = None  # needs_input: what to ask the user (agent/clarify.py)
+        self.request = ""
         self.finished: dict | None = None
         self.session: AgentSession | None = None
         self._summary_emitted: Any = None  # last Summary reported in an observation event
@@ -189,15 +197,25 @@ class _Run:
         await self.emit(step, "observation", payload, screenshot_path=shot, timings_ms=timings)
 
     async def run(self, request: str, start_url: str, planner_client: Any, grounder: Any, summarizer: Any,
-                  pool: Any) -> None:
+                  pool: Any, parent_run_id: str | None = None) -> None:
         cfg = self.cfg
-        start = {"request": request, "start_url": start_url, "config": cfg.public_dict()}
+        self.request = request
+        start = {"request": request, "start_url": start_url, "config": cfg.public_dict(),
+                 **_drop_empty({"parent_run_id": parent_run_id})}
         try:
             planner = LightningPlanner(cfg, client=planner_client)  # raises without an API key
             self.to_close.append(planner)
             start["config"]["lightning"].update(await planner.server_info())
         finally:  # every run's events begin with start, even if it fails or is cancelled here
             await self.emit(0, "start", start)
+        if cfg.clarify:  # before the browser opens: an unclear request costs one short call, nothing else
+            c = await clarify(planner, request)
+            timing = {"clarify": c.latency_ms} if c.latency_ms is not None else {}
+            self._time(timing)
+            await self.emit(0, "clarify", c.event_payload(request, cfg.lightning.model), timings_ms=timing)
+            if c.asks:
+                self.reason, self.question = "needs_input", c.question
+                return
         if pool is None:
             from agent import browser  # lazy: tests inject a fake pool
 
@@ -398,6 +416,8 @@ class _Run:
             summary = f"Stopped: reached the {self.cfg.max_steps}-step limit before finishing."
         elif self.reason == "stuck":
             summary = self.progress.summary()
+        elif self.reason == "needs_input":
+            summary = self.question or ""
         elif self.reason == "stopped":
             summary = "Stopped by the user."
         else:
@@ -405,6 +425,8 @@ class _Run:
         stats = dict(self.stats, latency_ms=self.latency)
         done = {"success_claimed": success, "summary": summary, "steps": self.steps, "reason": self.reason,
                 "stats": stats}
+        if self.reason == "needs_input":  # the console asks this, then starts a run with the answer
+            done.update(question=self.question, request=self.request)
         try:  # the done line is written before on_event runs, so a hung console only delays it
             cancelled |= await _shielded(asyncio.wait_for(self.emit(self.steps, "done", done), CLEANUP_EMIT_TIMEOUT_S))
         except Exception:
@@ -412,7 +434,7 @@ class _Run:
         finally:
             self.trace.close()
         result = RunResult(run_id=self.trace.run_id, success_claimed=success, summary=summary, steps=self.steps,
-                           trace_dir=str(self.trace.dir))
+                           trace_dir=str(self.trace.dir), reason=self.reason, question=self.question)
         if cancelled:
             raise asyncio.CancelledError
         return result
@@ -421,18 +443,19 @@ class _Run:
 async def run_task(request: str, *, start_url: str, cfg: AgentConfig,
                    on_event: EventCallback | None = None,
                    planner_client: Any = None, grounder: Any = None, summarizer: Any = None, pool: Any = None,
-                   run_id: str | None = None) -> RunResult:
+                   run_id: str | None = None, parent_run_id: str | None = None) -> RunResult:
     """Run one request in a fresh browser session (contracts.md §5).
 
     Optional injection points (tests, console): `planner_client` (an AsyncOpenAI-like
     client for Lightning), `grounder` / `summarizer` (agent.session protocols), `pool`
     (anything with `async new_session(viewport, *, navigation_timeout_s)`; default
     agent.browser.get_pool) and
-    `run_id`. Cancelling the task (console Stop) emits done(reason='stopped') and re-raises.
+    `run_id`. `parent_run_id`: the needs_input run whose question this run's request answers
+    (agent.clarify.follow_up_request); recorded in the start event. Cancelling the task (console Stop) emits done(reason='stopped') and re-raises.
     """
     run = _Run(cfg, TraceWriter(cfg.run_dir_root, run_id), on_event)
     try:
-        await run.run(request, start_url, planner_client, grounder, summarizer, pool)
+        await run.run(request, start_url, planner_client, grounder, summarizer, pool, parent_run_id)
     except asyncio.CancelledError:
         run.reason = "stopped"
         raise

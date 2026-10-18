@@ -10,6 +10,9 @@ summary_model: base         # base | grounder (grounder when Mac-local fully loc
 model_family: qwen3_5       # gate D1: Qwen/Qwen3.5-2B (qwen3_vl was the other candidate)
 max_steps: 25               # interactive cap; agent/progress.py warns, then stops a stuck run ("stuck"). The Gym eval keeps 12.
 thinking: retry             # off | on | retry (on only after a no-change/failed step)
+clarify: off                # pre-flight "understand the request" call (agent/clarify.py). Off: 5 false asks in 90
+                            # held-out phrasings (docs/results.md). AGENT_CLARIFY=on or --clarify on to use it.
+                            # scripts/run_agent_tasks.py and the Gym web_agent server force it off either way.
 viewport: {width: 1280, height: 800}
 runs_dir: runs
 

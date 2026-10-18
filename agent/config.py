@@ -5,7 +5,7 @@ Precedence: explicit `overrides` > env vars > yaml > dataclass defaults.
 Env vars (all optional):
   AGENT_CONFIG              path to the yaml (default: <repo>/configs/agent.yaml)
   AGENT_SANDBOX_URL, AGENT_GROUNDER_MODEL, AGENT_SUMMARY_MODEL, AGENT_MODEL_FAMILY,
-  AGENT_MAX_STEPS, AGENT_THINKING, AGENT_RUNS_DIR, AGENT_HEADLESS
+  AGENT_MAX_STEPS, AGENT_THINKING, AGENT_RUNS_DIR, AGENT_HEADLESS, AGENT_CLARIFY (on|off)
   AGENT_LIGHTNING           hosted | local (picks a preset from lightning_presets)
   AGENT_LIGHTNING_BASE_URL, AGENT_LIGHTNING_MODEL, AGENT_LIGHTNING_API_KEY_ENV
   AGENT_VLM_BASE_URL, AGENT_VLM_API_KEY
@@ -35,6 +35,7 @@ DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "agent.yaml"
 
 SERVED_NAMES = ("base", "grounder")
 THINKING_MODES = ("off", "on", "retry")
+_ON_OFF = {"on": True, "true": True, "1": True, "yes": True, "off": False, "false": False, "0": False, "no": False}
 
 DEFAULT_PRESETS = {
     "hosted": {
@@ -123,6 +124,10 @@ class AgentConfig:
     # The Gym rows keep "auto", since simple_agent stops only on a reply without a tool call.
     tool_choice: str = "required"
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    # Pre-flight "understand the request" call (agent/clarify.py), interactive only. Off by default
+    # (configs/agent.yaml too); AGENT_CLARIFY=on or --clarify on turns it on. The harness
+    # (scripts/run_agent_tasks.py) and the Gym web_agent server force it off either way.
+    clarify: bool = False
     # Test-only DOM oracle instead of the VLM (agent/testing/oracle_grounder.py). It
     # refuses to run outside pytest or the --use-oracle-grounder debug flag.
     use_oracle_grounder: bool = False
@@ -130,6 +135,12 @@ class AgentConfig:
     def __post_init__(self):
         if isinstance(self.thinking, bool):  # YAML 1.1 reads a bare `thinking: off` as False
             object.__setattr__(self, "thinking", "on" if self.thinking else "off")
+        if isinstance(self.clarify, str):     # "on" | "off" from env vars and CLI flags
+            if self.clarify.strip().lower() not in _ON_OFF:
+                raise ValueError(f"clarify must be on or off, got {self.clarify!r}")
+            object.__setattr__(self, "clarify", _ON_OFF[self.clarify.strip().lower()])
+        if not isinstance(self.clarify, bool):
+            raise ValueError(f"clarify must be on or off, got {self.clarify!r}")
         if self.grounder_model not in SERVED_NAMES:
             raise ValueError(f"grounder_model must be one of {SERVED_NAMES}, got {self.grounder_model!r}")
         if self.summary_model not in SERVED_NAMES:
@@ -192,6 +203,7 @@ class AgentConfig:
             "sampling": dataclasses.asdict(self.sampling),
             "history_full_steps": self.history_full_steps,
             "tool_choice": self.tool_choice,
+            "clarify": self.clarify,
             "timeouts": dataclasses.asdict(self.timeouts),
             "viewport": dataclasses.asdict(self.viewport),
             "use_oracle_grounder": self.use_oracle_grounder,
@@ -231,6 +243,7 @@ _ENV_SCALARS = {
     "AGENT_MAX_STEPS": ("max_steps", int),
     "AGENT_THINKING": ("thinking", str),
     "AGENT_RUNS_DIR": ("runs_dir", str),
+    "AGENT_CLARIFY": ("clarify", str),
 }
 
 

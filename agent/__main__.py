@@ -36,7 +36,7 @@ def config_from_args(args: argparse.Namespace) -> AgentConfig:
     """load_config + CLI overrides. --use-oracle-grounder also unlocks the oracle's guard."""
     overrides: dict = {}
     for flag, key in (("grounder", "grounder_model"), ("summary", "summary_model"), ("thinking", "thinking"),
-                      ("lightning", "lightning"), ("max_steps", "max_steps")):
+                      ("lightning", "lightning"), ("max_steps", "max_steps"), ("clarify", "clarify")):
         if getattr(args, flag, None) is not None:
             overrides[key] = getattr(args, flag)
     if args.headed:
@@ -58,6 +58,10 @@ def format_event(ev: StepEvent) -> str:
     p = ev.payload
     if ev.kind == "start":
         text = f"{p.get('request')!r} @ {p.get('start_url')}"
+    elif ev.kind == "clarify":
+        text = (f"ask: {p.get('question')!r}" if p.get("action") == "ask"
+                else f"proceed: {p.get('normalized_request') or p.get('request')!r}")
+        text += "".join(f"  [{k}: {p[k]}]" for k in ("error", "skipped") if p.get(k))
     elif ev.kind == "observation":
         o = p.get("observation", {})
         changed = {True: "changed", False: "NO change", None: ""}[o.get("screen_changed")]
@@ -108,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m agent", description=__doc__.split("\n\n")[0])
     p.add_argument("request", help="what the user wants, in their words")
     p.add_argument("--start-url", help="page to start on (default: the sandbox root)")
+    p.add_argument("--clarify", choices=("on", "off"),
+                   help="pre-flight 'understand the request' call (agent/clarify.py; configs/agent.yaml: off)")
     add_model_args(p)
     args = p.parse_args(argv)
     try:

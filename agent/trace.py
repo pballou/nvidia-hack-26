@@ -7,8 +7,13 @@ Trace layout (gitignored):
                                     with a crosshair at the click, the target text and the step
 
 Event payloads by kind (all JSON-serializable; done-event stats are documented in agent/core.py):
-  start        {request, start_url, config}  (config.lightning.root: the checkpoint the endpoint
-               reports serving, or null + server_error)
+  start        {request, start_url, config, parent_run_id?}  (config.lightning.root: the checkpoint the
+               endpoint reports serving, or null + server_error; parent_run_id: the needs_input run
+               this request answers)
+  clarify      {action: proceed|ask, request, question?, normalized_request?, model, prompt_version,
+               prompt_sha, usage?, latency_ms?, error?, skipped?, tool_call?: {name, arguments}}
+               (step 0, cfg.clarify only, agent/clarify.py; error = the call failed and the run
+               proceeded anyway; skipped = no call was made)
   observation  {observation: {step, url, title, screen_changed, last_action_result, screen_summary}, text,
                summary?: {model, prompt_sha?, usage?, error?, reused?}}
                (no screenshot_path when the screen could not be captured; summary.reused=true when
@@ -24,8 +29,10 @@ Event payloads by kind (all JSON-serializable; done-event stats are documented i
   usage = {prompt_tokens, completion_tokens} when the server reports it.
   action       {name, arguments, ok, error?, screen_changed, click?: {x, y}, done?}
   error        {message, where, recoverable, finish_reason?}
-  done         {success_claimed, summary, steps, reason: done|max_steps|stuck|stopped|error, stats}
-               (stuck: agent/progress.py ended a run that made no progress; the summary asks the user)
+  done         {success_claimed, summary, steps, reason: done|max_steps|stuck|needs_input|stopped|error, stats,
+               question?, request?}
+               (stuck: agent/progress.py ended a run that made no progress; the summary asks the user.
+               needs_input: the clarify step asked `question` before the browser opened; steps 0)
 """
 
 from __future__ import annotations
@@ -39,7 +46,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-EVENT_KINDS = ("start", "observation", "plan", "tool_call", "grounding", "action", "error", "done")
+EVENT_KINDS = ("start", "clarify", "observation", "plan", "tool_call", "grounding", "action", "error", "done")
 
 
 @dataclass
@@ -71,6 +78,8 @@ class RunResult:
     summary: str
     steps: int
     trace_dir: str
+    reason: str | None = None    # the done event's reason
+    question: str | None = None  # reason "needs_input": what to ask the user
 
     def to_dict(self) -> dict:
         return asdict(self)

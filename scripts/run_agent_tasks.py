@@ -189,7 +189,8 @@ async def amain(args: argparse.Namespace) -> int:
     tasks = select_tasks(all_tasks, args.ids, args.tags)
     if not tasks:
         raise SystemExit("no tasks selected")
-    cfg = cfg.with_options(sandbox_url=sandbox)
+    # clarify off: the harness measures the browser loop on the fixed task phrasings (agent/clarify.py).
+    cfg = cfg.with_options(sandbox_url=sandbox, clarify=False)
 
     rows: list[dict] = []
     started = time.strftime("%Y%m%d-%H%M%S")

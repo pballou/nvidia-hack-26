@@ -645,6 +645,7 @@ def test_yaml_server_block_is_accepted(monkeypatch):
                 "AGENT_SANDBOX_URL", "AGENT_MAX_STEPS"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("AGENT_GROUNDER_MODEL", "grounder")
+    monkeypatch.setenv("AGENT_CLARIFY", "on")
     conf = OmegaConf.load(Path(app_module.__file__).parent / "configs" / "web_agent.yaml")
     block = OmegaConf.to_container(conf.web_agent.resources_servers.web_agent, resolve=True)
     server = WebAgentResourcesServer(config=WebAgentConfig(name="web_agent", host="127.0.0.1", port=0, **block),
@@ -658,6 +659,8 @@ def test_yaml_server_block_is_accepted(monkeypatch):
     # larger cap plus the "stuck" stop (agent/progress.py), which Gym's simple_agent loop doesn't have.
     assert conf.web_agent_simple_agent.responses_api_agents.simple_agent.max_steps == 12
     assert agent_cfg.max_steps == 25
+    # The interactive pre-flight (agent/clarify.py) never runs in Gym, even when the env turns it on.
+    assert agent_cfg.clarify is True and server._cfg.clarify is False
 
 
 def test_compute_metrics_by_tag():
