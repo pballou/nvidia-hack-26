@@ -25,6 +25,40 @@ Lightning, the real sandbox, and grounder choices made on the dev split.
 
 ## Agent (sandbox tasks, verified from sandbox state)
 
+### Demo-config check: Lightning temperature 1.0 vs 0.6 (Sun 03:07–03:18; not a headline)
+
+Setup: fully local Mac.
+
+- **VLM:** `:8011` on vllm-metal, one process serving `base` (descriptions) and `grounder` (the
+  FINAL LoRA, clicks).
+- **Lightning:** official BF16 on `:8000`, thinking off.
+- **Harness:** `scripts/run_agent_tasks.py`, concurrency 1, with the adapter checked before and
+  after every run. Clarify is off in the harness. That matches the console: a proceeding clarify
+  call doesn't change what the planner sees.
+- **Arms:** interleaved round by round, 4 repeats each.
+- **Tasks:** pay-50, using the spoken phrasing from the demo ("Pay fifty dollars towards my
+  bill."), and text-size-large.
+
+| Arm | pay-50 verified | text-size-large verified | False claims | Steps (pay / text) | Wall p50 (pay / text) |
+| --- | --- | --- | --- | --- | --- |
+| T = 1.0 (model card) | 4/4 | 4/4 | 0 | 5-6 / 2-4 | 58 / 24 s |
+| T = 0.6 | 4/4 | 4/4 | 0 | 5-7 / 3-6 | 62 / 26 s |
+
+- **No temperature effect at this n.** NVIDIA's card recommends temperature 1.0 and top_p 0.95 for
+  every mode, including thinking off and tool calling, and gives no greedy setting. The demo keeps
+  1.0.
+- **What decided pay-50 was the screen description of the pay dialog.**
+  - These 8 runs: it said "Full balance (selected)" and listed the empty Other-amount input every
+    time. The planner then chose Other amount every time, and all 8 passed.
+  - T1's four console runs ~02:50, on near-identical screenshots (one is 1 px shifted): the
+    description had neither cue every time. The planner passed 1/4. The other 3 continued with the
+    preselected full balance, confirmed a dialog that said $142.37, and claimed $50.
+  - The `:8011` process was restarted between the two sessions; what changed is being asked of T4.
+- **Before recording,** do a console dry run of pay-50 and check that the dialog's description
+  names the selected option.
+- **Guards (post-Sunday):** check the confirmed amount against the request, and an A/B
+  oscillation rule.
+
 ### Clarify pre-flight (Sat 23:00–23:50, official BF16 Lightning, local `:8000`)
 
 `agent/clarify.py`, prompt `clarify-v4` (sha `c1adfb0587`): one Lightning call before the browser
