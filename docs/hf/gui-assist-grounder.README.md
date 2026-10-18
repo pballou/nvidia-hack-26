@@ -101,7 +101,7 @@ was evaluated on it after the loop had picked it.
   - vs `sft-lightning`, the loop's starting adapter: **+2.25**, 34 fixed / 6 broken,
     p ≈ 8 × 10⁻⁶;
   - vs `sft-template`: +1.29, 50 fixed / 34 broken, p = 0.10, **not significant**;
-  - vs base (86.25; 86.3 rounded): +4.10 (this pair wasn't McNemar-tested).
+  - vs base (86.25; 86.3 rounded): **+4.10**, 89 fixed / 38 broken, p ≈ 7 × 10⁻⁶.
 - **Released, by platform and type** (text / icon): mobile 96.90 / 88.15, desktop 91.67 / 84.92,
   web 92.74 / 82.76. Base: mobile 97.6 / 82.9, desktop 90.6 / 74.6, web 87.6 / 75.4.
 

@@ -264,6 +264,7 @@ stayed frozen through the FINAL grounder rerun (Sat 22:04), so all three arms co
 - [docs/submission.md](docs/submission.md): submission checklist, publishing, video plan
 - [docs/bounty-nemo-gym.md](docs/bounty-nemo-gym.md): NeMo Gym bounty write-up (envs, the Gym-driven improvement loop, results)
 - [docs/bounty-lightning.md](docs/bounty-lightning.md): Nemotron Lightning bounty write-up (planner, data engine, optimizations)
+- [docs/bounty-vllm.md](docs/bounty-vllm.md): Red Hat vLLM bounty write-up (serving architecture, configuration, measured results)
 - [docs/research-notes.md](docs/research-notes.md): verified facts and sources
 - [AGENTS.md](AGENTS.md): rules for teammates and coding agents
 

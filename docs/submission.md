@@ -18,7 +18,38 @@ Target: everything finished by 10:30.
 | Tools Used | NeMo Gym (envs, rollouts, profiling, compare, BLADE), vLLM (+ vllm-metal on the Mac), NVIDIA Brev (H200), NeMo-Speech.cpp (Parakeet voice input), TRL, Playwright | all | — |
 | ☑ Lightning bounty + explanation | What Lightning does (planner/tool-caller; instruction rewriting), why, how we optimize it (thinking budget, tool schema, Gym-measured success/latency) | Patrick | `docs/bounty-lightning.md` (final, Sun). Form text: §Form text |
 | ☑ NeMo Gym bounty + explanation | Gym setup (`gui_grounding`, `web_agent`), **baseline vs. final** numbers from `gym eval compare`, what we changed and why (BLADE findings → data/GRPO) | Charlie + Kyle | `docs/bounty-nemo-gym.md` (final, Sun 00:30). Form text: §Form text |
-| ☑ Red Hat vLLM bounty | (checkbox only) vLLM serves both models; GRPO rollouts via vLLM colocate | Kyle | — |
+| ☑ Red Hat vLLM bounty + explanation | How vLLM fits (one process for `base` + `grounder`, Gym evals, colocated GRPO rollouts, vllm-metal on the Mac), how we configured it, measured results | Kyle | `docs/bounty-vllm.md` (draft). Form text: §Form text |
+
+## Bounty asks → where we answer them
+
+Condensed from the organizers' bounty slides. "Open" is what a judge could push on.
+
+**Best Use of NVIDIA Nemotron Lightning** (RTX 5070, NVIDIA Developer Livestream feature):
+
+| Ask | Where we answer it | Open |
+| --- | --- | --- |
+| **Challenge:** Lightning does meaningful real work, alone or with other models; show what it enables | Planner and tool-caller for every agent step, plus the data engine that rewrote 8,620 SFT instructions ([bounty-lightning.md](bounty-lightning.md) §2) | — |
+| **Required:** a core part of the project | It's the agent's only planner: nothing happens on screen without a Lightning tool call | — |
+| **Demonstrate:** its contribution (quality, speed, efficiency, usefulness, creativity) | Thinking ablation: on vs off 26 vs 19 of 32 jobs, p = 0.039. Rewrite audit 42/43 faithful. Self-hosted ~1.2 s per step vs ~26 s hosted (§5, §6; [results.md](results.md)) | The rewrite ablation is mixed: dev +0.41 (inside the ~1.1-point SE), SSv2-clean −0.97. Present it as an ablation, not a win |
+| **Submit:** what it does, why we chose it, how we optimize it | §2, §3, §4; form text below | — |
+
+**Best Model Improvement with NeMo Gym** (RTX 5070, NVIDIA Developer Livestream feature):
+
+| Ask | Where we answer it | Open |
+| --- | --- | --- |
+| **Challenge:** one task a small model fails at today; make the score better with Gym | 2B GUI click grounding: base 76.4% dev / 86.25% SSv2-clean → final 87.0% / 90.35% ([bounty-nemo-gym.md](bounty-nemo-gym.md) §1–§2) | — |
+| **Required:** a Gym env with tasks, tools the agent can use, and code that scores each attempt | `gui_grounding` (rows + point-in-box `/verify`) and `web_agent` (12 sandbox tasks, 5 tools, app-state checks) (§3) | The score that improved is on `gui_grounding`, which is single-turn with no tools. The env with tools, `web_agent`, shows no significant change (18 / 22 / 17 of 36). Name both envs and say which one moved |
+| **Demonstrate:** baseline vs final on the same held-out tasks and eval config; isolate what made the improvement | SSv2-clean, same 1,244 rows and harness, T=0: 86.25 → 90.35 (+4.10). Separated into SFT (+9.9 dev), GRPO round 1 (+2.25 SSv2-clean over its start, p ≈ 8e-6) and the template-vs-Lightning SFT ablation (§2, §8) | No equal-compute non-GRPO control. (The base → final pair is now tested: 89 fixed vs 38 broken, p ≈ 7e-6) |
+| **Submit:** Gym setup, baseline vs final, how to run scoring, how we made the improvement | §3, §2, §9, §4; form text below | The §9 scoring commands need the Brev box, which is stopped |
+
+**Best Use of Red Hat vLLM** (JBL speaker per member, Red Hat Office Hours feature):
+
+| Ask | Where we answer it | Open |
+| --- | --- | --- |
+| **Challenge:** genuinely served on vLLM; vLLM plays a meaningful role in how the app runs | vLLM serves every generative model at every stage: H200 grounder, Gym evals, GRPO rollouts, and Lightning plus the local grounder on the Mac ([bounty-vllm.md](bounty-vllm.md) §2) | — |
+| **Required:** vLLM as the serving layer for a core model; functional and central | One process serves `base` + `grounder`, on the H200 and on the Mac, and the parameter-cap design depends on it (§2) | — |
+| **Demonstrate:** performance, efficiency, throughput, latency, scalability or reliability | 32,000 Gym replies in ~7 min; grounding p50 0.64–0.75 s; Gate G parity between CUDA and Metal runtime LoRA (87.0 vs 87.0); GRPO log-probs match (§4) | No controlled benchmark (`vllm bench serve`). Latencies come from real runs, several on a shared GPU |
+| **Submit:** how vLLM fits, how we configured and optimized it, measurable results; depth over breadth | bounty-vllm.md §2–§4; form text below | We'd planned it as checkbox-only. Check whether the form has a text box |
 
 ## Form text (paste-ready drafts)
 
@@ -30,6 +61,7 @@ with the full docs; each one links to its full doc for judges who want more.
 - **Lightning text: final** (Sun 00:35). It matches bounty-lightning.md and results.md: the agent
   numbers name each arm (base 18/36, sft-template 22/36, final 17/36, all within noise), and the
   thinking result is the 12 × 3 off/retry/on ablation, not Saturday's n=1 read.
+- **vLLM text: draft** (Sun). It matches bounty-vllm.md.
 
 **Lightning bounty:**
 
@@ -70,18 +102,27 @@ with the full docs; each one links to its full doc for judges who want more.
 > through Gym decides keep or revert (gain ≥ +0.5 points), and `gym eval compare` against the
 > previous round is saved as the per-task flip report. BLADE failure analysis steers the next
 > round through pre-approved knobs. GRPO round 1 raised dev from 86.27% to 87.00% (22 fixed vs 15
-> broken, not significant on its own); round 2 was flat and reverted. Final adapter: 87.0% dev and 90.35% on held-out ScreenSpot-v2-clean (a second run gave 90.27). On ScreenSpot-v2-clean that is +4.10 over base (86.25%), and +2.25 over the loop's starting adapter (34 rows fixed vs 6 broken on the same rows, McNemar p ≈ 8e-6). Against the raw-label (template) SFT, stronger on ScreenSpot-v2-clean but not the dev pick, it is +1.29 (p = 0.10). In the `web_agent` env (12 tasks × 3), agent success is within noise for all grounders (base 18/36, template SFT 22/36, final 17/36), and both tuned grounders cut failed actions from 10 to 0. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
+> broken, not significant on its own); round 2 was flat and reverted. Final adapter: 87.0% dev and 90.35% on held-out ScreenSpot-v2-clean (a second run gave 90.27). On ScreenSpot-v2-clean that is +4.10 over base (86.25%; 89 rows fixed vs 38 broken, McNemar p ≈ 7e-6), and +2.25 over the loop's starting adapter (34 rows fixed vs 6 broken on the same rows, McNemar p ≈ 8e-6). Against the raw-label (template) SFT, stronger on ScreenSpot-v2-clean but not the dev pick, it is +1.29 (p = 0.10). In the `web_agent` env (12 tasks × 3), agent success is within noise for all grounders (base 18/36, template SFT 22/36, final 17/36), and both tuned grounders cut failed actions from 10 to 0. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
 > were captured on the same machines as OS-Atlas training data. Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-nemo-gym.md`
 
-**vLLM bounty** (checkbox only; use this if the form asks for a sentence):
+**vLLM bounty:**
 
-> vLLM serves the planner and the grounder (voice input runs on NeMo-Speech.cpp). One Qwen3.5-2B
-> process serves both `base` (screen descriptions) and `grounder` (our LoRA adapter, switched per
-> request), so the base and tuned models count once toward the parameter cap. GRPO rollouts run on
-> vLLM colocated with TRL on the H200. The demo runs fully local on a MacBook through vllm-metal,
-> the vLLM project's plugin for Apple GPUs: Lightning (official BF16) plus one grounder instance,
-> which matches the H200 on 200 dev rows (87.0% both, 99% agreement).
+> vLLM is the serving layer for every generative model in GUI Assist, a vision-only accessibility
+> agent (only voice input runs elsewhere, on NeMo-Speech.cpp). On the H200, one vLLM 0.31.0 process
+> serves Qwen3.5-2B under two names: `base` (screen descriptions) and `grounder` (our LoRA adapter,
+> switched per request). That keeps base and tuned as one model (32.6B system total, under the 33B
+> cap), and the same server script answers the agent's clicks and every NeMo Gym eval. We pin the
+> 2 MP image cap in `--mm-processor-kwargs` to match training, pass screenshots as `file://` paths
+> instead of base64, and run at 0.30 GPU memory, so SFT and GRPO train beside it. GRPO rollouts
+> come from vLLM colocated with TRL. After four fixes to TRL's colocate path, rollout log-probs
+> match the trainer to within 0.01–0.03. Gym's profile pass drew 32,000 sampled replies (4,000
+> screenshots × 8) in about 7 minutes. The demo runs fully local on a MacBook through vllm-metal,
+> the vLLM project's plugin for Apple GPUs: official BF16 Lightning (about 1.2 s per idle step,
+> against a p50 of about 26 s on the hosted free tier) plus one Qwen3.5-2B instance with the same
+> per-request LoRA as the H200. On 200 dev rows, Metal and CUDA runtime LoRA agree: 87.0% vs 87.0%,
+> identical prompt tokens on every row, and 99% of decisions agreeing. Full write-up:
+> `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-vllm.md`
 
 ## README must include (organizer checklist)
 

@@ -30,7 +30,10 @@ The Gym loop then adds one kept GRPO round: **dev 87.0%**.
 On held-out **ScreenSpot-v2-clean**, never used to choose a checkpoint, the final adapter scores
 **90.35%**. A second independent T=0 run of the same adapter gave 90.27%, one row apart; we report
 the run that the paired compares use. Against the baselines:
-- **+4.10 points over base** (86.25%, 1,073 of 1,244 rows; 86.3 rounded).
+- **+4.10 points over base** (86.25%, 1,073 of 1,244 rows; 86.3 rounded), with 89 tasks fixed
+  and 38 broken on the same rows (McNemar exact p ≈ 7 × 10⁻⁶). Icons rose most (78.15 → 85.37,
+  61 fixed vs 22 broken); mobile text is the only slice that dropped (97.59 → 96.90, 3 vs 5,
+  p = 0.73).
 - **+2.25 over the loop's own starting adapter** (sft-lightning, the dev pick, 88.10%), with 34
   rows fixed and 6 broken on the same 1,244 rows (McNemar exact p ≈ 8 × 10⁻⁶). Every split rose,
   most on icons (+3.7) and web (+2.7).
@@ -453,12 +456,14 @@ More we hit, one row each (sources: [research-notes.md](research-notes.md) §3, 
   rows, which makes the comparison paired, but the keep rule is a plain accuracy delta. The same
   adapter also moved 0.2 points between two launches (85.66 vs 85.86, §5).
 - **Paired tests, McNemar exact on fixed vs broken tasks:**
+  - base → final on SSv2-clean: 89 vs 38, p ≈ 7 × 10⁻⁶ (computed Sun 09:43, runs.md;
+    [report](eval_results/compare_ssv2_base_vs_final/compare_report.md));
   - the loop's start → final on SSv2-clean: 34 vs 6, p ≈ 8 × 10⁻⁶;
   - template SFT → final on SSv2-clean: 50 vs 34, p = 0.10;
   - round 0 → round 1 on dev: 22 vs 15, p = 0.32.
-  So the loop's held-out gain over its own starting adapter is significant. Against template SFT
-  it is not (p = 0.10), and round 1's dev gain on its own was not (p = 0.32). The base → final
-  pair wasn't computed; base's SSv2 rollouts are archived on the stopped box.
+  So the final adapter's held-out gain over base is significant, and so is the loop's gain over
+  its own starting adapter. Against template SFT it is not (p = 0.10), and round 1's dev gain on
+  its own was not (p = 0.32).
 - **One kept round.** Round 2 had 6× fewer sometimes-pass rows (223 vs 1,282),
   consistent with round 1 sharpening the model (§4). The Gym-driven gain comes from a single GRPO
   round.
