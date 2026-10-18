@@ -1,6 +1,6 @@
 # Team status (living doc)
 
-**Updated:** Sat 2026-10-17 20:25 EDT by the orchestrator thread. This is the team-facing
+**Updated:** Sat 2026-10-17 20:55 EDT by the orchestrator thread. This is the team-facing
 "where is everything" page. Numbers come from [results.md](results.md) and [runs.md](runs.md).
 If this page disagrees with them, they win.
 
@@ -16,8 +16,8 @@ If this page disagrees with them, they win.
 | Agent step cap: the interactive agent now allows 25 steps. With no progress (4 no-change actions, or the same action 3×), it first warns Lightning and turns thinking on, then stops as `stuck` if 3 more actions make no progress. That cut off 0 of today's successes in replay. The Gym eval stays at 12 with no stuck stop | T2 (b179fcd); T1 for the console | **Done** (console display pending) |
 | Console `/logs` page (325848f) + review fixes | T1 | Fix pass in progress |
 | Fully local grounder on the Mac (Gate G, [local-mac.md](local-mac.md)) | T4 | **PASS 20:22:** 200 dev rows, local vllm-metal 86.0% vs H200 85.0%; 99% of hit/miss decisions agree; prompt tokens identical; local p50 1.77 s per click (H200 0.75 s). Needs Teams/Chrome closed. **Fully local end-to-end (20:32):** 2/3 verified (pay-50 and text-size pass; download-september falsely claimed success after two wrong rows). Per step: plan p50 4.6 s, click 1.0 s, screen summary 6.2 s (the slow stage on the Mac). Recipe in local-mac.md (T4) |
-| BLADE base vs SFT on dev, plus the overnight BLADE runbook (`docs/blade/`) | Orchestrator | Running |
-| HF dataset and model cards (`docs/hf/`), private data upload | Orchestrator | Tonight |
+| BLADE base vs SFT on dev, plus the overnight BLADE runbook (`docs/blade/`) | Orchestrator | **Done** (97c3d70). Knob changes are proposed for after round 1, if it's kept |
+| HF dataset and model cards (`docs/hf/`, 97c3d70), private data upload | Orchestrator | **Data uploaded (private) 20:55**: `patrickballou/gui-assist-data`, 16 files, sha256s match the box. The model goes up Sunday ~8:00 |
 | Video script ([demo-video-script.md](demo-video-script.md)), pitch segments from [pitch.md](pitch.md) §10 | Charlie | Updating numbers; dry run after ~19:45 |
 | Qwen3-VL-2B zero-shot on ScreenSpot-v2-clean (90.4%, per the video script notes) | Charlie | Needs a row in runs.md / results.md |
 
@@ -42,6 +42,18 @@ If this page disagrees with them, they win.
 | ~9:30 | Release check, then make both HF repos public | Patrick |
 | by 10:30 | Submit the form ([submission.md](submission.md)) | Patrick |
 | 11:00 | Deadline | |
+
+## Release check before going public (Patrick, Sunday ~9:30)
+
+1. **NVIDIA API Trial Terms vs publishing the 8,028 hosted-API rewrites.** §6.3 says we own the
+   generated content. §1.2 and §1.4 limit trial use to non-production, internal testing and
+   evaluation. The local BF16 rows (1,003) fall under OpenMDW-1.1, which puts no restrictions on
+   outputs. Confirm we're OK to publish, or publish the local rows only.
+2. **Personal data copied from OS-Atlas labels:** one macOS label is the capture machine's
+   account email (`…wa@gmail.com`). The others are public or example addresses. It's already
+   public in OS-Atlas. Keep it verbatim (reproducible) or redact it in our release.
+3. **Model card:** fill in the final adapter's numbers, and set `library_name` (`peft` if we
+   ship only the adapter).
 
 ## Headline numbers so far
 
