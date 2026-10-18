@@ -53,7 +53,14 @@ Setup: fully local Mac.
   - T1's four console runs ~02:50, on near-identical screenshots (one is 1 px shifted): the
     description had neither cue every time. The planner passed 1/4. The other 3 continued with the
     preselected full balance, confirmed a dialog that said $142.37, and claimed $50.
-  - The `:8011` process was restarted between the two sessions; what changed is being asked of T4.
+  - **Cause: the console's headed browser.** The `:8011` serve command was identical in both
+    sessions (T4), and within each session the dialog screenshot was byte-identical every run.
+    The two sessions' screenshots differ in ~85k pixels of font rasterization. Rendering the
+    dialog through `agent/browser.py` reproduces both exactly: headed matches T1's console
+    screenshot (0 px differ), headless matches the harness screenshot (0 px differ). At T=0 the
+    describer drops the selected-option cue on the headed pixels.
+  - Every measured run so far (Gym evals, harness, thinking ablation) is headless, so a headed
+    console is an unmeasured input for both the describer and the grounder.
 - **Before recording,** do a console dry run of pay-50 and check that the dialog's description
   names the selected option.
 - **Guards (post-Sunday):** check the confirmed amount against the request, and an A/B
