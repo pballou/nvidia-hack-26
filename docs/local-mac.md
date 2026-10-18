@@ -2,8 +2,9 @@
 
 How much of the demo can run on the laptop. Verified 2026-10-17 against vllm-metal,
 mlx-lm and llama.cpp sources, releases and issues. Since then, Lightning (§0–§2) and the
-tunnel (§3a) have run the agent evals and are the demo setup; §3b / Gate G is in progress
-([status.md](status.md)). Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
+tunnel (§3a) have run the agent evals and are the demo setup. Gate G passed on 2026-10-17,
+so the fully local grounder (§3b) works too ([Gate G results](#gate-g-results),
+[status.md](status.md)). Owner: Patrick (stream C). **Time-box all Mac-local work to about 1.5 h.**
 
 ## Decision: hybrid first, fully local if it passes, H200 as the fallback
 
@@ -66,9 +67,13 @@ mlx-lm's `nemotron_h` loader reads NVIDIA's HF checkpoint directly: it drops the
 
 ```bash
 hf download nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16     # 65.8 GB
-# Gate G only: the merged grounder that stream B exports for publishing
-rsync -avP permanent-tan-marmot:/home/ubuntu/ckpt/<run>/merged/ ~/models/grounder-merged/
+# Fully local grounder only: the base model, plus the LoRA adapter (scp the adapter dir only)
+hf download Qwen/Qwen3.5-2B --revision 15852e8c16360a2fea060d615a32b45270f8a8fc   # 4.6 GB
+scp -r permanent-tan-marmot:/home/ubuntu/ckpt/<run>/adapter ~/models/adapters/<name>
 ```
+
+The merged checkpoint is built on this Mac with `scripts/gate_g_merge.py` (§3b), not
+copied from the box.
 
 ## 2. Lightning on :8000
 
@@ -80,7 +85,8 @@ HF_HUB_OFFLINE=1 vllm serve nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 \
   --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3
 # Verified 2026-10-17 on the M4 Max:
 #   - 0.60 fails ("not enough Metal memory for KV cache"): the Metal limit is 115.45 GB, and weights + overhead are ~69.9 GB.
-#   - 0.68 works (~78.5 GB). A local grounder at 0.12 still fits.
+#   - 0.68 works (~78.5 GB). A local grounder fits next to it at 0.08 with --max-num-batched-tokens 2560,
+#     and only with Teams/Chrome closed (§3b, Gate G results).
 #   - Healthy in ~15 s from cache. /v1/models root = nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16.
 # Never add --speculative-config.
 ```
@@ -152,8 +158,9 @@ MODEL=~/models/grounder-merged-<name> GPU_UTIL=0.08 MAX_BATCHED=2560 MIN_FREE_PC
    `--spec-type`/`-md`/mtp files.
 
 **Gate G: local grounder.** Sat ~8pm, ≤ 45 min.
-1. Serve the merged checkpoint (§3b) locally, and the H200 grounder on tunnel port
-   18001 (`ssh -N -L 18001:localhost:8001 permanent-tan-marmot`).
+1. Serve the merged checkpoint locally on :8011 (§3b), and keep the normal :8001 tunnel to
+   the H200 grounder (§3a). Attempt 2 did exactly this. A second tunnel on 18001
+   (`ssh -N -L 18001:localhost:8001 permanent-tan-marmot`) is optional.
 2. Send the same 200 dev rows to both. Use images already run through
    `preprocess_screenshot`, sent as PNG, with the exact prompt from
    `common/grounding.py`.
