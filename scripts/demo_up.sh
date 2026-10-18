@@ -1,43 +1,71 @@
 #!/usr/bin/env bash
 # One command for the demo: start the sandbox (:8090) and the GUI assist console (:8095),
-# check that the VLM (configs/agent.yaml vlm.base_url, normally :8001) and Lightning
-# (hosted or :8000) respond, print the URL.
+# check that the VLM (configs/agent.yaml vlm.base_url, normally :8001, or --vlm-url) and Lightning
+# (hosted or :8000) respond and serve the names the console will ask for, print the URL.
 # Ctrl-C stops whatever this script started.
 #
-# Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--asr auto|parakeet|stub]
-#                           [--headed] [--skip-models]
+# Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--grounder base|grounder]
+#                           [--vlm-url URL] [--summary-model base|grounder] [--vlm-label TEXT]
+#                           [--asr auto|parakeet|stub] [--headed] [--skip-models]
 #   --agent mock      scripted stand-in agent, no models needed (default)
 #   --agent real      T2's agent (agent/core.py): Lightning plans, the VLM grounds
 #   --lightning       which Lightning the console defaults to and this script checks (default local:
 #                     the official BF16 checkpoint served as `lightning` on :8000; hosted is slow)
+#   --grounder        the console's initial Grounder choice (default grounder = the LoRA; base = adapter off)
+#   --vlm-url URL     the VLM's OpenAI base URL for the real agent and this script's check, e.g.
+#                     http://127.0.0.1:8011/v1 for the fully local Mac grounder (default: configs/agent.yaml
+#                     vlm.base_url, or $AGENT_VLM_BASE_URL)
+#   --summary-model   the served name that writes the screen summaries (default: configs/agent.yaml
+#                     summary_model, or $AGENT_SUMMARY_MODEL). grounder when the VLM serves only the grounder
+#   --vlm-label TEXT  how the console names the VLM, e.g. "Mac (vllm-metal)" (default: by port, 8001 = H200
+#                     via tunnel, 8011 = Mac (vllm-metal); or $CONSOLE_VLM_LABEL)
 #   --asr             voice input engine (default auto = parakeet: the local sidecar at $CONSOLE_ASR_URL,
 #                     default 127.0.0.1:8096, scripts/run_asr.sh; voice stays off until it answers, and the
 #                     page turns it on by itself). stub = fixed text for UI testing, never auto-run, only
 #                     when asked for. $CONSOLE_ASR overrides the default.
 #   --headed          show the Playwright browser window (for the video)
 #   --skip-models     don't check the VLM / Lightning
+# Env: SANDBOX_PORT (8090), CONSOLE_PORT (8095), LIGHTNING_LOCAL_URL (http://127.0.0.1:8000/v1, what
+#      --lightning local checks), PYTHON (.venv-gym/bin/python).
+# Fully local (Mac): scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder \
+#                      --vlm-label "Mac (vllm-metal)"
 # Logs: runs/demo_logs/{sandbox,console}.log
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
+
 AGENT=mock LIGHTNING=local ASR="${CONSOLE_ASR:-auto}" HEADED=0 SKIP_MODELS=0
+GROUNDER=grounder VLM_URL_ARG="" SUMMARY_MODEL_ARG="" VLM_LABEL="${CONSOLE_VLM_LABEL:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent) AGENT="${2:?--agent needs mock|real}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
     --lightning) LIGHTNING="${2:?--lightning needs hosted|local}"; shift 2 ;;
     --lightning=*) LIGHTNING="${1#*=}"; shift ;;
+    --grounder) GROUNDER="${2:?--grounder needs base|grounder}"; shift 2 ;;
+    --grounder=*) GROUNDER="${1#*=}"; shift ;;
+    --vlm-url) VLM_URL_ARG="${2:?--vlm-url needs a URL, e.g. http://127.0.0.1:8011/v1}"; shift 2 ;;
+    --vlm-url=*) VLM_URL_ARG="${1#*=}"; shift ;;
+    --summary-model) SUMMARY_MODEL_ARG="${2:?--summary-model needs base|grounder}"; shift 2 ;;
+    --summary-model=*) SUMMARY_MODEL_ARG="${1#*=}"; shift ;;
+    --vlm-label) VLM_LABEL="${2:?--vlm-label needs a text}"; shift 2 ;;
+    --vlm-label=*) VLM_LABEL="${1#*=}"; shift ;;
     --asr) ASR="${2:?--asr needs auto|parakeet|stub}"; shift 2 ;;
     --asr=*) ASR="${1#*=}"; shift ;;
     --headed) HEADED=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 case "$AGENT" in mock|real) ;; *) echo "--agent must be mock or real" >&2; exit 2 ;; esac
 case "$LIGHTNING" in hosted|local) ;; *) echo "--lightning must be hosted or local" >&2; exit 2 ;; esac
+case "$GROUNDER" in base|grounder) ;; *) echo "--grounder must be base or grounder" >&2; exit 2 ;; esac
+case "$SUMMARY_MODEL_ARG" in ""|base|grounder) ;; *) echo "--summary-model must be base or grounder" >&2; exit 2 ;; esac
+case "$VLM_URL_ARG" in ""|http://*|https://*) ;; *) echo "--vlm-url must be an http(s) URL, e.g. http://127.0.0.1:8011/v1" >&2; exit 2 ;; esac
 case "$ASR" in auto|parakeet|stub) ;; *) echo "--asr must be auto, parakeet or stub" >&2; exit 2 ;; esac
+VLM_URL_ARG="${VLM_URL_ARG%/}"
 
 PY="${PYTHON:-.venv-gym/bin/python}"
 if [ ! -x "$PY" ]; then
@@ -47,7 +75,9 @@ fi
 
 SANDBOX_PORT="${SANDBOX_PORT:-8090}"; export SANDBOX_PORT   # run_sandbox.sh reads the same variable
 SANDBOX_URL="http://127.0.0.1:$SANDBOX_PORT"
-CONSOLE_URL=http://127.0.0.1:8095
+CONSOLE_PORT="${CONSOLE_PORT:-8095}"
+CONSOLE_URL="http://127.0.0.1:$CONSOLE_PORT"
+LIGHTNING_LOCAL_URL="${LIGHTNING_LOCAL_URL:-http://127.0.0.1:8000/v1}"   # what --lightning local checks
 LOGS=runs/demo_logs
 mkdir -p "$LOGS"
 PIDS=""
@@ -82,22 +112,31 @@ fi
 # 2. Models (warnings only: the mock agent needs none of them)
 model_ids() { "$PY" -c 'import json,sys; print(" ".join(m["id"] for m in json.load(sys.stdin).get("data", [])))'; }
 if [ "$SKIP_MODELS" = 0 ]; then
-  # The agent's own config decides where the VLM is (env AGENT_VLM_BASE_URL overrides it).
-  VLM_URL=$("$PY" -c 'from agent.config import load_config; print(load_config().vlm.base_url.rstrip("/"))' 2>/dev/null ||
-    echo http://127.0.0.1:8001/v1)
+  # --vlm-url / --summary-model win; otherwise the agent's own config decides (env AGENT_VLM_BASE_URL and
+  # AGENT_SUMMARY_MODEL override configs/agent.yaml there).
+  CFG=$("$PY" -c 'from agent.config import load_config; c = load_config(); print(c.vlm.base_url.rstrip("/"), c.summary_model)' \
+    2>/dev/null || echo "http://127.0.0.1:8001/v1 base")
+  VLM_URL="${VLM_URL_ARG:-${CFG% *}}"
+  SUMMARY_MODEL="${SUMMARY_MODEL_ARG:-${CFG##* }}"
   if ids=$(curl -sf -m 5 "$VLM_URL/models" | model_ids); then
-    echo "vlm      $VLM_URL up, served: ${ids:-none}"
-    case " $ids " in *" base "*) ;; *) echo "warning: served name 'base' missing at $VLM_URL (contracts.md §3)" >&2 ;; esac
-    case " $ids " in *" grounder "*) ;; *) echo "note:    no 'grounder' adapter yet; use Grounder = base in the console" ;; esac
+    echo "vlm      $VLM_URL up, served: ${ids:-none} (grounder: $GROUNDER, summary: $SUMMARY_MODEL)"
+    case " $ids " in *" $GROUNDER "*) ;; *)
+      echo "warning: grounder '$GROUNDER' is not served at $VLM_URL (serves: ${ids:-nothing}); the console rejects runs" \
+        "that ask for it. Pick a served one with --grounder or in the console's Options." >&2 ;;
+    esac
+    case " $ids " in *" $SUMMARY_MODEL "*) ;; *)
+      echo "warning: summary model '$SUMMARY_MODEL' is not served at $VLM_URL (serves: ${ids:-nothing});" \
+        "screen summaries will fail. Use --summary-model with a served name." >&2 ;;
+    esac
   else
     echo "warning: VLM $VLM_URL not reachable. Open the tunnel (docs/local-mac.md §3a) or start it locally (§3b)." >&2
   fi
   if [ "$LIGHTNING" = local ]; then
-    if ids=$(curl -sf -m 5 http://127.0.0.1:8000/v1/models | model_ids); then
-      echo "lightning local :8000 up, served: ${ids:-none}"
-      case " $ids " in *" lightning "*) ;; *) echo "warning: served name 'lightning' missing on :8000" >&2 ;; esac
+    if ids=$(curl -sf -m 5 "$LIGHTNING_LOCAL_URL/models" | model_ids); then
+      echo "lightning local $LIGHTNING_LOCAL_URL up, served: ${ids:-none}"
+      case " $ids " in *" lightning "*) ;; *) echo "warning: served name 'lightning' missing at $LIGHTNING_LOCAL_URL" >&2 ;; esac
     else
-      echo "warning: local Lightning :8000 not reachable (docs/local-mac.md §2)." >&2
+      echo "warning: local Lightning $LIGHTNING_LOCAL_URL not reachable (docs/local-mac.md §2)." >&2
     fi
   else
     if [ -z "${NVIDIA_API_KEY:-}" ] && [ -f .env ]; then
@@ -140,14 +179,24 @@ fi
 
 # 4. Console
 if up "$CONSOLE_URL/api/config"; then
-  echo "console  already running at $CONSOLE_URL (restart it to change --agent/--asr/--headed)"
+  echo "console  already running at $CONSOLE_URL (restart it to change --agent/--grounder/--vlm-url/--summary-model/--asr/--headed)"
 else
-  set -- --agent "$AGENT" --lightning "$LIGHTNING" --asr "$ASR" --sandbox-url "$SANDBOX_URL"
-  [ "$HEADED" = 1 ] && set -- "$@" --headed
+  set -- --agent "$AGENT" --lightning "$LIGHTNING" --grounder "$GROUNDER" --asr "$ASR" --sandbox-url "$SANDBOX_URL" \
+    --port "$CONSOLE_PORT"
+  if [ -n "$VLM_URL_ARG" ]; then set -- "$@" --vlm-url "$VLM_URL_ARG"; fi
+  if [ -n "$SUMMARY_MODEL_ARG" ]; then set -- "$@" --summary-model "$SUMMARY_MODEL_ARG"; fi
+  if [ -n "$VLM_LABEL" ]; then set -- "$@" --vlm-label "$VLM_LABEL"; fi
+  if [ "$HEADED" = 1 ]; then set -- "$@" --headed; fi
   scripts/run_console.sh "$@" >"$LOGS/console.log" 2>&1 &
   PIDS="$PIDS $!"
   wait_up "$CONSOLE_URL/api/config" console "$!"
-  echo "console  started (agent: $AGENT, lightning: $LIGHTNING, asr: $ASR$([ "$HEADED" = 1 ] && echo ', headed'))"
+  desc="agent: $AGENT, lightning: $LIGHTNING, grounder: $GROUNDER"
+  if [ -n "$VLM_URL_ARG" ]; then desc="$desc, vlm: $VLM_URL_ARG"; fi
+  if [ -n "$SUMMARY_MODEL_ARG" ]; then desc="$desc, summary: $SUMMARY_MODEL_ARG"; fi
+  if [ -n "$VLM_LABEL" ]; then desc="$desc, vlm label: $VLM_LABEL"; fi
+  desc="$desc, asr: $ASR"
+  if [ "$HEADED" = 1 ]; then desc="$desc, headed"; fi
+  echo "console  started ($desc)"
 fi
 
 echo

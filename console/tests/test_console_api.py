@@ -80,6 +80,16 @@ def wait_status(base, run_id, statuses, timeout=10.0):
     raise AssertionError(f"run {run_id} never reached {statuses}: {info}")
 
 
+def wait_n_events(base, run_id, n, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        info = httpx.get(f"{base}/api/runs/{run_id}").json()
+        if info["n_events"] >= n:
+            return info
+        time.sleep(0.02)
+    raise AssertionError(f"run {run_id} never had {n} stream messages: {info}")
+
+
 # --- config, tasks, static -----------------------------------------------------------------
 
 
@@ -88,8 +98,9 @@ def test_config_tasks_and_index(console, tmp_path):
     base, _ = console(fake_agent(trace_root=tmp_path), static_dir=static)
     cfg = httpx.get(f"{base}/api/config").json()
     assert cfg == {"agent": "mock", "sandbox_url": cfg["sandbox_url"], "headed": False,
-                   "defaults": {"grounder": "base", "thinking": "retry", "lightning": "local"},
-                   "asr": {"available": True, "model": "stub", "label": "stub"}}
+                   "defaults": {"grounder": "grounder", "thinking": "retry", "lightning": "local"},
+                   "asr": {"available": True, "model": "stub", "label": "stub"},
+                   "endpoints": {"vlm": None, "lightning": None}}  # the mock runs no models
     tasks = httpx.get(f"{base}/api/tasks").json()
     assert len(tasks) == 12 and all(set(t) == {"id", "request", "start_path", "tags", "steps_min"} for t in tasks)
 
@@ -231,6 +242,8 @@ def test_verdict_after_stop(console, tmp_path):
     base, _ = console(fake_agent(steps=1, block=True, set_text_size="L", trace_root=tmp_path))
     run = start(base, task_id=TASK)
     wait_status(base, run["run_id"], {"running"})
+    # the grounding step comes after the fake's sandbox mutation; stopping before it would race the mutation
+    wait_n_events(base, run["run_id"], 5)  # status x2, start, observation, grounding
     httpx.post(f"{base}/api/runs/{run['run_id']}/stop", timeout=15)
     stream = messages(read_sse(f"{base}/api/runs/{run['run_id']}/events"))
     assert [m["event"] for m in stream][-3:] == ["verdict", "status", "end"]

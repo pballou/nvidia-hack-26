@@ -8,8 +8,11 @@
  * "voice" (first) and "verdict" (last). Everything from a trace is rendered with textContent, never innerHTML.
  *
  * Honest by construction: a field the trace doesn't have shows "—" (never a guess), and mock runs say "mock".
- * Deep links: /logs?run=<id>&kind=plan,grounding&model=base&q=text. The only timer is the 3 s auto-refresh,
- * and it runs only while the selected run's status is "running".
+ * Deep links: /logs?run=<id>&kind=plan,grounding&model=base&q=text&status=stuck (status filters the runs table).
+ * The only timer is the 3 s auto-refresh, and it runs only while the selected run's status is "running".
+ * "stuck" (agent/progress.py) is a status of its own: the agent stopped a run that made no progress and asks the
+ * user what to do; action rows carry its warn/stuck verdicts. Endpoints (where the VLM and Lightning ran) come
+ * from console.json, else the start event (summary.endpoints.source).
  */
 'use strict';
 
@@ -28,11 +31,13 @@
   const KIND_LABEL = { tool_call: 'tool call' };
   const KIND_LATENCY = { plan: 'plan', grounding: 'ground', action: 'act', observation: 'summary' };
   const STATUS = {
-    done: ['Done', 'ok'], max_steps: ['Step limit', 'warn'], stopped: ['Stopped', 'warn'], error: ['Error', 'bad'],
-    running: ['Running', 'live'], unknown: ['Unknown', 'muted'],
+    done: ['Done', 'ok'], max_steps: ['Step limit', 'warn'], stuck: ['Stuck', 'warn'], stopped: ['Stopped', 'warn'],
+    error: ['Error', 'bad'], running: ['Running', 'live'], unknown: ['Unknown', 'muted'],
   };
+  const STATUS_ORDER = ['running', 'done', 'stuck', 'max_steps', 'stopped', 'error', 'unknown'];
   const REASON_WORDS = {
-    done: 'the agent called done', max_steps: 'it reached the step limit', stopped: 'stopped by the user',
+    done: 'the agent called done', max_steps: 'it reached the step limit',
+    stuck: 'no progress, so it stopped and asks you what to do', stopped: 'stopped by the user',
     error: 'it stopped after an error',
   };
   const VERDICT_LABEL = 'verified by sandbox state, not seen by the agent';
@@ -60,6 +65,7 @@
     detailSeq: 0,          // bumps per request, so a slow old response never overwrites a newer one
     runsSeq: 0,
     filters: { kinds: null, model: '', q: '' },  // kinds: null = all kinds
+    runStatus: '',         // the runs table's status filter ('' = all)
     expanded: new Set(),   // event indexes with details open
     evEls: [],             // per event index: {li, row, sig, hay, visible}
     activeIdx: null,       // the event row that holds the tab stop
@@ -270,6 +276,18 @@
     return '';
   }
 
+  /** agent/core.py action.payload.stuck = {verdict: warn|stuck, reason}: "Stuck warning: …" / "Stopped as stuck: …". */
+  function stuckWords(p) {
+    const s = isObj(p.stuck) ? p.stuck : null;
+    if (!s) return '';
+    const reason = oneLine(s.reason) || 'no progress';
+    if (s.verdict === 'warn') return `Stuck warning: ${reason}`;
+    if (s.verdict === 'stuck') return `Stopped as stuck: ${reason}`;
+    return '';
+  }
+
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
   /** One line, plain words. Mock events (payload.mock) never claim a model did something. */
   function describe(ev) {
     const p = isObj(ev.payload) ? ev.payload : {};
@@ -314,7 +332,9 @@
       }
       case 'action': {
         const a = parseArgs(p.arguments);
-        if (p.ok === false) return `Action ${str(p.name) || ''} failed: ${oneLine(p.error) || 'unknown error'}`.replace('  ', ' ');
+        const stuck = stuckWords(p);  // first: the progress verdict is the news on this row
+        const lead = stuck ? `${stuck} · ` : '';
+        if (p.ok === false) return `${lead}Action ${str(p.name) || ''} failed: ${oneLine(p.error) || 'unknown error'}`.replace('  ', ' ');
         let what;
         switch (p.name) {
           case 'click':
@@ -326,7 +346,7 @@
           case 'done': what = 'Finished (the done tool)'; break;
           default: what = `${str(p.name) || 'Action'} done`;
         }
-        return what + changedWords(p.screen_changed);
+        return lead + what + changedWords(p.screen_changed);
       }
       case 'error': {
         const where = p.where ? ` in ${oneLine(p.where)}` : '';
@@ -334,10 +354,14 @@
         return `Error${where}: ${oneLine(p.message) || 'no message'}${rec}`;
       }
       case 'done': {
+        const steps = isNum(p.steps) ? ` · ${plural(p.steps, 'step')}` : '';
+        if (p.reason === 'stuck') {  // the summary is the agent's question to the user ("I'm stuck: …")
+          const question = oneLine(p.summary);
+          return `Run ended: stuck, no progress${steps} · the agent asks: ${question ? `“${question}”` : '(no question recorded)'}`;
+        }
         const reason = REASON_WORDS[p.reason] || (p.reason ? `reason ${oneLine(p.reason)}` : 'no reason given');
         const claim = p.success_claimed === true ? 'the agent claims success'
           : p.success_claimed === false ? 'the agent does not claim success' : 'no success claim';
-        const steps = isNum(p.steps) ? ` · ${p.steps} step${p.steps === 1 ? '' : 's'}` : '';
         return `Run ended: ${reason} · ${claim}${steps}`;
       }
       case 'verdict': {
@@ -362,6 +386,8 @@
     const p = isObj(ev.payload) ? ev.payload : {};
     if (ev.kind === 'error') return p.recoverable === true ? 'warn' : 'bad';
     if (ev.kind === 'tool_call' && p.valid === false) return 'warn';
+    if (ev.kind === 'action' && isObj(p.stuck) && p.stuck.verdict === 'stuck') return 'bad';
+    if (ev.kind === 'action' && isObj(p.stuck) && p.stuck.verdict === 'warn') return 'warn';
     if (ev.kind === 'action' && p.ok === false) return 'bad';
     if (ev.kind === 'action' && p.screen_changed === false) return 'warn';
     if (ev.kind === 'grounding' && (p.error || !isNum(p.x))) return 'warn';
@@ -375,7 +401,8 @@
 
   function init() {
     for (const id of [
-      'hc-toggle', 'runs-section', 'runs-meta', 'refresh-btn', 'refresh-note', 'runs-scroll', 'runs-table', 'runs-body',
+      'hc-toggle', 'runs-section', 'runs-meta', 'status-filter', 'refresh-btn', 'refresh-note', 'runs-scroll',
+      'runs-table', 'runs-body',
       'runs-empty', 'run-placeholder', 'run-section', 'run-heading', 'run-badges', 'copy-btn', 'download-link',
       'copy-status', 'copy-fallback-wrap', 'copy-fallback', 'copy-fallback-close', 'run-error', 'run-summary',
       'events-meta', 'kind-chips', 'model-filter', 'event-search', 'clear-filters', 'event-list', 'events-empty',
@@ -397,6 +424,14 @@
     });
 
     ui.refreshBtn.addEventListener('click', () => refresh({ user: true }));
+    ui.statusFilter.addEventListener('change', () => {
+      S.runStatus = ui.statusFilter.value;
+      renderRuns();
+      writeUrl(false);
+      const shown = visibleRunCount();
+      announce(S.runStatus ? `Showing ${plural(shown, 'run')} with status ${statusWord(S.runStatus)}.`
+        : `Showing all ${plural(S.runs.length, 'run')}.`);
+    });
     ui.runsBody.addEventListener('keydown', onRunsKey);
     ui.runsBody.addEventListener('click', onRunsClick);
 
@@ -451,6 +486,7 @@
     window.addEventListener('popstate', () => {
       readUrl();
       renderFilters();
+      renderRuns();
       if (S.selectedId && S.selectedId !== S.detailFor) loadDetail(S.selectedId, {});
       else if (!S.selectedId) showPlaceholder();
       else applyFilters();
@@ -474,6 +510,7 @@
     S.filters.kinds = kinds ? new Set(kinds.split(',').map((s) => s.trim()).filter(Boolean)) : null;
     S.filters.model = q.get('model') || '';
     S.filters.q = q.get('q') || '';
+    S.runStatus = q.get('status') || '';
   }
 
   function writeUrl(push) {
@@ -482,6 +519,7 @@
     if (S.filters.kinds) q.set('kind', [...S.filters.kinds].sort((a, b) => kindRank(a) - kindRank(b)).join(','));
     if (S.filters.model) q.set('model', S.filters.model);
     if (S.filters.q) q.set('q', S.filters.q);
+    if (S.runStatus) q.set('status', S.runStatus);
     const qs = q.toString().replace(/%2C/gi, ',');
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
     if (url === window.location.pathname + window.location.search) return;
@@ -563,6 +601,63 @@
       has(models.asr) ? item('ASR', 'Speech recognizer', models.asr) : null);
   }
 
+  const endpointsOf = (r) => (isObj(r.endpoints) ? r.endpoints : {});
+
+  /** Where the run's VLM and Lightning were, in three short lines: "VLM <label>", "<host:port> · S <summary model>",
+   *  "L <Lightning label>". The full URLs are in each line's title and in the summary card. */
+  function whereCell(r) {
+    const ep = endpointsOf(r);
+    const vlm = isObj(ep.vlm) ? ep.vlm : null;
+    const lt = isObj(ep.lightning) ? ep.lightning : null;
+    if (!vlm && !lt) return na(r.agent === 'mock' ? 'none: the mock runs no models' : 'not in the trace');
+    const from = ep.source === 'console' ? 'checked by the console at run start' : 'from the start event';
+    const vlmTitle = vlm ? `VLM (grounder and screen summary): ${str(vlm.label)}, ${str(vlm.base_url)}`
+      + `${has(vlm.summary_model) ? `, summary model ${vlm.summary_model}` : ''} (${from})` : 'VLM: not in the trace';
+    const ltTitle = lt ? `Lightning (planner): ${str(lt.label)}, ${str(lt.base_url)} (${from})` : 'Lightning: not in the trace';
+    return h('span', { class: 'where', 'data-source': str(ep.source) || null },
+      h('span', { class: 'where-line', title: vlmTitle },
+        h('abbr', { title: 'Grounder and screen-summary VLM', text: 'VLM' }), ' ',
+        vlm ? h('span', { class: 'where-v where-vlm', text: str(vlm.label) }) : na()),
+      vlm ? h('span', { class: 'where-line where-sub', title: vlmTitle },
+        has(vlm.host) ? h('span', { class: 'where-host', text: str(vlm.host) }) : na(), ' · ',
+        h('abbr', { title: 'Screen-summary model (served name)', text: 'S' }), ' ',
+        has(vlm.summary_model) ? h('span', { class: 'where-v', text: str(vlm.summary_model) }) : na()) : null,
+      h('span', { class: 'where-line', title: ltTitle },
+        h('abbr', { title: 'Lightning (planner)', text: 'L' }), ' ',
+        lt ? h('span', { class: 'where-v where-lightning', text: str(lt.label) }) : na()));
+  }
+
+  /** The status chip, plus "⚠ N" when the progress check warned and the run went on (or stopped as stuck). */
+  function statusCell(r) {
+    const chip = statusChip(r.status);
+    const n = isNum(r.n_stuck_warnings) ? r.n_stuck_warnings : 0;
+    if (!n || r.status === 'stuck') return chip;
+    const words = `${plural(n, 'stuck warning')}: Lightning was told to change approach`;
+    return h('span', { class: 'status-cell' }, chip,
+      h('span', { class: 'stuck-mark', title: words }, h('span', { 'aria-hidden': 'true', text: `⚠${n}` }), sv(words)));
+  }
+
+  const statusWord = (s) => (STATUS[s] || [str(s) || 'Unknown'])[0];
+  const visibleRunCount = () => S.runs.filter((r) => !S.runStatus || r.status === S.runStatus).length;
+
+  /** The runs table's status filter: every status in the loaded runs, with counts (and the chosen one, even at 0). */
+  function renderStatusFilter() {
+    const counts = new Map();
+    for (const r of S.runs) counts.set(str(r.status) || 'unknown', (counts.get(str(r.status) || 'unknown') || 0) + 1);
+    const want = S.runStatus;
+    if (want && !counts.has(want)) counts.set(want, 0);
+    const rank = (s) => { const i = STATUS_ORDER.indexOf(s); return i < 0 ? STATUS_ORDER.length : i; };
+    const opts = [['', `All statuses (${S.runs.length})`],
+      ...[...counts.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
+        .map(([s, n]) => [s, `${statusWord(s)} (${n})`])];
+    const sig = JSON.stringify(opts);
+    if (ui.statusFilter.dataset.sig !== sig) {
+      ui.statusFilter.dataset.sig = sig;
+      ui.statusFilter.replaceChildren(...opts.map(([v, t]) => new Option(t, v)));
+    }
+    ui.statusFilter.value = want;
+  }
+
   function runRow(r) {
     const req = oneLine(r.request);
     const link = h('a', {
@@ -579,13 +674,14 @@
       cell(when, 'c-time'),
       cell(h('div', { class: 'req-cell' }, link, task), 'c-request'),
       cell(agentBadge(r.agent), 'c-agent'),
-      cell(statusChip(r.status), 'c-status'),
+      cell(statusCell(r), 'c-status'),
       cell(tick(r.success_claimed, 'claimed success', 'did not claim success', 'no claim recorded'), 'num c-check'),
       cell(tick(r.verified, 'verified by the sandbox', 'the sandbox check failed', 'no sandbox check'), 'num c-check'),
       cell(val(r.steps, (v) => nf0.format(v)), 'num'),
       cell(isNum(r.total_ms) ? h('span', { title: fmtMs(r.total_ms), text: fmtMsShort(r.total_ms) }) : na(), 'num'),
       ...STAGES.map((k) => cell(isNum(p50[k]) ? fmtMsShort(p50[k]) : na(), 'num p50')),
-      cell(modelsCell(r.models), 'c-models'));
+      cell(modelsCell(r.models), 'c-models'),
+      cell(whereCell(r), 'c-where'));
     return tr;
   }
 
@@ -603,15 +699,27 @@
     });
     const same = rows.length === ui.runsBody.children.length && rows.every((tr, i) => ui.runsBody.children[i] === tr);
     if (!same) ui.runsBody.replaceChildren(...rows);
-    ui.runsEmpty.hidden = rows.length > 0;
+    renderStatusFilter();
+    let shown = 0;
+    rows.forEach((tr, i) => {
+      const ok = !S.runStatus || S.runs[i].status === S.runStatus;
+      if (tr.hidden === ok) tr.hidden = !ok;
+      if (ok) shown += 1;
+    });
+    ui.runsEmpty.hidden = shown > 0;
     if (!rows.length) {
       setText(ui.runsEmpty, S.runsError || (S.runsLoaded ? 'No runs yet. Start one from the console.' : 'Loading runs…'));
+    } else if (!shown) {
+      setText(ui.runsEmpty, `No runs with status “${statusWord(S.runStatus)}”. Choose “All statuses” to see every run.`);
     }
-    ui.runsEmpty.classList.toggle('is-error', Boolean(S.runsError));
+    ui.runsEmpty.classList.toggle('is-error', Boolean(S.runsError) && !rows.length);
     const nMock = S.runs.filter((r) => r.agent === 'mock').length;
+    const total = `${S.runsTotal > rows.length ? `newest ${rows.length} of ${S.runsTotal}` : rows.length} `
+      + `run${rows.length === 1 ? '' : 's'}`;
     setText(ui.runsMeta, S.runsError && rows.length ? S.runsError
-      : rows.length ? `${S.runsTotal > rows.length ? `newest ${rows.length} of ${S.runsTotal}` : rows.length} `
-        + `run${rows.length === 1 ? '' : 's'}${nMock ? ` · ${nMock} mock` : ''} · newest first` : '');
+      : !rows.length ? ''
+        : S.runStatus ? `${shown} ${statusWord(S.runStatus).toLowerCase()} of ${total} · newest first`
+          : `${total}${nMock ? ` · ${nMock} mock` : ''} · newest first`);
     markSelectedRow();
     if (focusedId) {
       const link = runLink(focusedId);
@@ -619,20 +727,22 @@
     }
   }
 
-  const runLinks = () => [...ui.runsBody.querySelectorAll('.run-link')];
+  const runLinks = () => [...ui.runsBody.querySelectorAll('tr:not([hidden]) .run-link')];  // the status filter hides rows
   const runLink = (id) => runLinks().find((a) => a.dataset.runId === id) || null;
 
   function markSelectedRow() {
-    const links = runLinks();
+    const all = [...ui.runsBody.querySelectorAll('.run-link')];
+    const links = runLinks();  // the visible ones: the one tab stop is among them
     let stop = null;
-    for (const a of links) {
+    for (const a of all) {
       const on = a.dataset.runId === S.selectedId;
       a.closest('tr').classList.toggle('is-selected', on);
-      if (on) { a.setAttribute('aria-current', 'true'); stop = a; } else a.removeAttribute('aria-current');
+      if (on) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+      if (on && links.includes(a)) stop = a;
     }
     const focused = links.find((a) => a === document.activeElement);
     stop = focused || stop || links[0] || null;
-    for (const a of links) a.tabIndex = a === stop ? 0 : -1;
+    for (const a of all) a.tabIndex = a === stop ? 0 : -1;
   }
 
   function onRunsKey(e) {
@@ -936,12 +1046,53 @@
     const startUrl = (c && c.start_url) || (startEv && isObj(startEv.payload) && startEv.payload.start_url);
     const consoleNote = c ? null : h('span', { class: 'kv-sub', text: 'no console.json: run outside the console, or before it recorded runs' });
 
+    // agent/progress.py: warned (Lightning told to change approach), then stopped as stuck
+    const nWarn = isNum(s.n_stuck_warnings) ? s.n_stuck_warnings : null;
+    let progress;
+    if (s.n_stuck_stops === 1) {
+      progress = [h('span', { class: 'warn-text', text: `Stopped as stuck${nWarn !== null ? ` after ${plural(nWarn, 'warning')}` : ''}` }),
+        h('span', { class: 'kv-sub', text: 'no progress: the agent stopped and asked the user what to do' })];
+    } else if (nWarn) {
+      progress = [h('span', { class: 'warn-text', text: `${plural(nWarn, 'stuck warning')}; the run went on` }),
+        h('span', { class: 'kv-sub', text: 'Lightning was told it was stuck and to change approach' })];
+    } else if (nWarn === 0) {
+      progress = [h('span', { text: 'no stuck warnings' })];
+    } else {
+      progress = [na(s.agent === 'mock' ? 'the mock has no progress check' : 'no progress check in this trace')];
+    }
+
+    const ep = isObj(s.endpoints) ? s.endpoints : {};
+    const vlm = isObj(ep.vlm) ? ep.vlm : null;
+    const lt = isObj(ep.lightning) ? ep.lightning : null;
+    const pair = (k, v, cls = 'kv-v') => h('span', { class: 'kv-pair' }, h('span', { class: 'kv-k', text: `${k} ` }),
+      has(v) ? h('span', { class: cls, text: str(v) }) : na());
+    const where = [];
+    if (vlm) {
+      const served = Array.isArray(vlm.served) ? `serves ${vlm.served.join(', ') || 'nothing'}`
+        : vlm.reachable === false ? 'not reachable at run start' : null;
+      where.push(h('span', { class: 'kv-line where-vlm' }, joinNodes([pair('VLM', vlm.label, 'kv-label'),
+        has(vlm.host) ? h('code', { text: str(vlm.host) }) : null, pair('summary model', vlm.summary_model), served])));
+    }
+    if (lt) {
+      where.push(h('span', { class: 'kv-line where-lightning' }, joinNodes([pair('Lightning', lt.label, 'kv-label'),
+        has(lt.host) ? h('code', { text: str(lt.host) }) : null, has(lt.model) ? pair('served as', lt.model) : null])));
+    }
+    if (where.length) {
+      where.push(h('span', { class: 'kv-sub', text: ep.source === 'console'
+        ? 'checked by the console when the run started (console.json)'
+        : 'from the run’s start event (the label follows the port; served names were not checked)' }));
+    } else {
+      where.push(na(s.agent === 'mock' ? 'none: the mock runs no models' : 'not in the trace'));
+    }
+
     const grid = h('dl', { class: 'kv' },
       kvRow('Request', has(s.request) ? h('q', { class: 'req-text', text: oneLine(s.request) }) : null),
       kvRow('Task', task),
       kvRow('Verdict', verdictBits),
       kvRow('Voice', voiceBits),
       kvRow('Models', h('span', { class: 'kv-line' }, joinNodes(modelBits)), extraModel),
+      kvRow('Where it ran', where),
+      kvRow('Progress check', progress),
       kvRow('Prompts', h('span', { class: 'kv-line' }, joinNodes(promptBits)),
         h('span', { class: 'kv-sub', text: s.agent === 'mock' ? 'the mock sends no prompts'
           : 'SHA = first 10 hex digits of the SHA-256 of the exact prompt (from the events)' })),
@@ -1442,11 +1593,16 @@
         else if (p.name === 'press_key') what = `press ${str(a.key)}`;
         else if (p.name === 'scroll') what = `scroll ${str(a.direction)}${a.amount ? ` (${str(a.amount)})` : ''}`;
         else if (p.name === 'done') what = 'done (no browser action)';
+        const stuck = stuckWords(p);
         parts.push(dl(
           dRow('Action', has(p.name) ? [h('span', { class: 'mono', text: str(p.name) }), what ? [' · ', what] : null] : null),
           dRow('Result', p.ok === true ? yesNo(true, 'ok') : p.ok === false ? yesNo(false, 'failed') : null),
           p.error ? dRow('Error', str(p.error)) : null,
           dRow('Screen changed', changedValue(p.screen_changed)),
+          stuck ? dRow('Progress check', [h('span', { class: p.stuck.verdict === 'stuck' ? 'yn yn-no' : 'yn yn-warn', text: stuck }),
+            h('span', { class: 'd-sub', text: p.stuck.verdict === 'stuck'
+              ? ' (the run ends here and asks the user what to do)'
+              : ' (Lightning is told it is stuck and to change approach)' })]) : null,
           dRow('Latency', isObj(ev.timings_ms) && isNum(ev.timings_ms.act) ? fmtMs(ev.timings_ms.act) : null),
           dRow('Timings', timingsValue(ev.timings_ms)),
         ));
@@ -1466,7 +1622,7 @@
           dRow('Reason', has(p.reason) ? [h('span', { class: 'mono', text: str(p.reason) }), REASON_WORDS[p.reason] ? h('span', { class: 'd-sub', text: ` (${REASON_WORDS[p.reason]})` }) : null] : null),
           dRow('Claimed success', p.success_claimed === true ? yesNo(true) : p.success_claimed === false ? yesNo(false) : null),
           dRow('Steps', has(p.steps) ? str(p.steps) : null),
-          dRow('Summary', has(p.summary) ? h('q', { text: str(p.summary) }) : null),
+          dRow(p.reason === 'stuck' ? 'The agent asks' : 'Summary', has(p.summary) ? h('q', { text: str(p.summary) }) : null),
           dRow('Stats', statsValue(p.stats)),
         ));
         break;

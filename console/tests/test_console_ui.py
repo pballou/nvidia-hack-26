@@ -7,10 +7,14 @@ straight from the banner too), the final banner carries the sandbox verdict with
 typed task text runs as that task, free text gets no sandbox check, focus never drops to <body> when the form locks,
 and the option toggles show the server defaults with clear labels. A replayed T2 event stream checks the step
 headers for replies without an action, sub-second timings in ms, accessible names and one announcement per step.
-Every test also checks that the page logs no console errors and makes no request that leaves 127.0.0.1.
+A route-fulfilled /api/config gives the page a real agent's endpoints: the header says where the VLM and Lightning
+run, an unreachable VLM gets a warning chip, and a grounder model the VLM doesn't serve is disabled (keyboard
+included). Fake agents replay agent/progress.py's stuck stop (the banner leads with the agent's question, the
+verdict below it, a warning line in the log) and a 25-step run (max_steps), which must fit at 1280x800 with nothing
+cropped. Every test also checks that the page logs no console errors and makes no request that leaves 127.0.0.1.
 
 DOM selectors are fine here (tests only). The agent under test never sees the DOM: the mock clicks pixels.
-Marked `e2e` like test_mock_e2e.py (a browser plus real mock runs, about 10 s); skip with -m "not e2e".
+Marked `e2e` like test_mock_e2e.py (a browser plus real mock runs, about 20 s); skip with -m "not e2e".
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import httpx
 import pytest
 from PIL import Image
 
+from agent.progress import ProgressTracker
 from console.app import CONSOLE_DIR, ConsoleSettings, create_app
 from console.runner import VERDICT_LABEL
 from console.tests.conftest import ServerThread
@@ -40,6 +45,15 @@ TASK_REQUEST = "Turn on high contrast."
 VIEWPORT = {"width": 1280, "height": 800}
 LOCAL_HOST = "127.0.0.1"
 FREE_TEXT_LABEL = "Free-text request: no sandbox check"
+WARN_RGB = "rgb(122, 74, 0)"  # console.css --warn (light theme); --bad is rgb(179, 38, 30)
+
+# /api/config "endpoints" of a real agent (console/agent_bridge.py endpoints_for), for route-fulfilled configs
+MAC_VLM = {"base_url": "http://127.0.0.1:8011/v1", "label": "Mac (vllm-metal)", "summary_model": "grounder",
+           "served": ["grounder"], "reachable": True}
+H200_VLM = {"base_url": "http://127.0.0.1:8001/v1", "label": "H200 via tunnel", "summary_model": "base",
+            "served": ["base", "grounder"], "reachable": True}
+LOCAL_LIGHTNING = {"base_url": "http://127.0.0.1:8000/v1", "model": "lightning", "label": "local BF16 (:8000)"}
+REAL_DEFAULTS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
 
 
 def _console(sandbox_url: str, runs: Path, **kw) -> ServerThread:
@@ -168,6 +182,32 @@ def button_names(pg) -> list[str]:
             if n.get("role", {}).get("value") == "button" and n.get("name", {}).get("value")]
 
 
+def fake_config(pg, base: str, **changes) -> dict:
+    """Serve the page's /api/config from the live console's, with `changes` merged in (e.g. a real agent's
+    endpoints; the mock has none). Returns {"cfg": ..., "hits": n}: assign a new "cfg" to change what the next
+    GET sees. Page routes take precedence over the context's (which still blocks off-host requests)."""
+    state = {"cfg": {**httpx.get(f"{base}/api/config").json(), **changes}, "hits": 0}
+
+    def handle(route):
+        state["hits"] += 1
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(state["cfg"]))
+
+    pg.route("**/api/config", handle)
+    return state
+
+
+def open_real_console(pg, base: str) -> None:
+    pg.goto(base + "/")
+    pg.wait_for_function("document.querySelector('#agent-badge').dataset.agent === 'real'")
+
+
+def no_page_overflow(pg) -> None:
+    """At 1280x800 the page itself never scrolls: the step log and the thumbnail strip scroll inside their boxes."""
+    size = pg.evaluate("""() => { const d = document.documentElement;
+        return [d.scrollWidth, d.scrollHeight, innerWidth, innerHeight]; }""")
+    assert size[0] <= size[2] and size[1] <= size[3], size
+
+
 # --- tests ---------------------------------------------------------------------------------
 
 
@@ -198,8 +238,9 @@ def test_keyboard_only_sandbox_task(page, ui_console):
     assert pg.inner_text("#banner-expl").startswith("Sandbox check: ")
     assert "The agent claimed success." in pg.inner_text("#banner-claim")
     assert pg.inner_text("#run-status").startswith("Done")
-    assert watch.run_bodies == [{"request": TASK_REQUEST, "task_id": TASK,
-                                 "options": {"grounder": "base", "thinking": "retry", "lightning": "local"}}]
+    defaults = httpx.get(f"{ui_console}/api/config").json()["defaults"]  # the page runs with the server's defaults
+    assert defaults == {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
+    assert watch.run_bodies == [{"request": TASK_REQUEST, "task_id": TASK, "options": defaults}]
 
     # the step log, in plain words: the start, one line per tool call, the done summary
     script = SCRIPTS[TASK]["steps"]
@@ -252,7 +293,7 @@ def test_keyboard_only_sandbox_task(page, ui_console):
     assert "before the click" in pg.get_attribute("#screen-img", "alt")
     step1 = "#step-log .step[data-step='1']"
     assert set(pg.get_attribute(step1, "class").split()) == {"step", "is-shown"}  # replayed: expanded, highlighted
-    assert "Grounder (base, mock) chose" in pg.inner_text(step1)
+    assert "Grounder (grounder, mock) chose" in pg.inner_text(step1)
     assert pg.inner_text(step1).count("“") >= 1  # its reasoning, quoted
 
     pg.keyboard.press("End")
@@ -525,11 +566,13 @@ def test_escape_stops_a_running_task(page, slow_console):
     watch.assert_clean(slow_console)
 
 
-@pytest.mark.parametrize("default_lightning", ["local", "hosted"])
-def test_options_show_server_defaults_with_clear_labels(page, console, default_lightning):
+@pytest.mark.parametrize("default_lightning,default_grounder", [("local", "grounder"), ("hosted", "base")])
+def test_options_show_server_defaults_with_clear_labels(page, console, default_lightning, default_grounder):
     pg, watch = page
-    base, _ = console(None, agent="mock", static_dir=STATIC, default_lightning=default_lightning)
-    assert httpx.get(f"{base}/api/config").json()["defaults"]["lightning"] == default_lightning
+    base, _ = console(None, agent="mock", static_dir=STATIC, default_lightning=default_lightning,
+                      default_grounder=default_grounder)
+    defaults = httpx.get(f"{base}/api/config").json()["defaults"]
+    assert (defaults["lightning"], defaults["grounder"]) == (default_lightning, default_grounder)
     open_console(pg, base)
 
     labels = pg.eval_on_selector_all(".options .seg label", "els => els.map(l => [l.htmlFor, l.textContent])")
@@ -537,9 +580,14 @@ def test_options_show_server_defaults_with_clear_labels(page, console, default_l
                       ["thinking-off", "off"], ["thinking-retry", "retry"], ["thinking-on", "on"],
                       ["lightning-local", "Local (BF16 on :8000)"], ["lightning-hosted", "Hosted API"]]
     checked = pg.eval_on_selector_all(".options input:checked", "els => els.map(i => i.id)")
-    assert checked == ["grounder-base", "thinking-retry", f"lightning-{default_lightning}"]
+    assert checked == [f"grounder-{default_grounder}", "thinking-retry", f"lightning-{default_lightning}"]
+    assert not pg.eval_on_selector_all(".options input:disabled", "els => els.map(i => i.id)")  # mock: no models
     summary = "local Lightning" if default_lightning == "local" else "hosted Lightning"
-    assert pg.text_content("#options-summary") == f"base · thinking retry · {summary}"
+    grounder = "LoRA grounder" if default_grounder == "grounder" else "base"
+    assert pg.text_content("#options-summary") == f"{grounder} · thinking retry · {summary}"
+    # the mock runs no models: its badge says so, and the header lists no endpoints
+    assert pg.inner_text("#agent-badge") == "Agent: mock (scripted, no models)"
+    assert pg.locator("#endpoints").is_hidden()
 
     # keyboard: the radio group is one tab stop, arrows change the choice, and the summary follows
     tab_to(pg, lambda f: f["id"] == f"lightning-{default_lightning}", limit=10)
@@ -547,4 +595,330 @@ def test_options_show_server_defaults_with_clear_labels(page, console, default_l
     other = "hosted" if default_lightning == "local" else "local"
     assert pg.is_checked(f"#lightning-{other}")
     assert pg.text_content("#options-summary").endswith(f"{other} Lightning")
+    watch.assert_clean(base)
+
+
+# --- a real agent's endpoints (route-fulfilled /api/config) -----------------------------------------------------
+
+
+def test_endpoints_header_and_unserved_grounder(page, ui_console):
+    """The header says where the VLM and Lightning run; a grounder model the VLM doesn't serve can't be picked."""
+    pg, watch = page
+    cfg = fake_config(pg, ui_console, agent="real", defaults=REAL_DEFAULTS,
+                      endpoints={"vlm": MAC_VLM, "lightning": LOCAL_LIGHTNING})
+    open_real_console(pg, ui_console)
+    assert pg.inner_text("#agent-badge") == "Agent: real"
+    assert pg.inner_text("#vlm-endpoint-text") == "VLM: Mac (vllm-metal) · 127.0.0.1:8011 · serves grounder"
+    assert pg.inner_text("#lightning-endpoint") == "Lightning: local BF16 (:8000)"
+    assert pg.locator("#vlm-warning").is_hidden()
+    assert pg.evaluate("document.querySelector('.app-header').getBoundingClientRect().height") < 80  # one row
+    no_page_overflow(pg)
+
+    # base isn't served at :8011: disabled, and its label says why; the served default stays checked
+    assert pg.is_disabled("#grounder-base") and pg.is_enabled("#grounder-grounder")
+    assert pg.text_content("label[for='grounder-base']") == "base (adapter off) (not served at 127.0.0.1:8011)"
+    assert pg.text_content("label[for='grounder-grounder']") == "grounder (LoRA)"
+    assert pg.is_checked("#grounder-grounder") and pg.locator("#grounder-note").is_hidden()
+    assert pg.text_content("#options-summary") == "LoRA grounder · thinking retry · local Lightning"
+    # the two segments still sit side by side (the note wraps inside its own segment)
+    tops = pg.eval_on_selector_all("#opt-grounder .seg label", "els => els.map(l => l.getBoundingClientRect().top)")
+    assert tops[0] == tops[1], tops
+
+    # keyboard: the group's one tab stop is the served model, and the arrow keys never land on the disabled one
+    pg.focus("#task-select")
+    tab_to(pg, lambda f: f["id"] == "grounder-grounder", limit=3)  # task picker, Options summary, grounder
+    for key in ("ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"):
+        pg.keyboard.press(key)
+        assert focused(pg)["id"] == "grounder-grounder" and pg.is_checked("#grounder-grounder"), key
+    pg.keyboard.press("Tab")
+    assert focused(pg)["id"] == "thinking-retry"
+
+    # the Lightning line follows the toggle (the endpoints describe the default; hosted is the other preset)
+    pg.click("label[for='lightning-hosted']")
+    assert pg.inner_text("#lightning-endpoint") == "Lightning: hosted API"
+    pg.click("label[for='lightning-local']")
+    assert pg.inner_text("#lightning-endpoint") == "Lightning: local BF16 (:8000)"
+
+    # the VLM doesn't answer: a warning chip, and nothing is disabled (what it serves is unknown)
+    cfg["cfg"] = {**cfg["cfg"], "endpoints": {"vlm": {**H200_VLM, "served": None, "reachable": False},
+                                              "lightning": LOCAL_LIGHTNING}}
+    open_real_console(pg, ui_console)
+    assert pg.inner_text("#vlm-endpoint-text") == "VLM: H200 via tunnel · 127.0.0.1:8001"
+    assert pg.is_visible("#vlm-warning") and pg.inner_text("#vlm-warning") == "⚠ not reachable"
+    assert pg.eval_on_selector_all("#opt-grounder input:disabled", "els => els.length") == 0
+    assert pg.evaluate("document.querySelector('.app-header').getBoundingClientRect().height") < 80
+
+    # it comes up: the page looks again (on a timer, or here when the tab becomes visible) and says so once
+    record_announcements(pg)
+    cfg["cfg"] = {**cfg["cfg"], "endpoints": {"vlm": H200_VLM, "lightning": LOCAL_LIGHTNING}}
+    pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    pg.wait_for_selector("#vlm-warning", state="hidden")
+    assert pg.inner_text("#vlm-endpoint-text") == "VLM: H200 via tunnel · 127.0.0.1:8001 · serves base, grounder"
+    pg.wait_for_function("window.__said.length > 0")
+    assert pg.evaluate("window.__said") == ["The VLM is reachable again."]
+
+    # the VLM stopped serving base since the page looked: the backend refuses the run (400), the page shows its
+    # message, looks again, and moves the choice to the model that is served
+    pg.click("label[for='grounder-base']")
+    msg = "grounder model 'base' is not served at http://127.0.0.1:8001/v1 (serves: grounder)"
+    pg.route("**/api/run", lambda r: r.fulfill(status=400, content_type="application/json",
+                                               body=json.dumps({"error": msg})))
+    cfg["cfg"] = {**cfg["cfg"], "endpoints": {"vlm": {**H200_VLM, "served": ["grounder"]}, "lightning": LOCAL_LIGHTNING}}
+    pg.fill("#request", "Open the settings")
+    pg.press("#request", "Enter")
+    pg.wait_for_function("document.querySelector('#grounder-base').disabled")
+    assert pg.inner_text("#form-error") == f"Can’t start: {msg}"
+    assert pg.is_checked("#grounder-grounder")
+    assert pg.text_content("label[for='grounder-base']").endswith("(not served at 127.0.0.1:8001)")
+
+    # serves neither model: both disabled, and a note says runs can't start
+    cfg["cfg"] = {**cfg["cfg"], "endpoints": {"vlm": {**H200_VLM, "served": []}, "lightning": LOCAL_LIGHTNING}}
+    open_real_console(pg, ui_console)
+    assert pg.inner_text("#vlm-endpoint-text") == "VLM: H200 via tunnel · 127.0.0.1:8001 · serves no models"
+    assert pg.eval_on_selector_all("#opt-grounder input:disabled", "els => els.length") == 2
+    assert pg.inner_text("#grounder-note") == ("The VLM at 127.0.0.1:8001 serves neither model, "
+                                               "so runs can’t start until it does.")
+
+    # the screen-summary model isn't served there (--summary-model base on a grounder-only VLM): a warning chip
+    cfg["cfg"] = {**cfg["cfg"], "endpoints": {"vlm": {**MAC_VLM, "summary_model": "base"}, "lightning": LOCAL_LIGHTNING}}
+    open_real_console(pg, ui_console)
+    assert pg.inner_text("#vlm-warning") == "⚠ summary model base not served"
+    assert pg.locator("#grounder-note").is_hidden() and pg.is_checked("#grounder-grounder")
+    assert pg.evaluate("document.querySelector('.app-header').getBoundingClientRect().height") < 80
+    assert cfg["hits"] == 6  # 4 page loads, the visibility change, the 400: no other polling in a short test
+    # Chromium logs every 4xx as a console error; this one 400 is the test's own
+    expected = [e for e in watch.errors if "status of 400" in e]
+    assert len(expected) == 1, watch.errors
+    watch.errors.remove(expected[0])
+    watch.assert_clean(ui_console)
+
+
+# --- 'stuck' (agent/progress.py) ------------------------------------------------------------------------------------
+
+
+def png_file(d: Path, name: str, color: str) -> str:
+    Image.new("RGB", (160, 100), color).save(d / name)
+    return str(d / name)
+
+
+def stuck_agent(trace_root: Path, seen: dict, target: str = "the save button", gap_s: float = 0.15):
+    """(run_task, make_cfg) with T2's stuck stop: the same click changes nothing, agent/progress.py's real
+    ProgressTracker warns (an action with stuck.verdict 'warn'), then stops it (verdict 'stuck', done reason
+    'stuck' with the tracker's own summary: a question to the user). `seen` gets the summary and the reason."""
+
+    async def run_task(request, *, start_url, cfg, on_event=None):
+        rid = f"stuck-{time.time_ns()}"
+        d = trace_root / rid
+        d.mkdir(parents=True)
+
+        async def ev(step, kind, payload, **extra):
+            await on_event({"run_id": rid, "step": step, "kind": kind, "ts": time.time(), "payload": payload, **extra})
+
+        await ev(0, "start", {"request": request, "start_url": start_url, "config": {}})
+        await ev(0, "observation", {"text": "Step 0 | URL: /settings"}, screenshot_path=png_file(d, "step_00.png", "white"))
+        tracker = ProgressTracker()
+        click = {"name": "click", "arguments": {"target_description": target}}
+        step, verdict = 0, None
+        while verdict != "stuck":
+            step += 1
+            await asyncio.sleep(gap_s)
+            await ev(step, "plan", {"tool_calls": [click], "thinking": verdict == "warn", "reasoning": "Save it."})
+            await ev(step, "tool_call", {**click, "valid": True, "description": f"Clicking: {target}"})
+            await ev(step, "grounding", {"target": target, "x": 640, "y": 400, "model": "grounder"},
+                     overlay_path=png_file(d, f"step_{step:02d}_overlay.png", "red"))
+            verdict = tracker.record("click", click["arguments"], ok=True, screen_changed=False, click_xy=(640, 400))
+            action = {**click, "ok": True, "screen_changed": False, "done": False, "click": {"x": 640, "y": 400}}
+            if verdict:
+                action["stuck"] = {"verdict": verdict, "reason": tracker.reason}
+            await ev(step, "action", action, timings_ms={"act": 20.0})
+            await ev(step, "observation", {"text": f"Step {step} | URL: /settings"},
+                     screenshot_path=png_file(d, f"step_{step:02d}.png", "white"))
+        seen.update(summary=tracker.summary(), reason=tracker.reason, steps=step)
+        stats = {"n_clicks": step, "n_no_change": step, "n_stuck_warnings": tracker.n_warnings, "n_stuck_stops": 1}
+        await ev(step, "done", {"success_claimed": False, "summary": seen["summary"], "steps": step, "reason": "stuck",
+                                "stats": stats})
+        return {"run_id": rid, "success_claimed": False, "summary": seen["summary"], "steps": step, "trace_dir": str(d)}
+
+    return run_task, lambda options: {"options": options}
+
+
+def test_stuck_run_asks_the_user(page, console, tmp_path):
+    """done.reason 'stuck': the banner leads with the agent's question (amber, not a red failure, clearly not
+    done), the sandbox verdict still shows below it, and the step log marks the warning and the stop."""
+    pg, watch = page
+    seen: dict = {}
+    base, _ = console(stuck_agent(tmp_path / "trace", seen), agent="mock", static_dir=STATIC)
+    open_console(pg, base)
+    record_announcements(pg)
+    pg.select_option("#task-select", TASK)
+    pg.press("#request", "Enter")
+    wait_banner(pg, 30)
+
+    summary, reason = seen["summary"], seen["reason"]
+    assert reason == 'click "the save button" made no progress 3 times'  # agent/progress.py's own words
+    cut = summary.index("What would you like")
+    question, context = summary[cut:], summary[:cut].strip()
+    assert summary.startswith("I'm stuck: ") and question.endswith("something else.")
+
+    # the banner: the question is the headline, and it is the banner's accessible name with the title
+    assert focused(pg)["id"] == "banner"
+    assert pg.get_attribute("#banner", "data-tone") == "stuck"
+    assert pg.inner_text("#banner-icon") == "?"
+    assert pg.inner_text("#banner-title") == "The agent is stuck and asks:"
+    assert pg.inner_text("#banner-question") == f"“{question}”"
+    assert pg.get_attribute("#banner", "aria-labelledby") == "banner-title banner-question"
+    assert pg.evaluate("getComputedStyle(document.querySelector('#banner')).borderTopColor") == WARN_RGB  # not red
+    # not done: the sandbox check (it still runs after a stuck stop) sits below the question
+    assert pg.text_content("#banner-label") == VERDICT_LABEL
+    assert pg.inner_text("#banner-expl").startswith("✗ Not done. Sandbox check: 1 of ")
+    assert pg.inner_text("#banner-summary") == f"Agent’s summary: “{context}”"  # what it tried, without the question
+    claim = pg.inner_text("#banner-claim")
+    assert "The agent did not claim success." in claim and "run it again" in claim
+    assert "1 stuck warning" in pg.inner_text("#banner-extra")
+    assert pg.get_attribute("#run-status", "data-state") == "stuck"
+    assert pg.inner_text("#run-status").startswith("Stuck")
+    y = pg.evaluate("""() => ['#banner', '#screen', '#thumbs'].map(s => document.querySelector(s)
+        .getBoundingClientRect()).map(r => [r.top, r.bottom])""")
+    assert y[0][1] <= y[1][0] and y[1][1] <= y[2][0], y  # banner, screen, thumbnails: stacked, none overlapping
+    no_page_overflow(pg)
+
+    # the step log: a warning line on the step that triggered it (still shown when that step is compact)...
+    n = seen["steps"]
+    assert n == 6
+    warn_step = "#step-log .step[data-step='3']"
+    assert pg.inner_text(f"{warn_step} .step-warn") == f"Stuck warning: {reason}"
+    assert pg.locator(f"{warn_step} .step-warn").is_visible() and "is-compact" in pg.get_attribute(warn_step, "class")
+    assert [pg.locator(f"#step-log .step[data-step='{i}'] .step-warn").count() for i in (1, 2, 4, 5)] == [0] * 4
+    # ...and "Stopped: stuck" plus the question on the last one, amber (warn), not red (bad)
+    last = f"#step-log .step[data-step='{n}']"
+    lines = pg.eval_on_selector_all(f"{last} .step-lines > p", "els => els.map(e => [e.className, e.textContent])")
+    assert ["step-line step-warn", f"Stopped: stuck ({reason})"] in lines, lines
+    assert ["step-line step-ask", f"The agent asks: “{question}”"] in lines, lines
+    assert pg.get_attribute(last, "data-state") == "warn"
+
+    # one announcement per step; the warning and the stop are each said once, with their step
+    said = pg.evaluate("window.__said")
+    assert said[0] == f"Run started: {TASK_REQUEST}"
+    assert said[1:] == [f"Step {i}: Clicking: the save button. No change on screen."
+                        + {3: f" Stuck warning: {reason}.", 6: f" Stopped: stuck ({reason})."}.get(i, "")
+                        for i in range(1, n + 1)]
+    watch.assert_clean(base)
+
+
+# --- a 25-step run (configs/agent.yaml max_steps) -------------------------------------------------------------------
+
+
+def long_agent(trace_root: Path, n: int = 25):
+    """(run_task, make_cfg): n screen-changing clicks, each with an overlay and a screenshot, then done(max_steps)."""
+
+    async def run_task(request, *, start_url, cfg, on_event=None):
+        rid = f"long-{time.time_ns()}"
+        d = trace_root / rid
+        d.mkdir(parents=True)
+
+        async def ev(step, kind, payload, **extra):
+            await on_event({"run_id": rid, "step": step, "kind": kind, "ts": time.time(), "payload": payload, **extra})
+
+        await ev(0, "start", {"request": request, "start_url": start_url, "config": {}})
+        await ev(0, "observation", {"text": "Step 0 | URL: /"}, screenshot_path=png_file(d, "step_00.png", "white"))
+        colors = ("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd")
+        for step in range(1, n + 1):
+            click = {"name": "click", "arguments": {"target_description": f"the row {step} details link"}}
+            await ev(step, "plan", {"tool_calls": [click], "reasoning": f"Row {step} is next. " * 6})
+            await ev(step, "tool_call", {**click, "valid": True})
+            await ev(step, "grounding", {"target": click["arguments"]["target_description"], "x": 600, "y": 30 * step,
+                                         "model": "grounder"},
+                     overlay_path=png_file(d, f"step_{step:02d}_overlay.png", "red"), timings_ms={"ground": 400.0})
+            await ev(step, "action", {**click, "ok": True, "screen_changed": True, "done": False},
+                     timings_ms={"act": 20.0})
+            await ev(step, "observation", {"text": f"Step {step} | URL: /usage"},
+                     screenshot_path=png_file(d, f"step_{step:02d}.png", colors[step % len(colors)]))
+        summary = f"Stopped: reached the {n}-step limit before finishing."
+        await ev(n, "done", {"success_claimed": False, "summary": summary, "steps": n, "reason": "max_steps",
+                             "stats": {"n_clicks": n}})
+        return {"run_id": rid, "success_claimed": False, "summary": summary, "steps": n, "trace_dir": str(d)}
+
+    return run_task, lambda options: {"options": options}
+
+
+THUMB_GEOMETRY = """() => {
+  const box = (e) => e.getBoundingClientRect();
+  const strip = document.querySelector('#thumbs');
+  const s = box(strip);
+  const inner = {top: s.top + strip.clientTop, bottom: s.top + strip.clientTop + strip.clientHeight,
+                 left: s.left + strip.clientLeft, right: s.left + strip.clientLeft + strip.clientWidth};
+  const thumbs = [...strip.querySelectorAll('.thumb')].map((t) => {
+    const r = box(t);
+    const num = t.querySelector('.thumb-num');
+    const img = t.querySelector('img');
+    return {step: t.dataset.step, top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+            current: t.getAttribute('aria-current') === 'true', num: num.textContent,
+            numFits: box(num).right <= r.right && box(num).bottom <= r.bottom,
+            filled: img.offsetHeight >= t.clientHeight - 1};  // no letterbox band under the image
+  });
+  return {strip: {...inner, scrollWidth: strip.scrollWidth, clientWidth: strip.clientWidth},
+          panel: box(document.querySelector('.panel-right')).toJSON(), thumbs};
+}"""
+
+
+def visible_in_strip(geo: dict, step: str, ring: float = 6) -> bool:
+    """The thumb for `step` is fully inside the strip's visible box, with room for its focus ring."""
+    t = next(t for t in geo["thumbs"] if t["step"] == step)
+    s = geo["strip"]
+    return t["left"] >= s["left"] + ring - 1 and t["right"] <= s["right"] - ring + 1
+
+
+def test_25_step_run_fits(page, console, tmp_path):
+    """max_steps is 25: start + 25 thumbnails scroll sideways inside their strip, never the page; none is cropped
+    (rings included); the log scrolls; replaying any step keeps its thumbnail in view."""
+    pg, watch = page
+    base, _ = console(long_agent(tmp_path / "trace"), agent="mock", static_dir=STATIC)
+    open_console(pg, base)
+    pg.fill("#request", "Look at every row")
+    pg.press("#request", "Enter")
+    wait_banner(pg, 60)
+
+    assert len(step_actions(pg)) == 26 and step_actions(pg)[-1] == "Clicking: the row 25 details link"
+    assert pg.inner_text("#banner-summary") == "Agent’s summary: “Stopped: reached the 25-step limit before finishing.”"
+    assert "25 steps" in pg.inner_text("#banner-claim")
+    pg.wait_for_function("[...document.querySelectorAll('#thumbs .thumb img')].every(i => i.complete && i.naturalWidth)")
+    no_page_overflow(pg)
+
+    geo = pg.evaluate(THUMB_GEOMETRY)
+    s, panel, thumbs = geo["strip"], geo["panel"], geo["thumbs"]
+    assert [t["step"] for t in thumbs] == [str(i) for i in range(26)]
+    assert [t["num"] for t in thumbs] == ["Start", *[str(i) for i in range(1, 26)]] and all(t["numFits"] for t in thumbs)
+    assert s["scrollWidth"] > s["clientWidth"]  # it scrolls sideways...
+    assert panel["left"] <= s["left"] and s["right"] <= panel["right"] and s["bottom"] <= panel["bottom"]  # ...inside
+    for t in thumbs:  # none is cut at the top or bottom (nor by a scrollbar), the focus ring fits (high contrast:
+        # 4 px + 2 px offset), and none is letterboxed
+        assert t["top"] >= s["top"] + 6 and t["bottom"] <= s["bottom"] - 6 and t["filled"], (t, s)
+    assert visible_in_strip(geo, "25")  # live: the newest is in view
+
+    # the log scrolls inside its box, and following live left the newest step in view
+    log = pg.evaluate("""() => { const l = document.querySelector('#log-scroll').getBoundingClientRect();
+        const n = document.querySelector('#step-log .step[data-step="25"]').getBoundingClientRect();
+        const el = document.querySelector('#log-scroll');
+        return {scrolls: el.scrollHeight > el.clientHeight, top: n.top >= l.top - 1, bottom: n.top < l.bottom}; }""")
+    assert log == {"scrolls": True, "top": True, "bottom": True}, log
+    assert pg.evaluate("(() => { const e = document.querySelector('#step-log .step[data-step=\"25\"] .step-num');"
+                       " return e.scrollWidth <= e.clientWidth; })()")
+
+    # keyboard replay from the banner: Home, End and arrows keep the focused thumbnail in view
+    pg.focus("#banner")
+    pg.keyboard.press("Home")
+    assert focused(pg)["step"] == "0" and visible_in_strip(pg.evaluate(THUMB_GEOMETRY), "0")
+    pg.keyboard.press("End")
+    assert focused(pg)["step"] == "25" and visible_in_strip(pg.evaluate(THUMB_GEOMETRY), "25")
+    for _ in range(3):
+        pg.keyboard.press("ArrowLeft")
+    assert focused(pg)["step"] == "22" and visible_in_strip(pg.evaluate(THUMB_GEOMETRY), "22")
+
+    # replaying from the log (mouse) scrolls the strip to that step's thumbnail too
+    pg.evaluate("document.querySelector('#log-scroll').scrollTop = 0")
+    pg.click("#step-log .step[data-step='2'] .step-action")
+    geo = pg.evaluate(THUMB_GEOMETRY)
+    assert next(t for t in geo["thumbs"] if t["step"] == "2")["current"] and visible_in_strip(geo, "2")
+    assert shown_image(pg).endswith("step_02_overlay.png")
+    no_page_overflow(pg)
     watch.assert_clean(base)

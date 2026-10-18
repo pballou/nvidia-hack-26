@@ -46,7 +46,7 @@ LONG_TASK = "message-support-meter"  # 7 steps: at 1 s per step it is still runn
 VIEWPORT = {"width": 1280, "height": 800}
 LOCAL_HOST = "127.0.0.1"
 FAKE_MIC = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
-DEFAULT_OPTIONS = {"grounder": "base", "thinking": "retry", "lightning": "local"}
+DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}  # console default (--grounder)
 HEARD_STUB = re.compile(r"^Heard \(stub, \d+ ms\): Turn on high contrast\.$")
 FORBIDDEN_APIS = ("SpeechRecognition", "webkitSpeechRecognition", "MediaRecorder")
 

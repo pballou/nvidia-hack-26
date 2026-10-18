@@ -252,7 +252,7 @@ def test_push_to_talk_fills_selects_and_runs_a_sandbox_task(voice, fast_console)
     body = dict(v.run_bodies[0])
     voice = body.pop("voice")  # what was heard, for the logs page (console.json only; the agent never gets it)
     assert body == {"request": TASK_REQUEST, "task_id": TASK,
-                    "options": {"grounder": "base", "thinking": "retry", "lightning": "local"}}
+                    "options": {"grounder": "grounder", "thinking": "retry", "lightning": "local"}}
     assert voice["text"] == STUB_TEXT and voice["model"] == "stub" and voice["latency_ms"] >= 0, voice
     assert 0.6 < voice["duration_s"] < 2.0, voice
     s = v.state()
@@ -524,7 +524,7 @@ def test_explicit_stub_is_labelled_and_never_runs_by_itself(voice, fast_console)
     s = v.state()
     assert s["mic"] == "idle" and s["hint"] == ("Voice input is a stub: it fills in fixed text, whatever you say, "
                                                 "and never runs it by itself. Hold Right Option to try it."), s
-    assert v.pg.text_content("#asr-note").startswith("Voice input is the stub (stub (fixed text)): it recognizes no")
+    assert v.pg.text_content("#asr-note").startswith("Voice input is the stub (fixed text) engine: it recognizes no")
     v.pg.evaluate("document.activeElement.blur()")
     v.hold("AltRight", 0.4)
     v.wait_mic("done")

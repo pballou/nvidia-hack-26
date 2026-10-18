@@ -64,10 +64,19 @@ the sandbox's own state (the agent never sees that state).
 scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API; --headed to watch the browser
 ```
 
-The script checks that the VLM (`vlm.base_url` in `configs/agent.yaml`) and Lightning
-respond, then prints the console URL. In the console, choose Grounder `base` (before
-SFT) or `grounder`, then run an easy task such as "Make the text bigger, I can't read
-this."
+**Fully local (Mac):** the merged grounder on :8011 also writes the screen summaries
+(bring it up with [docs/local-mac.md](docs/local-mac.md)):
+
+```bash
+scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder --vlm-label "Mac (vllm-metal)"
+```
+
+The script checks that the VLM (`--vlm-url`, else `vlm.base_url` in `configs/agent.yaml`)
+and Lightning respond. It also checks that the VLM serves the chosen grounder and summary
+model, then prints the console URL. The console starts with Grounder `grounder` (the LoRA;
+`--grounder base` for the adapter off). It refuses a run whose grounder the VLM doesn't
+serve, and shows where each model runs (the Logs page does this per run). Then run an easy
+task such as "Make the text bigger, I can't read this."
 
 **5. Voice input (optional).** NVIDIA Parakeet TDT 0.6B v3 runs locally through
 NeMo-Speech.cpp 0.2.0. Audio never leaves the machine, and there's no cloud speech.

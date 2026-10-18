@@ -29,6 +29,10 @@
       <div class="section-head">
         <h2 id="runs-heading">Runs</h2>
         <p id="runs-meta" class="section-meta"></p>
+        <span class="status-filter">
+          <label class="filter-label" for="status-filter">Status</label>
+          <select id="status-filter"><option value="">All statuses</option></select>
+        </span>
         <p id="refresh-note" class="section-meta refresh-note"></p>
         <button id="refresh-btn" class="btn btn-small" type="button">Refresh</button>
       </div>
@@ -40,7 +44,7 @@
             <col class="c-time"><col class="c-request"><col class="c-agent"><col class="c-status">
             <col class="c-check"><col class="c-check"><col class="c-steps"><col class="c-total">
             <col class="c-p50"><col class="c-p50"><col class="c-p50"><col class="c-p50"><col class="c-p50">
-            <col class="c-models">
+            <col class="c-models"><col class="c-where">
           </colgroup>
           <thead>
             <tr>
@@ -54,6 +58,7 @@
               <th scope="col" rowspan="2" class="num">Total</th>
               <th scope="colgroup" colspan="5" class="group-head">p50 latency per stage</th>
               <th scope="col" rowspan="2">Models</th>
+              <th scope="col" rowspan="2">Where it ran</th>
             </tr>
             <tr>
               <th scope="col" class="num sub">voice</th>
@@ -72,7 +77,8 @@
         <kbd>Home</kbd><kbd>End</kbd> first and last<span class="narrow-only"> · <kbd>←</kbd><kbd>→</kbd> scroll
           sideways</span>.
         <span class="legend-sep">Claimed = the agent said it succeeded. Verified = the sandbox state, checked by
-          the console after the run. — = not in the trace.</span>
+          the console after the run. Stuck = the agent stopped because nothing changed, and asks what to do;
+          ⚠N = N stuck warnings in a run that went on. — = not in the trace.</span>
       </p>
     </section>
 

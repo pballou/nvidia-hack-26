@@ -1,0 +1,46 @@
+{
+  "console_run_id": "c-5f7c1d00",
+  "agent": "real",
+  "request": "Make the text bigger, I can't read this.",
+  "task_id": "text-size-large",
+  "options": {
+    "grounder": "grounder",
+    "thinking": "retry",
+    "lightning": "local"
+  },
+  "sid": "console-c-5f7c1d00",
+  "start_url": "http://127.0.0.1:8090/settings?tab=accessibility&sid=console-c-5f7c1d00",
+  "voice": null,
+  "endpoints": {
+    "vlm": {
+      "base_url": "http://127.0.0.1:8011/v1",
+      "label": "Mac (vllm-metal)",
+      "summary_model": "grounder",
+      "served": [
+        "grounder"
+      ],
+      "reachable": true
+    },
+    "lightning": {
+      "base_url": "http://127.0.0.1:8000/v1",
+      "model": "lightning",
+      "label": "local BF16 (:8000)"
+    }
+  },
+  "status": "done",
+  "result": {
+    "run_id": "20261017-211502-5f7c1d",
+    "success_claimed": false,
+    "summary": "I'm stuck: click \"the L option in the Text size row\" made no progress 3 times, and changing approach didn't help. I tried: click \"the L option in the Text size row\"; click \"the Large text button\"; click \"the letter L at the right end of the Text size control\"; click \"the L segment\". None of it changed the screen. What would you like me to do next? You could tell me where the control is or what it looks like, or ask me to try something else.",
+    "steps": 6,
+    "trace_dir": "/path/to/repo/runs/20261017-211502-5f7c1d"
+  },
+  "verdict": {
+    "task_id": "text-size-large",
+    "passed": false,
+    "explanation": "1 of 7 conditions failed: settings.accessibility.text_size: expected 'L', got 'M'",
+    "label": "verified by sandbox state, not seen by the agent"
+  },
+  "started_ts": 1792286101.6,
+  "ended_ts": 1792286130.0
+}

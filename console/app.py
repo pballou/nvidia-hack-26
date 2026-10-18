@@ -2,9 +2,10 @@
 
 HTTP API (binding for console/static; details in console/README.md):
   GET  /                          console/static/index.html (and /static/*, Cache-Control: no-cache)
-  GET  /api/config                {agent, sandbox_url, headed, defaults, asr}
+  GET  /api/config                {agent, sandbox_url, headed, defaults, asr, endpoints}
   GET  /api/tasks                 the 12 sandbox tasks, without their checks
-  POST /api/run                   {request, task_id?, options?} -> {run_id, sid, start_url}; 409 busy, 400 bad input, 503 unavailable
+  POST /api/run                   {request, task_id?, options?} -> {run_id, sid, start_url}; 409 busy, 400 bad input
+                                  (or a grounder the VLM doesn't serve), 503 unavailable
   GET  /api/runs/{run_id}         run summary
   GET  /api/runs/{run_id}/events  SSE: status, step, result, verdict, end (replay + live; honors Last-Event-ID)
   POST /api/runs/{run_id}/stop    {ok: true}
@@ -29,7 +30,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from console import asr, logs
-from console.agent_bridge import AgentUnavailable, get_agent
+from console.agent_bridge import (NO_ENDPOINTS, SERVED_NAMES, AgentUnavailable, ServedModels, endpoints_for, get_agent,
+                                  unserved_grounder)
 from console.runner import Busy, Runner, StartFailed, run_dir_root
 
 log = logging.getLogger("console")
@@ -38,7 +40,7 @@ CONSOLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CONSOLE_DIR.parent
 
 OPTION_CHOICES = {"grounder": ("base", "grounder"), "thinking": ("off", "retry", "on"), "lightning": ("hosted", "local")}
-DEFAULT_OPTIONS = {"grounder": "base", "thinking": "retry", "lightning": "hosted"}
+DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
 MAX_REQUEST_CHARS = 500
 MAX_VOICE_TEXT_CHARS = 500
 MAX_VOICE_MODEL_CHARS = 120
@@ -61,6 +63,13 @@ class ConsoleSettings:
     headed: bool = False
     step_delay_s: float = 0.8  # mock pacing
     default_lightning: str = "local"  # the console's initial Lightning toggle (local :8000 or hosted API)
+    default_grounder: str = "grounder"  # the console's initial Grounder choice (--grounder base|grounder)
+    # Real agent only (load_config overrides; None = the agent's config and env vars decide):
+    vlm_url: str | None = None          # --vlm-url -> vlm={"base_url": ...}
+    summary_model: str | None = None    # --summary-model base|grounder
+    vlm_label: str | None = None        # --vlm-label / CONSOLE_VLM_LABEL (default: by port, agent_bridge.vlm_label)
+    served_ttl_s: float = 10.0          # GET <vlm>/models is re-checked at most this often
+    served_timeout_s: float = 2.0
     host: str = "127.0.0.1"
     port: int = 8095
     static_dir: Path = field(default_factory=lambda: CONSOLE_DIR / "static")
@@ -77,9 +86,15 @@ class ConsoleSettings:
         self.mock_scripts = repo_path(self.mock_scripts)
         if self.default_lightning not in OPTION_CHOICES["lightning"]:
             raise ValueError(f"default_lightning must be one of {OPTION_CHOICES['lightning']}")
+        if self.default_grounder not in OPTION_CHOICES["grounder"]:
+            raise ValueError(f"default_grounder must be one of {OPTION_CHOICES['grounder']}")
+        if self.summary_model is not None and self.summary_model not in SERVED_NAMES:
+            raise ValueError(f"summary_model must be one of {SERVED_NAMES}")
+        self.vlm_url = self.vlm_url.strip().rstrip("/") if self.vlm_url and self.vlm_url.strip() else None
+        self.vlm_label = self.vlm_label.strip() if self.vlm_label and self.vlm_label.strip() else None
 
     def default_options(self) -> dict:
-        return {**DEFAULT_OPTIONS, "lightning": self.default_lightning}
+        return {**DEFAULT_OPTIONS, "grounder": self.default_grounder, "lightning": self.default_lightning}
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -176,6 +191,19 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
     runner = Runner(run_task=run_task, make_cfg=make_cfg, sandbox_url=settings.sandbox_url,
                     tasks_by_id=tasks_by_id, stop_timeout_s=settings.stop_timeout_s, agent_name=settings.agent)
     agent_root = _agent_run_root(make_cfg, settings.default_options())
+    served = ServedModels(ttl_s=settings.served_ttl_s, timeout_s=settings.served_timeout_s)
+
+    def endpoints(options: dict | None = None) -> dict:
+        """Where the VLM and Lightning are for these options (default: the console's defaults), from the agent's
+        cfg after the console's overrides. Null entries for the mock (it runs no models). Blocking (probes the VLM)."""
+        if settings.agent != "real" or make_cfg is None:
+            return dict(NO_ENDPOINTS)
+        try:
+            cfg = make_cfg(options or settings.default_options())
+        except Exception as e:  # reported as a 503 when a run starts
+            log.warning("endpoints: the agent config failed: %s: %s", type(e).__name__, e)
+            return dict(NO_ENDPOINTS)
+        return endpoints_for(cfg, served=served, label=settings.vlm_label)
 
     def log_roots() -> list[Path]:
         """Where the logs page looks for <run_id>/events.jsonl: --runs-dir, then the agent's cfg.run_dir_root."""
@@ -190,6 +218,8 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
     app.state.settings = settings
     app.state.runner = runner
     app.state.log_roots = log_roots
+    app.state.served = served
+    app.state.endpoints = endpoints
     app.mount("/static", RevalidatedStaticFiles(directory=settings.static_dir, check_dir=False), name="static")
     app.include_router(logs.make_router(static_dir=settings.static_dir, roots=log_roots,
                                         live=runner.live_agent_run_ids))
@@ -203,9 +233,9 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
                             "<a href='/api/config'>/api/config</a></p>", status_code=404)
 
     @app.get("/api/config")
-    def config():
+    def config():  # sync: FastAPI runs it in a worker thread (the VLM probe blocks for up to 2 s)
         return {"agent": settings.agent, "sandbox_url": settings.sandbox_url, "headed": settings.headed,
-                "defaults": settings.default_options(), "asr": asr.info()}
+                "defaults": settings.default_options(), "asr": asr.info(), "endpoints": endpoints()}
 
     @app.get("/api/tasks")
     def list_tasks():
@@ -222,9 +252,13 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
             return _error(400, problem)
         if agent_error:
             return _error(503, agent_error)
+        snapshot = await run_in_threadpool(endpoints, clean["options"])  # recorded in console.json
+        unserved = unserved_grounder(snapshot, clean["options"]["grounder"])
+        if unserved:
+            return _error(400, unserved)
         try:
             run = await run_in_threadpool(runner.start, clean["request"], clean["task_id"], clean["options"],
-                                          clean["voice"])
+                                          clean["voice"], snapshot)
         except Busy as e:
             return _error(409, "a run is already in progress; stop it first", active_run_id=e.active_run_id)
         except StartFailed as e:

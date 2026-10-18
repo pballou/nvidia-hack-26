@@ -32,6 +32,12 @@ from console.tests.conftest import messages, read_sse
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "real_traces"
 DONE_RUN = "20261017-175025-e9fe8e"
 STOPPED_RUN = "20261017-174924-f75115"
+# fixtures/stuck_trace/: a synthetic real-agent trace in agent/core.py's exact shapes for the "stuck" stop, with the
+# console.json a fully local (Mac) console run writes. Its stuck verdicts, reason and done summary come from
+# agent.progress.ProgressTracker itself (test_stuck_fixture_matches_progress_tracker keeps them in sync). Six clicks
+# on the Text size control that change nothing: a warning at step 3 (the same target 3 times), the stop at step 6.
+STUCK_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "stuck_trace"
+STUCK_RUN = "20261017-211502-5f7c1d"
 TASK = "download-september-statement"
 VOICE = {"text": "VOICE-ONLY-MARKER download my september statement", "model": "parakeet-tdt-0.6b-v3",
          "latency_ms": 812.4, "duration_s": 2.5}
@@ -243,6 +249,7 @@ def _done(reason):
 @pytest.mark.parametrize("events, console, status", [
     (_done("done"), None, "done"),
     (_done("max_steps"), None, "max_steps"),
+    (_done("stuck"), console_doc(status="done"), "stuck"),          # agent/progress.py's stop: its own status
     (_done("stopped"), console_doc(status="stopped"), "stopped"),
     (_done("error"), None, "error"),
     (_done("weird"), None, "unknown"),
@@ -331,6 +338,112 @@ def test_prompt_identity_tokens_and_reused_summaries(tmp_path):
     assert logs.event_prompt_sha({"kind": "observation", "payload": {"summary": "a string"}}) is None
     assert logs.event_prompt_sha({"kind": "action", "payload": {"prompt_sha": "x"}}) is None
     json.dumps(s, allow_nan=False)
+
+
+# --- stuck (agent/progress.py) and endpoints -----------------------------------------------------------
+
+
+def stuck_events() -> list[dict]:
+    return logs.read_events(STUCK_FIXTURES / STUCK_RUN / "events.jsonl")[0]
+
+
+def stuck_console() -> dict:
+    return json.loads((STUCK_FIXTURES / STUCK_RUN / "console.json").read_text())
+
+
+def test_stuck_fixture_matches_progress_tracker():
+    """The fixture's stuck verdicts, reason and question are what agent/progress.py produces for its actions."""
+    from agent.progress import ProgressTracker
+
+    events = stuck_events()
+    tr = ProgressTracker()
+    verdicts = []
+    for e in (e for e in events if e["kind"] == "action"):
+        p = e["payload"]
+        c = p.get("click") or {}
+        verdicts.append(tr.record(p["name"], p["arguments"], ok=p["ok"], screen_changed=p["screen_changed"],
+                                  click_xy=(c["x"], c["y"]) if "x" in c else None))
+        assert p.get("stuck") == ({"verdict": verdicts[-1], "reason": tr.reason} if verdicts[-1] else None), e
+    assert verdicts == [None, None, "warn", None, None, "stuck"]
+    done = events[-1]["payload"]
+    assert done["reason"] == "stuck" and done["success_claimed"] is False and done["summary"] == tr.summary()
+    assert done["summary"].startswith("I'm stuck: ") and done["summary"].endswith("ask me to try something else.")
+    # every stat agent/core.py documents, plus latency_ms
+    assert set(done["stats"]) == {"n_tool_calls", "n_invalid_calls", "n_actions", "n_clicks", "n_failed_actions",
+                                  "n_no_tool_call", "n_truncated", "n_no_change", "n_recoveries", "n_thinking_calls",
+                                  "n_api_errors", "n_stuck_warnings", "n_stuck_stops", "latency_ms"}
+    assert all(e["kind"] in ("start", "observation", "plan", "tool_call", "grounding", "action", "done") for e in events)
+
+
+def test_stuck_summary_status_and_counts():
+    events, console = stuck_events(), stuck_console()
+    s = logs.summarize_run(events, console, run_id=STUCK_RUN)
+    assert (s["status"], s["steps"], s["success_claimed"], s["verified"]) == ("stuck", 6, False, False)
+    assert (s["n_stuck_warnings"], s["n_stuck_stops"], s["n_errors"], s["n_invalid_tool_calls"]) == (1, 1, 0, 0)
+    assert s["models"] == {"lightning": "lightning", "grounder": "grounder", "summary": "grounder", "asr": None}
+    assert s["agent"] == "real" and s["task_id"] == "text-size-large"
+    json.dumps(s, allow_nan=False)
+
+    # without the done event's stats (a run cut off, or an older writer): counted from the action verdicts
+    no_stats = [dict(e, payload={k: v for k, v in e["payload"].items() if k != "stats"}) for e in events]
+    assert logs.stuck_counts(no_stats, no_stats[-1]["payload"]) == (1, 1)
+    still_going = [e for e in events if e["kind"] != "done"][:20]  # up to step 3's warning, no done yet
+    assert logs.stuck_counts(still_going, {}) == (1, 0)  # the progress check ran (a verdict) and hasn't stopped it
+    assert logs.summarize_run(still_going, None)["status"] == "unknown"
+    # traces from before the progress check: not recorded (null), not 0
+    assert logs.stuck_counts(hand_trace(), hand_trace()[-1]["payload"]) == (None, None)
+    assert logs.summarize_run(_done("stuck"))["n_stuck_stops"] == 1  # the reason alone says it stopped as stuck
+    zero = {"reason": "done", "stats": {"n_stuck_warnings": 0, "n_stuck_stops": 0}}
+    assert logs.stuck_counts([], zero) == (0, 0)
+    assert logs.stuck_counts([], {"stats": {"n_stuck_warnings": True, "n_stuck_stops": -1}}) == (None, None)
+
+
+def test_endpoints_from_console_json_else_the_start_event():
+    s = logs.summarize_run(stuck_events(), stuck_console(), run_id=STUCK_RUN)
+    assert s["endpoints"] == {
+        "vlm": {"base_url": "http://127.0.0.1:8011/v1", "label": "Mac (vllm-metal)", "host": "127.0.0.1:8011",
+                "summary_model": "grounder", "served": ["grounder"], "reachable": True},
+        "lightning": {"base_url": "http://127.0.0.1:8000/v1", "model": "lightning", "label": "local BF16 (:8000)",
+                      "host": "127.0.0.1:8000"},
+        "source": "console"}
+
+    # no console.json: from the start event's config (the label follows the port; nobody checked what it served)
+    derived = logs.summarize_run(stuck_events(), None)["endpoints"]
+    assert derived["source"] == "trace"
+    assert derived["vlm"] == {**s["endpoints"]["vlm"], "served": None, "reachable": None}
+    assert derived["lightning"] == s["endpoints"]["lightning"]
+    old = json.loads((FIXTURES / DONE_RUN / "events.jsonl").read_text().splitlines()[0])  # recorded on :8001
+    ep = logs.summarize_run([old], console_doc())["endpoints"]  # an older console.json: no endpoints key
+    assert ep["source"] == "trace" and (ep["vlm"]["label"], ep["vlm"]["host"], ep["vlm"]["summary_model"]) == (
+        "H200 via tunnel", "127.0.0.1:8001", "base")
+    assert ep["lightning"]["label"] == "local BF16 (:8000)" and "root" not in ep["lightning"]
+
+    # mock runs ran no models; junk in console.json is ignored, not shown
+    mock = [ev("start", 0, 1.0, {"config": {"agent": "mock", "lightning": "hosted"}, "mock": True})]
+    assert logs.summarize_run(mock, {"agent": "mock", "endpoints": {"vlm": None, "lightning": None}})["endpoints"] == {
+        "vlm": None, "lightning": None, "source": None}
+    junk = console_doc(endpoints={"vlm": {"base_url": 5}, "lightning": "x"})
+    assert logs.summarize_run(hand_trace(), junk)["endpoints"]["source"] == "trace"  # hand_trace: lightning only
+    assert logs.summarize_run([], None)["endpoints"] == {"vlm": None, "lightning": None, "source": None}
+    # the hosted API
+    hosted = [ev("start", 0, 1.0, {"config": {"lightning": {"base_url": "https://integrate.api.nvidia.com/v1",
+                                                             "model": "nvidia/nemotron-3.5-lightning-30b-a3b"}}})]
+    assert logs.summarize_run(hosted)["endpoints"]["lightning"]["label"] == "hosted API"
+
+
+def test_stuck_run_over_http(console, tmp_path):
+    runs = tmp_path / "runs"
+    shutil.copytree(STUCK_FIXTURES / STUCK_RUN, runs / STUCK_RUN)
+    base, _ = console(idle_agent(), runs_dir=runs)
+    listed = httpx.get(f"{base}/api/logs/runs").json()["runs"]
+    assert [(r["run_id"], r["status"], r["n_stuck_warnings"], r["n_stuck_stops"]) for r in listed] == [
+        (STUCK_RUN, "stuck", 1, 1)]
+    detail = httpx.get(f"{base}/api/logs/runs/{STUCK_RUN}").json()
+    assert detail["summary"]["endpoints"]["source"] == "console" and detail["console"] == stuck_console()
+    kinds = [e["kind"] for e in detail["events"]]
+    assert kinds[-2:] == ["done", "verdict"] and kinds.count("action") == 6
+    stuck = [e["payload"]["stuck"]["verdict"] for e in detail["events"] if "stuck" in e.get("payload", {})]
+    assert stuck == ["warn", "stuck"]
 
 
 # --- reading and details --------------------------------------------------------------------------
@@ -713,7 +826,7 @@ def test_real_mock_run_with_voice(console, tmp_path):
     detail = httpx.get(f"{base}/api/logs/runs/{rid}").json()
     s = detail["summary"]
     assert (s["agent"], s["status"], s["verified"], s["success_claimed"]) == ("mock", "done", True, True)
-    assert s["models"] == {"lightning": "mock (no Lightning)", "grounder": "base, mock", "summary": "mock (no VLM)",
+    assert s["models"] == {"lightning": "mock (no Lightning)", "grounder": "grounder, mock", "summary": "mock (no VLM)",
                            "asr": "stub"}
     assert s["prompt_version"] == "mock" and s["lightning_root"] is None
     assert s["prompt_sha"] == {"lightning": "mock", "grounder": "mock", "summary": "mock"}

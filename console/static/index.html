@@ -21,6 +21,12 @@
       <p class="tagline">Say what you want. The agent does it from pixels alone.</p>
     </div>
     <div class="header-tools">
+      <!-- real agent only: where the grounder VLM and Lightning run (from /api/config endpoints) -->
+      <div id="endpoints" class="endpoints" hidden>
+        <p id="vlm-endpoint" class="endpoint"><span id="vlm-endpoint-text"></span><span id="vlm-warning"
+           class="endpoint-warn" hidden></span></p>
+        <p id="lightning-endpoint" class="endpoint"></p>
+      </div>
       <p id="agent-badge" class="badge" data-agent="unknown">Agent: …</p>
       <a id="logs-link" class="btn btn-quiet header-link" href="/logs">Logs</a>
       <button id="hc-toggle" class="btn btn-quiet" type="button" aria-pressed="false">High contrast</button>
@@ -84,11 +90,12 @@
             <fieldset class="opt" id="opt-grounder">
               <legend>Grounder <span class="legend-hint">the 2B vision model that finds each click</span></legend>
               <div class="seg">
-                <input type="radio" id="grounder-base" name="grounder" value="base" checked>
+                <input type="radio" id="grounder-base" name="grounder" value="base">
                 <label for="grounder-base">base (adapter off)</label>
-                <input type="radio" id="grounder-grounder" name="grounder" value="grounder">
+                <input type="radio" id="grounder-grounder" name="grounder" value="grounder" checked>
                 <label for="grounder-grounder">grounder (LoRA)</label>
               </div>
+              <p id="grounder-note" class="legend-hint opt-msg" hidden></p>
             </fieldset>
             <fieldset class="opt" id="opt-thinking">
               <legend>Thinking <span class="legend-hint">retry = think only after a miss</span></legend>
@@ -158,6 +165,7 @@
           <span id="banner-icon" class="banner-icon" aria-hidden="true"></span>
           <div>
             <h2 id="banner-title" class="banner-title"></h2>
+            <p id="banner-question" class="banner-question" hidden></p>
             <p id="banner-label" class="banner-label"></p>
             <p id="banner-expl" class="banner-expl"></p>
             <ul id="banner-details" class="banner-details" hidden></ul>

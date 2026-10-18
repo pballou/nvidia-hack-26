@@ -3,9 +3,21 @@
 Sources, read-only:
   <root>/<run_id>/events.jsonl   the agent's StepEvents (agent/trace.py; console/mock_agent.py)
   <root>/<run_id>/console.json   written by console/runner.py for runs started from the console:
-                                 request, task_id, options, voice, status, result, verdict, timestamps
+                                 request, task_id, options, voice, endpoints, status, result, verdict,
+                                 timestamps
 roots = the console's --runs-dir plus the agent's cfg.run_dir_root (deduplicated). Sandbox state
 is never read here: the verdict is the one the console recorded in console.json.
+
+Status = the done event's reason (done, max_steps, stuck, stopped, error), else console.json's
+running/stopped/error, else "unknown". "stuck" (agent/progress.py): the agent stopped a run that made
+no progress; success_claimed is false and the done summary is its question to the user ("I'm stuck: ...").
+n_stuck_warnings / n_stuck_stops come from the done event's stats, else from the action events' "stuck"
+verdicts (warn | stuck), else null (a trace from before the progress check).
+
+Endpoints (where the run's VLM and Lightning were): console.json's snapshot, taken at run start
+(source "console"), else derived from the start event's config.vlm.base_url / summary_model / lightning
+(source "trace": the label comes from the port, served/reachable are null: nobody checked). Mock runs
+have none (they run no models).
 
 Honesty rules: a field the trace doesn't have is null (the page shows "—"); nothing is estimated.
 A run is "mock" when any payload says "mock": true (or console.json says the console ran the mock).
@@ -41,13 +53,16 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
+from console.agent_bridge import host_port_text, lightning_label, vlm_label
+
 EVENTS_FILE = "events.jsonl"
 CONSOLE_FILE = "console.json"
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")             # a run dir name the logs API can address
 IMAGE_RE = re.compile(r"^step_\d{2,3}(_overlay)?\.png$")      # the only files GET /runs/... serves
 IMAGE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 STAGES = ("voice", "summary", "plan", "ground", "act")
-DONE_REASONS = ("done", "max_steps", "stopped", "error")
+DONE_REASONS = ("done", "max_steps", "stuck", "stopped", "error")
+STUCK_VERDICTS = ("warn", "stuck")  # action.payload.stuck.verdict (agent/core.py)
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 1000
 
@@ -202,6 +217,58 @@ def _voice(console: dict | None) -> dict | None:
             "duration_s": _num(v.get("duration_s"))}
 
 
+def _count(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def stuck_counts(events: list[dict], done_payload: dict) -> tuple[int | None, int | None]:
+    """(n_stuck_warnings, n_stuck_stops): the done event's stats, else the action events' stuck verdicts, else
+    None (a trace from before agent/progress.py, or a run still going without any verdict yet)."""
+    stats = _dict(done_payload.get("stats"))
+    warnings, stops = _count(stats.get("n_stuck_warnings")), _count(stats.get("n_stuck_stops"))
+    verdicts = [_dict(_payload(ev).get("stuck")).get("verdict") for ev in events
+                if ev.get("kind") == "action" and isinstance(_payload(ev).get("stuck"), dict)]
+    verdicts = [v for v in verdicts if v in STUCK_VERDICTS]
+    if warnings is None and verdicts:
+        warnings = verdicts.count("warn")
+    if stops is None and (verdicts or done_payload.get("reason") == "stuck"):
+        stops = int("stuck" in verdicts or done_payload.get("reason") == "stuck")
+    return warnings, stops
+
+
+def _vlm_endpoint(v: Any) -> dict | None:
+    if not isinstance(v, dict) or not _str(v.get("base_url")):
+        return None
+    base = _str(v.get("base_url"))
+    served = v.get("served")
+    return {"base_url": base, "label": _str(v.get("label")) or vlm_label(base), "host": host_port_text(base),
+            "summary_model": _str(v.get("summary_model")),
+            "served": [s for s in served if isinstance(s, str)] if isinstance(served, list) else None,
+            "reachable": v.get("reachable") if isinstance(v.get("reachable"), bool) else None}
+
+
+def _lightning_endpoint(v: Any) -> dict | None:
+    if not isinstance(v, dict) or not _str(v.get("base_url")):
+        return None
+    base = _str(v.get("base_url"))
+    return {"base_url": base, "model": _str(v.get("model")), "label": _str(v.get("label")) or lightning_label(base),
+            "host": host_port_text(base)}
+
+
+def run_endpoints(console: dict | None, config: dict, mock: bool) -> dict:
+    """{"vlm", "lightning", "source"}: console.json's snapshot from run start (source "console"), else the start
+    event's config (source "trace": label by port, served/reachable null), else nothing. Mock runs: nothing."""
+    snap = _dict(_dict(console).get("endpoints"))
+    vlm, lightning = _vlm_endpoint(snap.get("vlm")), _lightning_endpoint(snap.get("lightning"))
+    if vlm or lightning:
+        return {"vlm": vlm, "lightning": lightning, "source": "console"}
+    if mock:
+        return {"vlm": None, "lightning": None, "source": None}
+    vlm_cfg = {"base_url": _dict(config.get("vlm")).get("base_url"), "summary_model": config.get("summary_model")}
+    vlm, lightning = _vlm_endpoint(vlm_cfg), _lightning_endpoint(_dict(config.get("lightning")))
+    return {"vlm": vlm, "lightning": lightning, "source": "trace" if vlm or lightning else None}
+
+
 def _status(done: dict | None, console: dict | None) -> str:
     if done is not None:
         reason = _payload(done).get("reason")
@@ -249,6 +316,7 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
     request = request if isinstance(request, str) else (c.get("request") if isinstance(c.get("request"), str) else None)
     plan_pv = next((_str(_payload(ev).get("prompt_version")) for ev in events
                     if ev.get("kind") == "plan" and _str(_payload(ev).get("prompt_version"))), None)
+    n_stuck_warnings, n_stuck_stops = stuck_counts(events, dp)
 
     return {
         "run_id": run_id if run_id is not None else (_str(events[0].get("run_id")) if events else None),
@@ -274,6 +342,9 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
         "n_events": len(events),
         "n_errors": sum(1 for ev in events if ev.get("kind") == "error"),
         "n_invalid_tool_calls": sum(1 for ev in events if ev.get("kind") == "tool_call" and _payload(ev).get("valid") is False),
+        "n_stuck_warnings": n_stuck_warnings,
+        "n_stuck_stops": n_stuck_stops,
+        "endpoints": run_endpoints(console, config, mock),
         "voice": voice,
         # beyond the contract, for the detail view
         "n_bad_lines": n_bad_lines,

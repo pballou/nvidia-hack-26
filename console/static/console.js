@@ -5,6 +5,12 @@
  * StepEvent payloads are documented in agent/trace.py. Everything the agent says is
  * rendered with textContent (never innerHTML), and unknown shapes fall back to JSON.
  *
+ * /api/config `endpoints` (real agent only; null for the mock) drive the header ("VLM: <label> · <host:port> ·
+ * serves <ids>", "Lightning: <label>", a chip when the VLM is unreachable) and disable grounder radios the VLM
+ * doesn't serve. They are re-read while the page is idle (every 15 s while the VLM is down, else every 60 s, on
+ * tab focus, after a run, after a "not served" 400). A run that ends with done.reason "stuck" (agent/progress.py)
+ * gets a banner that leads with the agent's question; an action's `stuck` verdict adds a step-log line.
+ *
  * Voice input lives in voice.js and drives the page through window.AcmeConsole (below):
  * ready (resolves after /api/config and /api/tasks were tried), config(), isRunning(),
  * isStarting(), setRequest(text, voice?) -> {taskId, request}, run(), stop(). The page fires
@@ -22,25 +28,34 @@
   const VOICE_TEXT_MAX = 500;
   const VOICE_MODEL_MAX = 120;
   const REASON_MAX = 200;
+  const SUMMARY_MAX = 220;  // the banner's agent summary; longer ones get Show more
   const CHECK_HEAD_MAX = 110;  // longer sandbox-check explanations are cut, with the full text one click away
   const OPTION_NAMES = ['grounder', 'thinking', 'lightning'];
   const DIFFICULTIES = ['easy', 'medium', 'hard'];
   const TAG_WORDS = { icon_only: 'unlabeled icon buttons', canvas: 'canvas widget', scroll: 'needs scrolling' };
   const TIMING_ORDER = ['plan', 'ground', 'act', 'summary'];
   const TIMING_HIDDEN = new Set(['settle', 'screenshot']);
-  const FINAL = new Set(['done', 'stopped', 'error']);
+  const FINAL = new Set(['done', 'stopped', 'error', 'stuck']);
   const STATUS_TEXT = {
     idle: 'Idle', starting: 'Starting', running: 'Running', reconnecting: 'Reconnecting',
-    done: 'Done', stopped: 'Stopped', error: 'Error',
+    done: 'Done', stopped: 'Stopped', error: 'Error', stuck: 'Stuck',
   };
+  // The header's Lightning line when the toggle isn't the server default (/api/config endpoints describe the
+  // default only). The console's per-run choice always picks one of agent.yaml's two presets.
+  const LIGHTNING_PRESET_LABELS = { local: 'local BF16 (:8000)', hosted: 'hosted API' };
+  const SERVED_SHOWN_MAX = 3;
+  const CONFIG_POLL_MS = 15000;      // re-check /api/config this often while the VLM is unreachable...
+  const CONFIG_REFRESH_MS = 60000;   // ...and this often otherwise (idle, page visible, real agent only)
   // The collapsed Options line, e.g. "base · thinking retry · local Lightning".
   const OPTION_SHORT = {
     grounder: { base: 'base', grounder: 'LoRA grounder' },
     thinking: { off: 'thinking off', retry: 'thinking retry', on: 'thinking on' },
     lightning: { local: 'local Lightning', hosted: 'hosted Lightning' },
   };
+  const FREE_TEXT_LABEL = 'Free-text request: no sandbox check';
   const REASON_WORDS = {
     max_steps: 'Stopped: reached the step limit before finishing.',
+    stuck: 'Stopped: stuck',
     stopped: 'Stopped by the user.',
     error: 'Stopped after an error.',
   };
@@ -80,6 +95,8 @@
     timer: null,
     runSeq: 0,          // bumps per attached run (unique element ids)
     voice: null,        // {request, voice}: the last transcript put in the box (see setRequestText)
+    configAt: 0,        // when /api/config was last read (the header's endpoints; see refreshConfig)
+    refreshing: false,
   };
   const ui = {};
 
@@ -283,6 +300,33 @@
     return `Error${where}: ${msg}`;
   }
 
+  /** An action's agent/progress.py verdict: 'warn' (Lightning was told it is stuck), 'stuck' (the run stops), or ''. */
+  function stuckVerdict(a) {
+    const v = isObj(a) && isObj(a.stuck) ? str(a.stuck.verdict) : '';
+    return v === 'warn' || v === 'stuck' ? v : '';
+  }
+
+  function stuckLine(a) {
+    const v = stuckVerdict(a);
+    if (!v) return '';
+    const reason = oneLine(a.stuck.reason);
+    return v === 'warn' ? `Stuck warning: ${reason || 'no progress'}` : `Stopped: stuck${reason ? ` (${reason})` : ''}`;
+  }
+
+  /** A stuck stop's summary (agent/progress.py: "I'm stuck: <why>. I tried: <…>. None of it changed the screen.
+   *  What would you like me to do next? <…>") as {question, context}: the question runs from the first sentence
+   *  that asks one (question marks inside quoted targets don't count); context is what comes before it. */
+  function stuckParts(summary) {
+    const text = oneLine(summary);
+    const masked = text.replace(/"[^"]*"|“[^”]*”/g, (q) => '_'.repeat(q.length));
+    const q = masked.indexOf('?');
+    if (q < 0) return { question: text, context: '' };
+    let start = 0;
+    const end = /[.!…]["”’)]*\s+/g;
+    for (let m = end.exec(masked); m && m.index < q; m = end.exec(masked)) start = m.index + m[0].length;
+    return { question: text.slice(start).trim(), context: text.slice(0, start).trim() };
+  }
+
   // --- init -----------------------------------------------------------------------------
   document.addEventListener('DOMContentLoaded', init);
 
@@ -292,7 +336,8 @@
       'form-error', 'follow-btn', 'log-scroll', 'step-log', 'log-empty', 'pending', 'banner', 'banner-icon',
       'banner-title', 'banner-label', 'banner-expl', 'banner-details', 'banner-summary', 'banner-claim', 'banner-extra',
       'options', 'options-summary', 'live-btn', 'view-toggle', 'view-before', 'view-after', 'screen-img', 'screen-empty',
-      'screen', 'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge',
+      'screen', 'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge', 'endpoints', 'vlm-endpoint',
+      'vlm-endpoint-text', 'vlm-warning', 'lightning-endpoint', 'grounder-note', 'banner-question',
     ]) ui[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = $(id);
     ui.optionSets = OPTION_NAMES.map((n) => $(`opt-${n}`));
 
@@ -352,7 +397,10 @@
     }
     ui.thumbs.addEventListener('keydown', onThumbKey);
     document.addEventListener('keydown', onPageArrowKey);
-    ui.options.addEventListener('change', renderOptionsSummary);
+    ui.options.addEventListener('change', () => {
+      renderOptionsSummary();
+      renderEndpoints();  // the Lightning line follows the toggle
+    });
     ui.screenImg.addEventListener('error', () => {
       if (!ui.screenImg.getAttribute('src')) return;
       ui.screenImg.hidden = true;
@@ -370,17 +418,28 @@
     resolveReady({ config: S.config });
     const last = tabStore.get(RUN_KEY);
     if (last) watchRun(last, { quietIfDone: true });
+    // The VLM can come up (or go down) while the page is open: re-read the endpoints now and then.
+    window.setInterval(() => {
+      if (!hasEndpoints() || document.visibilityState !== 'visible') return;
+      const { vlm } = endpoints();
+      const due = vlm && (vlm.reachable === false || !servedList(vlm)) ? CONFIG_POLL_MS : CONFIG_REFRESH_MS;
+      if (Date.now() - S.configAt >= due - 500) refreshConfig();
+    }, CONFIG_POLL_MS);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshConfig();
+    });
   }
 
   async function loadConfig() {
     try {
       const cfg = await getJson('/api/config');
       S.config = cfg;
+      S.configAt = Date.now();
       const agent = str(cfg.agent);
       ui.agentBadge.dataset.agent = agent === 'mock' || agent === 'real' ? agent : 'unknown';
       ui.agentBadge.textContent = agent === 'mock' ? 'Agent: mock (scripted, no models)' : `Agent: ${agent || '?'}`;
-      const d = isObj(cfg.defaults) ? cfg.defaults : {};
-      for (const name of OPTION_NAMES) setRadio(name, d[name]);
+      for (const name of OPTION_NAMES) setRadio(name, configDefaults()[name]);
+      applyEndpoints();
       renderOptionsSummary();
       if (cfg.headed) {
         ui.logEmpty.textContent = 'Steps appear here while the agent works. Its browser window opens beside this one.';
@@ -390,6 +449,170 @@
       ui.agentBadge.textContent = 'Agent: offline';
       showFormError('Can’t reach the console backend. Is it running? (scripts/run_console.sh)');
     }
+  }
+
+  /** Re-read /api/config for the endpoints (where the VLM and Lightning run, what the VLM serves). The option
+   *  choices on the page are the user's now: defaults are applied once, at load. Idle real-agent pages only. */
+  async function refreshConfig() {
+    if (S.refreshing || !hasEndpoints() || isRunning() || S.starting) return;
+    S.refreshing = true;
+    const before = vlmProblem();
+    try {
+      const cfg = await getJson('/api/config');
+      if (isRunning() || !isObj(cfg)) return;
+      S.config = { ...S.config, endpoints: cfg.endpoints };
+      applyEndpoints();
+      renderOptionsSummary();
+      const after = vlmProblem();
+      if ((after && after.sentence) !== (before && before.sentence)) {
+        announce(after ? `Warning: ${after.sentence}.`
+          : `The VLM ${before.chip === 'not reachable' ? 'is reachable' : 'serves the screen-summary model'} again.`);
+      }
+    } catch {
+      /* the backend is down: the next run reports it */
+    } finally {
+      S.configAt = Date.now();
+      S.refreshing = false;
+    }
+  }
+
+  function configDefaults() {
+    return S.config && isObj(S.config.defaults) ? S.config.defaults : {};
+  }
+
+  /** /api/config endpoints ({vlm, lightning}, each an object or null). Both null for the mock: it runs no models. */
+  function endpoints() {
+    const ep = S.config && S.config.agent !== 'mock' && isObj(S.config.endpoints) ? S.config.endpoints : {};
+    return { vlm: isObj(ep.vlm) ? ep.vlm : null, lightning: isObj(ep.lightning) ? ep.lightning : null };
+  }
+
+  function hasEndpoints() {
+    const { vlm, lightning } = endpoints();
+    return Boolean(vlm || lightning);
+  }
+
+  /** The model ids the VLM serves (GET <base_url>/models), or null when unknown (unreachable). */
+  function servedList(vlm) {
+    return vlm && Array.isArray(vlm.served) ? vlm.served.map(String) : null;
+  }
+
+  /** '127.0.0.1:8011' from 'http://127.0.0.1:8011/v1'. */
+  function hostPort(u) {
+    const s = str(u);
+    try { return new URL(s).host || s; } catch { return oneLine(s); }
+  }
+
+  function shortList(items) {
+    const shown = items.slice(0, SERVED_SHOWN_MAX).join(', ');
+    return items.length > SERVED_SHOWN_MAX ? `${shown} +${items.length - SERVED_SHOWN_MAX} more` : shown;
+  }
+
+  /** What is wrong with the VLM endpoint: {chip (a few words for the header), sentence (for announcements)}, or
+   *  null if nothing is known to be. */
+  function vlmProblem() {
+    const { vlm } = endpoints();
+    if (!vlm) return null;
+    const served = servedList(vlm);
+    if (vlm.reachable === false || (vlm.reachable !== true && !served)) {
+      return { chip: 'not reachable', sentence: `the VLM is not reachable at ${hostPort(vlm.base_url)}` };
+    }
+    const summary = oneLine(vlm.summary_model);
+    if (served && summary && !served.includes(summary)) {
+      return { chip: `summary model ${summary} not served`,
+        sentence: `the VLM doesn’t serve ${summary}, the model that writes the screen summaries` };
+    }
+    return null;
+  }
+
+  function applyEndpoints() {
+    renderEndpoints();
+    applyServed();
+  }
+
+  /** The header line(s): 'VLM: Mac (vllm-metal) · 127.0.0.1:8011 · serves grounder' and 'Lightning: local BF16
+   *  (:8000)'. Real agent only; the mock's badge already says it runs no models. */
+  function renderEndpoints() {
+    const { vlm, lightning } = endpoints();
+    ui.endpoints.hidden = !(vlm || lightning);
+    if (ui.endpoints.hidden) return;
+
+    ui.vlmEndpoint.hidden = !vlm;
+    if (vlm) {
+      const where = hostPort(vlm.base_url);
+      const label = oneLine(vlm.label);
+      const served = servedList(vlm);
+      const parts = [label || where || '?'];
+      if (label && where && label !== where) parts.push(where);
+      if (served) parts.push(served.length ? `serves ${shortList(served)}` : 'serves no models');
+      setText(ui.vlmEndpointText, `VLM: ${parts.join(' · ')}`);
+      const summary = oneLine(vlm.summary_model);
+      ui.vlmEndpoint.title = [str(vlm.base_url), summary && `screen summaries: ${summary}`].filter(Boolean).join(' · ');
+      const problem = vlmProblem();
+      ui.vlmWarning.hidden = !problem;
+      setText(ui.vlmWarning, problem ? `⚠ ${problem.chip}` : '');
+    }
+
+    const lt = lightningEndpoint(lightning);
+    ui.lightningEndpoint.hidden = !lt;
+    if (lt) {
+      setText(ui.lightningEndpoint, `Lightning: ${lt.label}`);
+      ui.lightningEndpoint.title = lt.title;
+    }
+  }
+
+  /** The Lightning the next run uses: /api/config's endpoint when the toggle is on the server default (that is
+   *  what it describes), else the preset the toggle picks. */
+  function lightningEndpoint(lightning) {
+    const choice = readOptions().lightning;
+    const dflt = configDefaults().lightning;
+    if (lightning && (!choice || !dflt || choice === dflt)) {
+      return {
+        label: oneLine(lightning.label) || hostPort(lightning.base_url) || '?',
+        title: [str(lightning.base_url), lightning.model ? `model ${oneLine(lightning.model)}` : ''].filter(Boolean)
+          .join(' · '),
+      };
+    }
+    return choice ? { label: LIGHTNING_PRESET_LABELS[choice] || choice, title: '' } : null;
+  }
+
+  /** Grounder radios: a model the VLM doesn't serve is disabled, with '(not served at <host:port>)' in its label
+   *  (arrow keys skip it; Tab lands on the checked one). The choice moves off a disabled model. */
+  function applyServed() {
+    const { vlm } = endpoints();
+    const served = servedList(vlm);
+    const where = vlm ? hostPort(vlm.base_url) : '';
+    const inputs = [...document.querySelectorAll('input[name="grounder"]')];
+    for (const input of inputs) {
+      const off = Boolean(served) && !served.includes(input.value);
+      input.disabled = off;
+      const label = input.labels && input.labels[0];
+      if (!label) continue;
+      let note = label.querySelector('.opt-note');
+      if (off) {
+        if (!note) {
+          note = h('span', { class: 'opt-note' });
+          label.append(note);
+        }
+        setText(note, ` (not served at ${where || 'the VLM'})`);
+      } else if (note) {
+        note.remove();
+      }
+      label.classList.toggle('is-unserved', off);
+    }
+    keepServedChoice();
+    const none = Boolean(served) && inputs.length > 0 && inputs.every((i) => i.disabled);
+    ui.grounderNote.hidden = !none;
+    setText(ui.grounderNote, none ? `The VLM at ${where} serves neither model, so runs can’t start until it does.` : '');
+  }
+
+  /** If the checked grounder isn't served, check the default (or the first served one) instead. */
+  function keepServedChoice() {
+    const inputs = [...document.querySelectorAll('input[name="grounder"]')];
+    const checked = inputs.find((i) => i.checked);
+    if (!checked || !checked.disabled) return;
+    const dflt = configDefaults().grounder;
+    const pick = inputs.find((i) => !i.disabled && i.value === dflt) || inputs.find((i) => !i.disabled);
+    if (pick) pick.checked = true;
   }
 
   async function loadTasks() {
@@ -648,6 +871,7 @@
         showFormError(`Can’t start: ${msg}. Check that the sandbox (and for the real agent, the models) are running.`);
       } else {
         showFormError(`Can’t start: ${msg}`);
+        if (/not served/.test(msg)) refreshConfig();  // the VLM changed since the page last looked: update the choices
       }
       return;
     }
@@ -676,7 +900,9 @@
     ui.taskMeta.textContent = taskId ? taskMetaText(S.tasksById.get(taskId)) : '';
     ui.requestNote.textContent = '';
     if (isObj(info.options)) for (const name of OPTION_NAMES) setRadio(name, info.options[name]);
+    keepServedChoice();  // that run's grounder may not be served any more: the radios describe the next run
     renderOptionsSummary();
+    renderEndpoints();
     attach(String(info.run_id || runId), {
       request: str(info.request), taskId: info.task_id || null, options: info.options,
       focusOnEnd: active || !quietIfDone, quiet: !active, agentRunId: info.agent_run_id || null,
@@ -849,11 +1075,12 @@
     scrollLog();
     if (run.focusOnEnd) ui.banner.focus();
     emit('acme:run-end', { runId: run.id, request: run.request, taskId: run.taskId });
+    if (!run.quiet) refreshConfig();  // e.g. a grounding error: is the VLM still up?
   }
 
   function finalStatus(run) {
     const reason = run.done && run.done.reason;
-    if (reason === 'stopped' || reason === 'error') return reason;
+    if (reason === 'stopped' || reason === 'error' || reason === 'stuck') return reason;
     if (FINAL.has(run.status)) return run.status;
     return run.statusMessage ? 'error' : 'done';
   }
@@ -937,7 +1164,7 @@
         break;
       case 'observation':
         s.observation = p;
-        setPending(`Lightning is planning step ${n + 1}…`);
+        setPending(stuckVerdict(s.action) === 'stuck' ? 'Finishing…' : `Lightning is planning step ${n + 1}…`);
         break;
       case 'plan': {
         s.plan = p;
@@ -954,7 +1181,7 @@
         break;
       case 'action':
         s.action = p;
-        setPending(p.done || p.name === 'done' ? 'Finishing…' : 'Reading the new screen…');
+        setPending(p.done || p.name === 'done' || stuckVerdict(p) === 'stuck' ? 'Finishing…' : 'Reading the new screen…');
         break;
       case 'error':
         s.errors.push(p);
@@ -997,6 +1224,8 @@
       else if (p.screen_changed === true) tail = 'Screen changed.';
       else if (p.screen_changed === false) tail = 'No change on screen.';
       else tail = '';
+      const stuck = stuckLine(p);  // once: each step has one action event
+      if (stuck) tail = `${tail ? `${tail} ` : ''}${sentence(stuck)}`;
     } else if (kind === 'tool_call' && p.valid === false) {
       tail = 'Invalid tool call, asking again.';
     } else if (kind === 'error' && p.recoverable === false) {
@@ -1136,8 +1365,14 @@
     if (a && a.ok === false && a.error && !(s.toolCall && oneLine(s.toolCall.error) === oneLine(a.error))) {
       lines.push(['actionerr', 'error', `Action failed: ${oneLine(a.error)}`]);
     }
+    if (stuckVerdict(a)) lines.push(['stuck', 'warn', stuckLine(a)]);
     s.errors.forEach((e, i) => lines.push([`err${i}`, 'error', errorLine(e)]));
-    if (s.done && s.done.reason && s.done.reason !== 'done') {
+    if (s.done && s.done.reason === 'stuck') {
+      // the question itself is the banner's headline; here it closes the transcript, after "Stopped: stuck"
+      if (stuckVerdict(a) !== 'stuck') lines.push(['stuck', 'warn', REASON_WORDS.stuck]);
+      const ask = stuckParts(s.done.summary).question;
+      if (ask) lines.push(['done', 'ask', `The agent asks: “${ask}”`]);
+    } else if (s.done && s.done.reason && s.done.reason !== 'done') {
       lines.push(['done', s.done.reason === 'error' ? 'error' : 'warn',
         oneLine(s.done.summary) || REASON_WORDS[s.done.reason] || `Run ended (${oneLine(s.done.reason)}).`]);
     }
@@ -1183,7 +1418,7 @@
     const a = s.action;
     if (s.errors.some((e) => isObj(e) && e.recoverable === false) || (a && a.ok === false)
         || (s.done && s.done.reason === 'error')) return 'bad';
-    if (s.errors.length || (s.toolCall && s.toolCall.valid === false) || (a && a.screen_changed === false)
+    if (s.errors.length || (s.toolCall && s.toolCall.valid === false) || (a && a.screen_changed === false) || stuckVerdict(a)
         || (s.grounding && s.grounding.error) || (s.done && s.done.reason && s.done.reason !== 'done')) return 'warn';
     if ((a && a.ok) || (s.done && s.done.reason === 'done') || (s.n === 0 && s.observation)) return 'ok';
     if (isRunning() && s.n === lastStepNumber()) return 'active';
@@ -1296,7 +1531,18 @@
     }
     if (live && focusThumb && document.activeElement !== focusThumb && !ui.thumbs.contains(document.activeElement)) {
       ui.thumbs.scrollLeft = ui.thumbs.scrollWidth;
+    } else if (!live && focusThumb) {
+      revealThumb(focusThumb);  // replaying from the log or by arrow key: the strip shows which step it is
     }
+  }
+
+  /** Scroll the thumbnail strip (only it, not the page) just enough to show `btn` with its focus ring. */
+  function revealThumb(btn) {
+    const box = ui.thumbs.getBoundingClientRect();
+    const r = btn.getBoundingClientRect();
+    const pad = 8;
+    if (r.left < box.left + pad) ui.thumbs.scrollLeft -= box.left + pad - r.left;
+    else if (r.right > box.right - pad) ui.thumbs.scrollLeft += r.right - (box.right - pad);
   }
 
   /** Scroll the log just enough to show `el` (not scrollIntoView: that would scroll the page too). */
@@ -1371,8 +1617,24 @@
     let title;
     let label = '';
     let expl = '';
+    let question = '';
+    let agentSays = summary;
     const check = v ? checkParts(oneLine(v.explanation)) : { head: '', details: [] };
-    if (v && st === 'stopped') {  // the stop is the headline; the sandbox check still says where things stand
+    if (st === 'stuck') {  // the agent's question is the headline: not a failure, but not done either
+      const ask = stuckParts(summary);
+      tone = 'stuck';
+      icon = '?';
+      title = 'The agent is stuck and asks:';
+      question = ask.question || 'What would you like me to do next?';
+      agentSays = ask.context;
+      if (v) {
+        label = oneLine(v.label) || 'verified by sandbox state, not seen by the agent';
+        expl = v.passed ? `✓ ${check.head}` : `✗ Not done. ${check.head}`;
+      } else {
+        label = run.taskId ? 'No sandbox verdict received' : FREE_TEXT_LABEL;
+        expl = 'Not done: the agent stopped to ask you.';
+      }
+    } else if (v && st === 'stopped') {  // the stop is the headline; the sandbox check still says where things stand
       tone = 'stopped';
       icon = '■';
       title = v.passed ? 'Stopped, but the task is done' : 'Stopped: the task is not done';
@@ -1389,31 +1651,36 @@
       icon = '!';
       title = 'Run failed';
       expl = run.statusMessage || summary;
-      label = run.taskId ? '' : 'Free-text request: no sandbox check';
+      label = run.taskId ? '' : FREE_TEXT_LABEL;
     } else if (st === 'stopped') {
       tone = 'stopped';
       icon = '■';
       title = 'Run stopped';
-      label = run.taskId ? 'No sandbox verdict for this run' : 'Free-text request: no sandbox check';
+      label = run.taskId ? 'No sandbox verdict for this run' : FREE_TEXT_LABEL;
     } else {
       tone = 'neutral';
       icon = 'ⓘ';
       title = 'Run finished';
-      label = run.taskId ? 'No sandbox verdict received' : 'Free-text request: no sandbox check';
+      label = run.taskId ? 'No sandbox verdict received' : FREE_TEXT_LABEL;
     }
     ui.banner.dataset.tone = tone;
     setText(ui.bannerIcon, icon);
     setText(ui.bannerTitle, title);
+    ui.bannerQuestion.hidden = !question;
+    setText(ui.bannerQuestion, question ? `“${question}”` : '');
+    // focus lands here after a run: a screen reader then reads the question as the banner's name
+    ui.banner.setAttribute('aria-labelledby', question ? 'banner-title banner-question' : 'banner-title');
     setText(ui.bannerLabel, label);
     renderCheck(expl, check.details, check.more);
 
-    setText(ui.bannerSummary, summary ? `Agent’s summary: “${summary}”` : 'The agent gave no summary.');
+    renderSummary(agentSays, st === 'stuck' ? '' : 'The agent gave no summary.');
     const claim = [];
     if (claimed === true) claim.push('The agent claimed success.');
     else if (claimed === false) claim.push('The agent did not claim success.');
     if (v && claimed !== null && v.passed !== claimed) {
       claim.push(claimed ? 'The sandbox state says otherwise.' : 'The sandbox state shows it is done anyway.');
     }
+    if (st === 'stuck') claim.push('To answer, add what it needs to your request and run it again.');
     if (st === 'stopped') claim.push(run.stopRequested ? 'You stopped the run.' : 'The run was stopped.');
     if (st === 'error' && v && run.statusMessage) claim.push(`Error: ${run.statusMessage}`);
     const dur = fmtDuration(elapsedMs());
@@ -1427,6 +1694,7 @@
     if (stats.n_no_change) extra.push(plural('n_no_change', 'no-change', 'no-changes'));
     if (stats.n_recoveries) extra.push(plural('n_recoveries', 'recovery', 'recoveries'));
     if (stats.n_thinking_calls) extra.push(plural('n_thinking_calls', 'thinking call', 'thinking calls'));
+    if (stats.n_stuck_warnings) extra.push(plural('n_stuck_warnings', 'stuck warning', 'stuck warnings'));
     ui.bannerExtra.replaceChildren();
     if (extra.length) ui.bannerExtra.append(document.createTextNode(extra.join(' · ')));
     const links = [];
@@ -1442,6 +1710,31 @@
       ui.bannerExtra.append(a);
     }
     ui.banner.hidden = false;
+  }
+
+  /** "Agent’s summary: “…”", cut to SUMMARY_MAX characters with a Show more button, so a long one (a real agent's,
+   *  or a stuck stop's list of what it tried) doesn't push the screenshot and the thumbnails out of view. */
+  function renderSummary(text, empty) {
+    const run = S.run;
+    ui.bannerSummary.replaceChildren();
+    if (!text) {
+      if (empty) ui.bannerSummary.append(empty);
+      return;
+    }
+    const long = text.length > SUMMARY_MAX;
+    const shown = long && !run.summaryOpen ? `${text.slice(0, SUMMARY_MAX).trimEnd()}…` : text;
+    ui.bannerSummary.append(`Agent’s summary: “${shown}”`);
+    if (!long) return;
+    const btn = h('button', {
+      type: 'button', class: 'btn-link', 'aria-expanded': String(Boolean(run.summaryOpen)),
+      text: run.summaryOpen ? 'Show less' : 'Show more',
+    });
+    btn.addEventListener('click', () => {
+      run.summaryOpen = !run.summaryOpen;
+      renderSummary(text, empty);
+      ui.bannerSummary.querySelector('button').focus();
+    });
+    ui.bannerSummary.append(' ', btn);
   }
 
   /** A sandbox/checks.py explanation as a short headline plus details shown on request (keeps the banner small). */

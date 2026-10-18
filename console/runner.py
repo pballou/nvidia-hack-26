@@ -16,10 +16,12 @@ console.json (read by the logs page, console/logs.py) goes into the agent's trac
 (the parent of the events' screenshot paths, or cfg.run_dir_root/<agent run id>) as soon
 as that dir is known, with status "running", and is rewritten atomically at the end,
 before the final status and `end` messages:
-  {console_run_id, agent, request, task_id, options, sid, start_url, voice, status,
+  {console_run_id, agent, request, task_id, options, sid, start_url, voice, endpoints, status,
    result, verdict, started_ts, ended_ts}
 `voice` ({text, model, latency_ms, duration_s} from the voice UI) is only recorded there;
-it is never passed to the agent.
+it is never passed to the agent. `endpoints` is the /api/config endpoints snapshot for this run's
+options, taken at run start ({"vlm": {base_url, label, summary_model, served, reachable} | null,
+"lightning": {base_url, model, label} | null}; both null for the mock): where its VLM and Lightning ran.
 """
 
 from __future__ import annotations
@@ -81,6 +83,7 @@ class Run:
     start_url: str
     status: str = "starting"
     voice: dict | None = None       # recorded in console.json only; never given to the agent
+    endpoints: dict | None = None   # where the VLM and Lightning were at run start (console.json, /api/runs/{id})
     started_ts: float = field(default_factory=time.time)
     ended_ts: float | None = None
     cfg: Any = None
@@ -154,7 +157,7 @@ class Runner:
         with self.lock:
             return {"run_id": run.run_id, "status": run.status, "request": run.request, "task_id": run.task_id,
                     "options": dict(run.options), "agent_run_id": run.agent_run_id, "result": run.result,
-                    "verdict": run.verdict, "n_events": len(run.messages)}
+                    "verdict": run.verdict, "endpoints": run.endpoints, "n_events": len(run.messages)}
 
     def trace_dir(self, agent_run_id: str) -> Path | None:
         with self.lock:
@@ -173,15 +176,17 @@ class Runner:
 
     # --- start / stop --------------------------------------------------------------
 
-    def start(self, request: str, task_id: str | None, options: dict, voice: dict | None = None) -> Run:
+    def start(self, request: str, task_id: str | None, options: dict, voice: dict | None = None,
+              endpoints: dict | None = None) -> Run:
         """Reset the sandbox session and schedule the agent. Raises Busy or StartFailed. Blocking (call off-loop).
-        `voice` is only recorded in console.json; the agent gets request, start_url and cfg, nothing else."""
+        `voice` and `endpoints` are only recorded (console.json); the agent gets request, start_url and cfg."""
         task = self.tasks_by_id[task_id] if task_id else None
         run_id = "c-" + secrets.token_hex(4)
         sid = "console-" + run_id
         run = Run(run_id=run_id, request=request, task_id=task_id, options=dict(options), sid=sid,
                   start_url=start_url_for(self.sandbox_url, task["start_path"] if task else "/", sid),
-                  voice=dict(voice) if voice else None)
+                  voice=dict(voice) if voice else None,
+                  endpoints=json.loads(json.dumps(endpoints)) if endpoints is not None else None)
         with self.lock:
             if self.active is not None:
                 raise Busy(self.active.run_id)
@@ -328,7 +333,8 @@ class Runner:
             return
         doc = {"console_run_id": run.run_id, "agent": self.agent_name, "request": run.request,
                "task_id": run.task_id, "options": dict(run.options), "sid": run.sid, "start_url": run.start_url,
-               "voice": run.voice, "status": status, "result": run.result, "verdict": run.verdict,
+               "voice": run.voice, "endpoints": run.endpoints, "status": status, "result": run.result,
+               "verdict": run.verdict,
                "started_ts": round(run.started_ts, 3),
                "ended_ts": round(run.ended_ts, 3) if run.ended_ts is not None else None}
         tmp = d / f".{CONSOLE_JSON}.{os.getpid()}.{threading.get_ident()}.tmp"

@@ -17,6 +17,10 @@
    grounding's prompt SHA and tokens, and the run's prompts in the summary card.
 3) A trace with an overflowing number (1e999 -> inf) still opens and downloads (as null), over HTTP.
 4) A run watched while it is going: the auto-refresh says once, in the live region, how it ended.
+5) The "stuck" trace (fixtures/stuck_trace, agent/progress.py's shapes) next to the real traces: the Stuck status
+   chip and the runs table's status filter (keyboard, ?status= deep link), the "Stuck warning" / "Stopped as stuck"
+   action rows, the done row with the agent's question, the progress check and where the models ran (console.json
+   for the stuck run, the start event for the older ones) in the table and the summary card, AA contrast.
 
 Every page also checks: no console errors, no request that leaves 127.0.0.1. DOM selectors are fine here (tests only).
 Marked `e2e` (about 25 s); skip with -m "not e2e".
@@ -41,7 +45,8 @@ from console import asr
 from console.app import CONSOLE_DIR, ConsoleSettings, create_app
 from console.runner import VERDICT_LABEL
 from console.tests.conftest import ServerThread
-from console.tests.test_logs import CURRENT_RUN, GROUND_USAGE, SHA, SUMMARY_ERROR, SUMMARY_USAGE, current_agent_trace
+from console.tests.test_logs import (CURRENT_RUN, GROUND_USAGE, SHA, STUCK_FIXTURES, STUCK_RUN, SUMMARY_ERROR,
+                                     SUMMARY_USAGE, current_agent_trace)
 
 pytestmark = pytest.mark.e2e
 
@@ -105,6 +110,38 @@ def current_console(sandbox_url, tmp_path_factory):
     (d / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
     for name in ("step_00.png", "step_01.png", "step_02.png", "step_01_overlay.png", "step_02_overlay.png"):
         Image.new("RGB", (1280, 800), (240, 244, 248)).save(d / name)
+    srv = _serve(sandbox_url, runs)
+    yield srv.start(), runs
+    srv.stop()
+
+
+WARNED_RUN = "20261017-212000-0a1b2c"  # the stuck trace cut after step 3's warning, then done: a run that went on
+
+
+def _warned_run(runs: Path) -> None:
+    evs = lines_of(STUCK_FIXTURES / STUCK_RUN / "events.jsonl")
+    cut = next(i for i, e in enumerate(evs) if e["kind"] == "observation" and e["step"] == 3) + 1
+    out = [dict(e, run_id=WARNED_RUN, ts=round(e["ts"] + 300, 3)) for e in evs[:cut]]
+    out.append({"run_id": WARNED_RUN, "step": 4, "kind": "done", "ts": round(out[-1]["ts"] + 1, 3),
+                "payload": {"success_claimed": True, "summary": "Text size is now L.", "steps": 4, "reason": "done",
+                            "stats": {"n_stuck_warnings": 1, "n_stuck_stops": 0}}})
+    (runs / WARNED_RUN).mkdir()
+    (runs / WARNED_RUN / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in out))
+
+
+@pytest.fixture(scope="module")
+def stuck_console(sandbox_url, tmp_path_factory):
+    """The stuck trace (with its console.json), a run that was warned and went on, and the two real traces (no
+    console.json); the mock never runs."""
+    runs = tmp_path_factory.mktemp("e2e-stuck-runs")
+    shutil.copytree(STUCK_FIXTURES / STUCK_RUN, runs / STUCK_RUN)
+    _warned_run(runs)
+    for rid in (DONE_RUN, STOPPED_RUN):
+        shutil.copytree(FIXTURES / rid, runs / rid)
+    for i in range(7):
+        Image.new("RGB", (1280, 800), (240, 244, 248)).save(runs / STUCK_RUN / f"step_{i:02d}.png")
+        if i:
+            Image.new("RGB", (1280, 800), (250, 236, 240)).save(runs / STUCK_RUN / f"step_{i:02d}_overlay.png")
     srv = _serve(sandbox_url, runs)
     yield srv.start(), runs
     srv.stop()
@@ -665,4 +702,147 @@ def test_a_watched_live_run_announces_its_end(page, console, tmp_path):
     n = pg.locator("#event-list li.ev").count()
     assert said == f"Run {aid} finished: Done, verified, {n} events.", said
     assert pg.get_attribute("#events-meta", "aria-live") is None  # one live region for this, not two
+    watch.assert_clean()
+
+
+# --- 5) the stuck trace, the status filter and where the models ran ------------------------------------------------
+
+
+def where_lines(pg, rid: str) -> list[str]:
+    return pg.eval_on_selector_all(f"#runs-body tr[data-run-id='{rid}'] .where-line", """els => els.map(e => {
+        const c = e.cloneNode(true); c.querySelectorAll('.visually-hidden').forEach(n => n.remove());
+        return c.textContent.replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim(); })""")
+
+
+def kv_value(pg, label: str) -> str | None:
+    """The summary card's value for one label, visible text only."""
+    return pg.evaluate("""(label) => { const row = [...document.querySelectorAll('#run-summary .kv-row')]
+        .find(r => r.querySelector('dt').textContent === label); if (!row) return null;
+        const c = row.querySelector('dd').cloneNode(true); c.querySelectorAll('.visually-hidden').forEach(n => n.remove());
+        return c.textContent.replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim(); }""", label)
+
+
+def shown_run_ids(pg) -> list[str]:
+    return pg.eval_on_selector_all("#runs-body tr", "trs => trs.filter(t => !t.hidden).map(t => t.dataset.runId)")
+
+
+def test_stuck_run_status_filter_and_endpoints_in_the_table(page, stuck_console):
+    pg, watch = page
+    base, runs = stuck_console
+    open_logs(pg, base)
+    pg.wait_for_function("document.querySelectorAll('#runs-body tr').length === 4")
+    everything = [WARNED_RUN, STUCK_RUN, DONE_RUN, STOPPED_RUN]
+    assert shown_run_ids(pg) == everything
+    tr = f"#runs-body tr[data-run-id='{STUCK_RUN}']"
+    assert visible(pg, f"{tr} .status-chip") == "Stuck" and pg.locator(f"{tr} .stuck-mark").count() == 0
+    assert "tone-warn" in pg.get_attribute(f"{tr} .status-chip", "class")
+    # a run that was warned and went on: Done, plus ⚠1 (with words for screen readers)
+    warned = f"#runs-body tr[data-run-id='{WARNED_RUN}']"
+    assert visible(pg, f"{warned} .status-chip") == "Done" and visible(pg, f"{warned} .stuck-mark") == "⚠1"
+    assert pg.text_content(f"{warned} .stuck-mark .visually-hidden") == (
+        "1 stuck warning: Lightning was told to change approach")
+    # where the models ran: console.json for the stuck run (fully local Mac), the start event for the others
+    assert where_lines(pg, STUCK_RUN) == ["VLM Mac (vllm-metal)", "127.0.0.1:8011 · S grounder", "L local BF16 (:8000)"]
+    assert where_lines(pg, WARNED_RUN) == where_lines(pg, STUCK_RUN)  # the label follows the port
+    assert where_lines(pg, DONE_RUN) == ["VLM H200 via tunnel", "127.0.0.1:8001 · S base", "L local BF16 (:8000)"]
+    assert "checked by the console at run start" in pg.get_attribute(f"{tr} .where-line", "title")
+    assert "from the start event" in pg.get_attribute(f"#runs-body tr[data-run-id='{DONE_RUN}'] .where-line", "title")
+
+    # the nav link's accessible name is its text: the arrow glyph is decoration (content: "\2190" / "")
+    assert pg.get_by_role("link", name="Console", exact=True).count() == 1
+
+    # the status filter, by keyboard: it sits before Refresh, so the runs table stays right after Refresh
+    options = pg.eval_on_selector_all("#status-filter option", "os => os.map(o => [o.value, o.textContent])")
+    assert options == [["", "All statuses (4)"], ["done", "Done (2)"], ["stuck", "Stuck (1)"], ["stopped", "Stopped (1)"]]
+    pg.focus("#status-filter")
+    pg.select_option("#status-filter", "stuck")
+    pg.wait_for_function("document.querySelector('#runs-meta').textContent.startsWith('1 stuck')")
+    assert shown_run_ids(pg) == [STUCK_RUN]
+    assert visible(pg, "#runs-meta") == "1 stuck of 4 runs · newest first"
+    assert pg.evaluate("new URLSearchParams(location.search).get('status')") == "stuck"
+    assert "1 run with status Stuck" in visible(pg, "#sr-status")
+    pg.keyboard.press("Tab")
+    assert pg.evaluate("document.activeElement.id") == "refresh-btn"
+    pg.keyboard.press("Tab")
+    assert pg.evaluate("document.activeElement.dataset.runId") == STUCK_RUN
+    pg.keyboard.press("ArrowDown")  # the only visible run: the arrows stay on it
+    assert pg.evaluate("document.activeElement.dataset.runId") == STUCK_RUN
+    pg.keyboard.press("Enter")
+    pg.wait_for_function(f"document.querySelector('#run-heading').textContent === 'Run {STUCK_RUN}'")
+    assert pg.evaluate("location.search") == f"?run={STUCK_RUN}&status=stuck"
+
+    # deep link; a status no run has says so and offers the way back
+    pg.goto(f"{base}/logs?status=error")
+    pg.wait_for_function("document.querySelector('#runs-body').children.length === 4")
+    assert shown_run_ids(pg) == [] and pg.input_value("#status-filter") == "error"
+    assert visible(pg, "#runs-empty") == "No runs with status “Error”. Choose “All statuses” to see every run."
+    pg.select_option("#status-filter", "")
+    assert shown_run_ids(pg) == everything and pg.locator("#runs-empty").is_hidden()
+    assert pg.evaluate("location.search") == ""
+    pg.screenshot(path=str(runs / "stuck-list.png"))
+    watch.assert_clean()
+
+
+def test_stuck_run_rows_question_and_summary_card(page, stuck_console):
+    pg, watch = page
+    base, runs = stuck_console
+    evs = lines_of(runs / STUCK_RUN / "events.jsonl")
+    kinds = [e["kind"] for e in evs]
+    open_logs(pg, base, STUCK_RUN)
+    assert pg.eval_on_selector_all("#event-list li.ev", "els => els.map(e => e.dataset.kind)") == kinds + ["verdict"]
+    assert "Stuck" in visible(pg, "#run-badges") and "Not verified" in visible(pg, "#run-badges")
+
+    # the action rows carry the progress check's verdicts
+    acts = [i for i, k in enumerate(kinds) if k == "action"]
+    reason = evs[acts[2]]["payload"]["stuck"]["reason"]
+    assert reason == 'click "the L option in the Text size row" made no progress 3 times'
+    descs = [visible(pg, f"{ev_sel(i)} .ev-desc") for i in acts]
+    assert descs[2] == f"Stuck warning: {reason} · Clicked at (1139, 441) · no change"
+    assert descs[5] == f"Stopped as stuck: {reason} · Clicked at (1140, 442) · no change"
+    assert all(d.startswith("Clicked at") for i, d in enumerate(descs) if i not in (2, 5))
+    assert [pg.get_attribute(ev_sel(i), "data-tone") for i in acts] == ["warn", "warn", "warn", "warn", "warn", "bad"]
+
+    # the done row: the agent's question to the user
+    question = evs[-1]["payload"]["summary"]
+    di = kinds.index("done")
+    assert visible(pg, f"{ev_sel(di)} .ev-desc") == f"Run ended: stuck, no progress · 6 steps · the agent asks: “{question}”"
+    assert pg.get_attribute(ev_sel(di), "data-tone") == "warn"
+    expand_all(pg)
+    det = text_of(pg, f"{ev_sel(di)} .ev-details")
+    assert "The agent asks" in det and question in det and "stuck_warnings 1" in det and "stuck_stops 1" in det
+    det = text_of(pg, f"{ev_sel(acts[2])} .ev-details")
+    assert f"Stuck warning: {reason}" in det and "Lightning is told it is stuck and to change approach" in det
+    det = text_of(pg, f"{ev_sel(acts[5])} .ev-details")
+    assert f"Stopped as stuck: {reason}" in det and "the run ends here and asks the user what to do" in det
+
+    # the summary card: status, progress check, where the models ran
+    summary = text_of(pg, "#run-summary")
+    assert "no progress, so it stopped and asks you what to do" in summary  # the Status tile's note
+    assert "Stopped as stuck after 1 warning" in summary
+    where = kv_value(pg, "Where it ran")
+    for bit in ("VLM Mac (vllm-metal)", "127.0.0.1:8011", "summary model grounder", "serves grounder",
+                "Lightning local BF16 (:8000)", "127.0.0.1:8000", "served as lightning",
+                "checked by the console when the run started"):
+        assert bit in where, (bit, where)
+    assert "mock" not in pg.evaluate("document.body.textContent").lower()  # a real run never says mock
+
+    # an older real trace: endpoints from its start event, and no progress check recorded
+    open_logs(pg, base, DONE_RUN)
+    summary = text_of(pg, "#run-summary")
+    assert "VLM H200 via tunnel" in summary and "from the run’s start event" in summary
+    assert kv_value(pg, "Progress check") == "—"
+    open_logs(pg, base, WARNED_RUN)  # warned, then the screen changed and it finished
+    progress = kv_value(pg, "Progress check")
+    assert progress.startswith("1 stuck warning; the run went on")
+    assert progress.endswith("Lightning was told it was stuck and to change approach")
+
+    pg.evaluate("document.activeElement.blur()")
+    for theme in ("0", "1"):  # the new rows and the table's Where column keep AA contrast in both themes
+        pg.evaluate(f"localStorage.setItem('gui-assist.high-contrast', '{theme}')")
+        open_logs(pg, base, STUCK_RUN)
+        expand_all(pg)
+        pg.evaluate("document.activeElement.blur()")
+        res = pg.evaluate(CONTRAST_JS)
+        assert res["n"] > 200 and res["low"] == [], (theme, res["low"])
+        pg.screenshot(path=str(runs / f"stuck-{theme}.png"), full_page=True)
     watch.assert_clean()

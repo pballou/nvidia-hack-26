@@ -262,7 +262,7 @@
     if (el.asrNote) {
       el.asrNote.hidden = !on;
       setText(el.asrNote, isFixedText()
-        ? `Voice input is the stub (${asrLabel()}): it recognizes no speech. For real voice input, start `
+        ? `Voice input is the ${asrLabel()} engine: it recognizes no speech. For real voice input, start `
           + 'scripts/run_asr.sh and the console with --asr parakeet.'
         : `Speech is recognized on this computer (${asrLabel()}); audio goes only to this console.`);
     }

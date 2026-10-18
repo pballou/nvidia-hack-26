@@ -256,8 +256,8 @@ def cell_text(pg, sel: str) -> str:
 def test_voice_run_body_and_runs_table_by_keyboard(page, logs_console, runs):
     pg, watch = page
     # the console sent what it heard with the run (console.json only; never passed to the agent)
-    assert runs.voice_body == {"request": TASK_REQUEST, "task_id": TASK,
-                               "options": {"grounder": "base", "thinking": "retry", "lightning": "local"},
+    assert runs.voice_body == {"request": TASK_REQUEST, "task_id": TASK,  # the console's defaults (/api/config)
+                               "options": {"grounder": "grounder", "thinking": "retry", "lightning": "local"},
                                "voice": TRANSCRIPT}
     open_logs(pg, logs_console)
     pg.wait_for_function("document.querySelectorAll('#runs-body tr').length === 2")
@@ -420,10 +420,11 @@ def test_filters_by_kind_model_and_search_follow_the_url(page, logs_console, run
 
     # the model filter lists the models in this run; one model shows only its events
     options = pg.eval_on_selector_all("#model-filter option", "os => os.map(o => o.value)")
-    assert set(options) == {"", "test-asr", "mock (no Lightning)", "mock (no VLM)", "base, mock"}, options
-    pg.select_option("#model-filter", "base, mock")
+    # the mock names the grounder option it was given (the console's default: grounder)
+    assert set(options) == {"", "test-asr", "mock (no Lightning)", "mock (no VLM)", "grounder, mock"}, options
+    pg.select_option("#model-filter", "grounder, mock")
     assert visible_kinds(pg) == ["grounding"] * counts["grounding"]
-    assert params(pg)["model"] == "base, mock"
+    assert params(pg)["model"] == "grounder, mock"
 
     # text search (with the model filter still on), then "Show all events" clears everything
     pg.fill("#event-search", "accessibility tab")
