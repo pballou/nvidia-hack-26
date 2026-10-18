@@ -47,7 +47,7 @@ clicks M when asked for L; FINAL clicks L).
 | ~7:45 | Quit Teams/Chrome. T4 starts the local VLM (:8011, **base + FINAL LoRA in one instance**); then T1 relaunches the console fully local, **headless** (`--summary-model base`, clarify on, thinking off) from a fresh export of main. **Don't use `--headed`**: its font rendering changes the pixels, and pay-50 drops from 8/8 to 1/4 | Orchestrator → T4, T1 |
 | (done Sun 03:42) | **Recording config verified headless:** pay-50 ✓ ×2 (7 steps, ~71 s; the dialog cue was present), text-size ✓ (3 steps, 26 s) | T1 |
 | ~8:00 | One pay-50 dry run in the console. In Logs, check that the observation after "Pay bill" names "Full balance (selected)" and the Other-amount input | Patrick |
-| ~8:00 | HF model upload (private): adapter + merged FINAL + model card with final numbers | Orchestrator |
+| (done Sun 04:28) | **HF model uploaded (private):** `patrickballou/gui-assist-grounder` with merged FINAL at the root (sha256 `cd120bc0…`), PEFT `adapter/` (`54ce9389…`), `training/` GRPO records, and the model card | Orchestrator |
 | 8:00–8:30 | Rehearse the five demo tasks (FINAL passed each 3/3): download September statement, turn on autopay, pay $50, report a Riverside outage, make text bigger | Patrick |
 | 8:30–10:00 | Record with Cmd+Shift+5 (screen + mic), not Zoom; team-on-camera segment separately. Show the console's run view (step screenshot + click overlay). Base vs tuned: live toggle (base is served again) or the cutaway image | Charlie (+ everyone) |
 | ~9:30 | Release check (below), then make both HF repos public | Patrick |
