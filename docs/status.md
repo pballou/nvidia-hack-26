@@ -1,6 +1,6 @@
 # Team status (living doc)
 
-**Updated:** Sat 2026-10-17 20:05 EDT by the orchestrator thread. This is the team-facing
+**Updated:** Sat 2026-10-17 20:30 EDT by the orchestrator thread. This is the team-facing
 "where is everything" page. Numbers come from [results.md](results.md) and [runs.md](runs.md).
 If this page disagrees with them, they win.
 
@@ -12,7 +12,7 @@ If this page disagrees with them, they win.
 | Pick the round-0 adapter on dev | Kyle | **Done:** `sft-lightning` 86.27 vs `sft-template` 85.86 (same harness) |
 | Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | **Running since 19:38** from `sft-lightning`, extended flags. `:8001` `grounder` stays `sft-template` until the loop's end step re-serves the best adapter |
 | Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36**; see below |
-| Agent step cap: interactive agent goes to 25 steps plus a `stuck` stop (no progress for 4 actions, or the same action 3× with no change); the Gym eval stays at 12 | T2 (+T1 for the console) | In progress |
+| Agent step cap: the interactive agent now allows 25 steps. With no progress (4 no-change actions, or the same action 3×), it first warns Lightning and turns thinking on, then stops as `stuck` if 3 more actions make no progress. That cut off 0 of today's successes in replay. The Gym eval stays at 12 with no stuck stop | T2 (b179fcd); T1 for the console | **Done** (console display pending) |
 | Console `/logs` page (325848f) + review fixes | T1 | Fix pass in progress |
 | Fully local grounder on the Mac (Gate G, [local-mac.md](local-mac.md)) | T4 | Attempt 1 stopped safely on memory pressure (the model loads fine). One retry after the video dry run, once ~10 GB is freed; otherwise we stay hybrid |
 | BLADE base vs SFT on dev, plus the overnight BLADE runbook (`docs/blade/`) | Orchestrator | Running |
@@ -35,7 +35,7 @@ If this page disagrees with them, they win.
 | Time (EDT) | What | Who |
 | --- | --- | --- |
 | ~7:00 | `brev start`, re-serve `:8001` with the final adapter | Orchestrator (Kyle's OK) |
-| 7:15–8:15 | One ScreenSpot-v2-clean eval of the final adapter; **agent rerun of the `grounder` arm with the final adapter** (always: tonight's 22/36 is `sft-template`, and the loop starts from `sft-lightning`; tonight's base arm is reused) | Kyle, T2 |
+| 7:15–8:15 | One ScreenSpot-v2-clean eval of the final adapter; **agent rerun of the `grounder` arm with the final adapter** (always: tonight's 22/36 is `sft-template`, and the loop starts from `sft-lightning`; tonight's base arm is reused). Command: `GROUNDERS=grounder OUT_DIR=results/agent_final BASELINE=results/agent_v4_sft_template/agent_base.jsonl AGENT_SANDBOX_URL=http://127.0.0.1:8091 HEAD_PORT=21017 TASKS=resources_servers/web_agent/data/tasks_all.jsonl REPEATS=3 CONCURRENCY=2 scripts/agent_eval.sh` (don't regenerate `tasks_all.jsonl` before then) | Kyle, T2 |
 | ~8:00 | HF model upload (private) | Orchestrator |
 | 8:30–10:00 | Record the video | Charlie (+ everyone on camera) |
 | ~9:30 | Release check, then make both HF repos public | Patrick |
