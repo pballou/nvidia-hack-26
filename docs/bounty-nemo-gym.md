@@ -78,6 +78,9 @@ tools; only the grounder's served name changes):
 | `grounder` = sft-template | **22/36 (61%)** | 25/36 (4 false) | 6/234 | Sat 19:05, `agent-v4`, reportable |
 | `grounder` (final overnight adapter, if it beats sft-template on dev) | TBD | TBD | TBD | Sunday |
 
+- **Strict-check caveat:** with a strict `mark-all-read` check, tuned is 20/36 (+2), as the
+  current check doesn't guard the bell notifications ([BLADE](blade/agent_base_vs_sft.md)). The
+  check stays unchanged until after Sunday's grounder rerun, so that rerun is comparable.
 - **`gym eval compare`:** `mean/reward` +0.111, 95% CI [−0.06, +0.28], so suggestive but not
   significant at n=36. Failed actions per episode −0.28, CI [−0.52, −0.04], significant
   (10 → 0). No-change actions 83 → 45, and Lightning's done claims matched the sandbox 31/36 vs

@@ -42,6 +42,9 @@ screens. `gym eval compare`: 3 fail→pass, 1 pass→fail.
 | Tool-call validity | 249/259 (96%) | 228/234 (97%) |
 | Mean steps | 7.2 | 6.5 |
 
+- **Strict-check caveat:** with a strict `mark-all-read` check, tuned is 20/36 (+2), as the
+  current check doesn't guard the bell notifications (BLADE). The check is left unchanged until
+  after Sunday's grounder rerun, so that rerun stays comparable with this base arm.
 - **Significance:** `mean/reward` +0.111, 95% CI [−0.06, +0.28]: suggestive, not significant
   at n=36. `n_failed_actions` −0.28/episode, CI [−0.52, −0.04]: significant.
 - **Per task (verified/3, base → grounder):** text-size-large 0→2 (the L-vs-M grounding miss),

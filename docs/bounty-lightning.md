@@ -277,7 +277,10 @@ not committed), `reportable=yes`. The false claim was `high-contrast` (reward 0,
 in both conditions, `base` screen descriptions in both, 0 masked. With the tuned grounder,
 no-change actions fell 83 → 45 and failed actions 10 → 0 (CI excludes 0), and Lightning's done
 claims matched the sandbox 31/36 vs 26/36. `gym eval compare`: reward +0.111, 95% CI
-[−0.06, +0.28] (n=36: suggestive, not significant); 3 fail→pass, 1 pass→fail.
+[−0.06, +0.28] (n=36: suggestive, not significant); 3 fail→pass, 1 pass→fail. With a strict
+`mark-all-read` check, tuned is 20/36 (+2), as the current check doesn't guard the bell
+notifications ([BLADE](blade/agent_base_vs_sft.md)); the check stays as-is until after Sunday's
+grounder rerun.
 
 ⁴ `$PY scripts/run_agent_tasks.py --tasks sandbox/tasks.json --sandbox-url http://127.0.0.1:8091
 --grounder base --thinking off|retry` (`runs/summary_20261017-165130.json` and

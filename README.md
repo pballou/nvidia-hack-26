@@ -164,7 +164,8 @@ choose checkpoints on dev only and report both.
 **Browser tasks** (Gym `web_agent`, 12 sandbox tasks × 3 repeats, official BF16 Lightning;
 only the grounder changes): verified success 18/36 with `base` vs **22/36** with
 `grounder` = `sft-template`. Failed actions went from 10 to 0, and false success claims
-from 8 to 4.
+from 8 to 4. With a strict `mark-all-read` check, tuned is 20/36 (+2): the current check
+doesn't guard the bell notifications ([BLADE report](docs/blade/agent_base_vs_sft.md)).
 
 *TBD Sunday:* SFT+GRPO from the overnight loop (a round is kept only if it gains ≥ 0.5
 points on dev), then one ScreenSpot-v2-clean eval of the final adapter.
@@ -177,7 +178,24 @@ points on dev), then one ScreenSpot-v2-clean eval of the final adapter.
 - **Small n:** the agent gain (+4 of 36) is suggestive but not significant (mean reward
   gain +0.11, 95% CI [-0.06, +0.28]). The drop in failed actions is significant.
 - **Still 0/3:** the canvas-chart task and the two scroll-dependent tasks.
-- *TBD:* next steps, after Sunday's results.
+
+Next steps, ranked by the [BLADE report](docs/blade/agent_base_vs_sft.md). The agent pipeline
+is frozen until Sunday's grounder rerun, so the comparison with Saturday's base arm holds:
+
+1. **Observation pipeline.** The 2B screen describer drops toggle state and cuts off long grids
+   (high-contrast state missing in 6/6 rollouts; the notifications grid cut in 15/15 first
+   views). Report STATE reliably and add "more below" scroll hints.
+2. **Agent-loop guards.** Refuse `done(success=true)` when the latest toast or STATE contradicts
+   the request, and catch on/off oscillation. The interactive stuck stop also needs fixing: an
+   occasional screen change resets its count, so 7 of 36 thinking-off runs still hit the
+   25-step cap without a stuck stop.
+3. **Planner prompt `agent-v5`.** Scroll when the target isn't listed, and stop once a toast
+   confirms the result.
+4. **Grounder data and RL.** Add segmented controls and adjacent-option targets (the tuned
+   grounder's "L" hits land 1 px inside the box), and add centre-distance pressure to the GRPO
+   reward.
+5. **Verifier.** Make the `mark-all-read` check guard the bell notifications, then rerun both
+   arms.
 
 ## Team
 
