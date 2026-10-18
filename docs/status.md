@@ -1,6 +1,6 @@
 # Team status (living doc)
 
-**Updated:** Sat 2026-10-17 20:55 EDT by the orchestrator thread. This is the team-facing
+**Updated:** Sat 2026-10-17 20:58 EDT by the orchestrator thread. This is the team-facing
 "where is everything" page. Numbers come from [results.md](results.md) and [runs.md](runs.md).
 If this page disagrees with them, they win.
 
@@ -10,7 +10,7 @@ If this page disagrees with them, they win.
 | --- | --- | --- |
 | Rewritten-data SFT (`train_lightning.jsonl`, same config and seed as `sft-template`) | Kyle | **Done 19:33** (`/home/ubuntu/ckpt/sft-lightning`, 572 steps) |
 | Pick the round-0 adapter on dev | Kyle | **Done:** `sft-lightning` 86.27 vs `sft-template` 85.86 (same harness) |
-| Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | **Running since 19:38** from `sft-lightning`, extended flags. `:8001` `grounder` stays `sft-template` until the loop's end step re-serves the best adapter |
+| Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | Started 19:38 from `sft-lightning` (dev 86.27). **Round 1 GRPO kept: dev 87.00 (+0.73)**. BLADE knobs applied 20:51 ([round 1 report](blade/round_1_r0_vs_r1.md)), and round 2 is running. `:8001` `grounder` stays `sft-template` until the loop's end step |
 | Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36**; see below |
 | Thinking off / retry / on comparison: interactive agent, 12 tasks × 3 each, `grounder` | T2 | Running since 20:35 (~2 h); pauses for the dry run |
 | Agent step cap: the interactive agent now allows 25 steps. With no progress (4 no-change actions, or the same action 3×), it first warns Lightning and turns thinking on, then stops as `stuck` if 3 more actions make no progress. That cut off 0 of today's successes in replay. The Gym eval stays at 12 with no stuck stop | T2 (b179fcd); T1 for the console | **Done** (console display pending) |
