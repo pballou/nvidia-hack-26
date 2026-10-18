@@ -61,6 +61,9 @@ Setup: fully local Mac.
     describer drops the selected-option cue on the headed pixels.
   - Every measured run so far (Gym evals, harness, thinking ablation) is headless, so a headed
     console is an unmeasured input for both the describer and the grounder.
+  - **Confirmed through the console, headless** (T1, ~03:37, same fully local path, clarify on):
+    pay-50 passed 2/2, both with the "(selected)" cue after "Pay bill". text-size-large passed
+    1/1. Runs `20261018-033713-fa7117`, `-033826-ec7c0f`, `-033941-79bd0f`.
 - **Before recording,** do a console dry run of pay-50 and check that the dialog's description
   names the selected option.
 - **Guards (post-Sunday):** check the confirmed amount against the request, and an A/B
