@@ -86,7 +86,7 @@ class Episode:
     tags: list[str] = field(default_factory=list)
     verified: bool | None = None       # None: no verifier result (no summary row, harness error, masked)
     claimed: bool | None = None
-    excluded: str | None = None        # masked | dropped | incomplete | stopped | infra_error | no_reward -> not scored
+    excluded: str | None = None        # masked | dropped | incomplete | stopped | infra_error | adapter_changed | no_reward
     end_reason: str | None = None      # done | max_steps | error | no_tool_call | ...
     steps: int | None = None
     n_lightning_calls: int = 0
@@ -323,6 +323,8 @@ def interactive_episode(run_id: str, events: list[dict], summary: dict | None, t
         ep.steps = ep.n_lightning_calls
         ep.end_reason, ep.excluded = "incomplete", "incomplete"
     ep.completion_tokens, ep.reasoning_tokens = _plan_tokens(events)
+    if summary and summary.get("adapter_changed") and ep.excluded is None:
+        ep.excluded = "adapter_changed"  # the grounder served something else at some point (run_agent_tasks.py)
     return ep
 
 
