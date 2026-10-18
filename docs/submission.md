@@ -43,8 +43,8 @@ full doc for judges who want more.
 > validation, compact observations and per-step thinking control. Turning thinking on only after
 > a problem step raised claimed-equals-verified from 6/12 to 9/12 tasks and cut actions that
 > changed nothing on screen from 45 to 27 (n=1 per task). In the NeMo Gym `web_agent` env (12 tasks × 3),
-> swapping the base grounder for the fine-tuned one raised verified success from 18/36 to 22/36 and cut
-> failed actions from 10 to 0. Full write-up:
+> swapping the base grounder for the fine-tuned one raised verified success from 18/36 to 22/36 (20/36 with a
+> stricter mark-all-read check; not significant at n=36) and cut failed actions from 10 to 0 (significant). Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-lightning.md`
 
 **NeMo Gym bounty:**
@@ -59,7 +59,8 @@ full doc for judges who want more.
 > gets right, TRL GRPO trains on them with the Gym server's `/verify` as the reward, and a dev
 > eval plus `gym eval compare` decides keep or revert. BLADE failure analysis steers the next
 > round. In the `web_agent` env, the tuned grounder raised verified task success from 18/36 to
-> 22/36 over the base. After GRPO: TBD dev and TBD ScreenSpot-v2-clean. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
+> 22/36 over the base (20/36 with a stricter check), and cut failed actions from 10 to 0. GRPO round 1 in the
+> loop raised dev from 86.27% to 87.00% (AndroidWorld +6.5). Final: TBD dev and TBD ScreenSpot-v2-clean. Along the way we found and excluded a ScreenSpot-v2 leak: 28 desktop test screenshots
 > were captured on the same machines as OS-Atlas training data. Full write-up:
 > `https://github.com/pballou/nvidia-hack-26/blob/main/docs/bounty-nemo-gym.md`
 

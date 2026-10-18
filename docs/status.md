@@ -11,7 +11,7 @@ If this page disagrees with them, they win.
 | Rewritten-data SFT (`train_lightning.jsonl`, same config and seed as `sft-template`) | Kyle | **Done 19:33** (`/home/ubuntu/ckpt/sft-lightning`, 572 steps) |
 | Pick the round-0 adapter on dev | Kyle | **Done:** `sft-lightning` 86.27 vs `sft-template` 85.86 (same harness) |
 | Overnight NeMo Gym loop in `/home/ubuntu/night` ([B-night-loop.md](tasks/B-night-loop.md)) | Automatic | Started 19:38 from `sft-lightning` (dev 86.27). **Round 1 GRPO kept: dev 87.00 (+0.73)**. BLADE knobs applied 20:51 ([round 1 report](blade/round_1_r0_vs_r1.md)), and round 2 is running. `:8001` `grounder` stays `sft-template` until the loop's end step |
-| Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36**; see below |
+| Base-vs-tuned agent eval: Gym `web_agent`, 12 tasks × 3 repeats, `base` vs `grounder` (= `sft-template`) | T2 | **Done 19:30:** verified 18/36 → **22/36** (20/36 with a strict check); see below |
 | Thinking off / retry / on comparison: interactive agent, 12 tasks × 3 each, `grounder` | T2 | Running since 20:35 (~2 h); pauses for the dry run |
 | Agent step cap: the interactive agent now allows 25 steps. With no progress (4 no-change actions, or the same action 3×), it first warns Lightning and turns thinking on, then stops as `stuck` if 3 more actions make no progress. That cut off 0 of today's successes in replay. The Gym eval stays at 12 with no stuck stop | T2 (b179fcd); T1 for the console | **Done** (console display pending) |
 | Console `/logs` page (325848f) + review fixes | T1 | Fix pass in progress |
@@ -88,6 +88,9 @@ If this page disagrees with them, they win.
 
   - Mean reward +0.111. The 95% CI is [-0.06, +0.28], so it's suggestive but not significant
     at n=36. The drop in failed actions is significant.
+  - With a strict `mark-all-read` check (the current one doesn't guard the bell notifications),
+    tuned is 20/36 (+2). The fix is deferred until after Sunday's rerun
+    ([agent BLADE](blade/agent_base_vs_sft.md)).
   - Gains: `text-size-large` 0→2, `sms-billing-off` 0→2, `message-support-meter` 1→2.
     Regression: `high-contrast` 2→1.
   - Still 0/3: the canvas chart and the two scroll tasks.
