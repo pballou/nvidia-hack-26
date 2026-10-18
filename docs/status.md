@@ -1,6 +1,6 @@
 # Team status (living doc)
 
-**Updated:** Sat 2026-10-17 22:25 EDT by the orchestrator thread. This is the team-facing
+**Updated:** Sat 2026-10-17 23:15 EDT by the orchestrator thread. This is the team-facing
 "where is everything" page. Numbers come from [results.md](results.md) and [runs.md](runs.md).
 If this page disagrees with them, they win.
 
@@ -31,15 +31,22 @@ If this page disagrees with them, they win.
 - **When `FINAL.json` exists,** the orchestrator copies the summaries and adapters to Patrick's
   Mac and runs `brev stop`. That happens by 6:00 at the latest.
 
-## Sunday
+## Sunday (updated Sat 23:15: fully local, no H200 needed)
+
+The H200 was stopped Sat 22:35 with every eval done. The video records **fully local** on Patrick's
+Mac (Gate G passed on FINAL). `brev start` is needed only if we want a live hybrid take with the
+base/tuned toggle. The base-vs-tuned moment is covered by
+[docs/assets/base_vs_tuned_text_size.png](assets/base_vs_tuned_text_size.png) (real overlays: base
+clicks M when asked for L; FINAL clicks L).
 
 | Time (EDT) | What | Who |
 | --- | --- | --- |
-| ~7:00 | `brev start`, re-serve `:8001` with the final adapter | Orchestrator (Kyle's OK) |
-| 7:15–8:15 | One ScreenSpot-v2-clean eval of the final adapter; **agent rerun of the `grounder` arm with the final adapter** (always: tonight's 22/36 is `sft-template`, and the loop starts from `sft-lightning`; tonight's base arm is reused). Command: `GROUNDERS=grounder OUT_DIR=results/agent_final BASELINE=results/agent_v4_sft_template/agent_base.jsonl AGENT_SANDBOX_URL=http://127.0.0.1:8091 HEAD_PORT=21017 TASKS=resources_servers/web_agent/data/tasks_all.jsonl REPEATS=3 CONCURRENCY=2 scripts/agent_eval.sh` (don't regenerate `tasks_all.jsonl` before then) | Kyle, T2 |
-| ~8:00 | HF model upload (private) | Orchestrator |
-| 8:30–10:00 | Record the video | Charlie (+ everyone on camera) |
-| ~9:30 | Release check, then make both HF repos public | Patrick |
+| ~7:45 | Quit Teams/Chrome. T4 starts the local grounder (:8011, FINAL merge); then T1 relaunches the console fully local from a fresh export of main | Orchestrator → T4, T1 |
+| ~8:00 | HF model upload (private): adapter + merged FINAL + model card with final numbers | Orchestrator |
+| 8:00–8:30 | Rehearse the five demo tasks (FINAL passed each 3/3): download September statement, turn on autopay, pay $50, report a Riverside outage, make text bigger | Patrick |
+| 8:30–10:00 | Record with Cmd+Shift+5 (screen + mic), not Zoom; team-on-camera segment separately | Charlie (+ everyone) |
+| ~9:30 | Release check (below), then make both HF repos public | Patrick |
+| by 10:15 | Upload the video (unlisted YouTube) | Charlie |
 | by 10:30 | Submit the form ([submission.md](submission.md)) | Patrick |
 | 11:00 | Deadline | |
 
