@@ -4,7 +4,8 @@ The mock drives headless Chromium from pixels only: mouse clicks and wheel and k
 console/mock_scripts.json (measured by console/tools/calibrate_mock.py). It never reads the DOM or the sandbox state,
 and the console checks the verdict against /api/state only after the run. So a passing verdict here shows the task is
 solvable by pixel clicks alone, and that the stream carries everything the console UI renders: tool calls in plain
-words, grounding points with overlay images, screenshots, measured act timings, the done summary and the verdict.
+words, grounding points with overlay images, screenshots, measured act/settle/screenshot timings, the done summary
+and the verdict.
 
 The two browser-driving tests are marked `e2e` and run in the default suite (about 45 s for all 12 tasks plus the
 free-text run). Skip them with -m "not e2e"; the fast script-integrity checks below still run.
@@ -98,12 +99,16 @@ def test_task_solved_by_pixel_clicks(mock_console, task):
     start = by_step[0]
     assert start["start"]["payload"]["start_url"] == run["start_url"]
     assert start["observation"]["payload"]["observation"]["screen_summary"] == script["start_screen"]
+    assert start["observation"]["payload"]["summary"] == mock_agent.MOCK_SUMMARY_INFO
+    assert set(start["observation"]["timings_ms"]) == {"screenshot"}  # measured; no summary latency invented
     assert_png(base, start["observation"]["screenshot_url"])
 
     for n, want in enumerate(script["steps"], 1):
         ev = by_step[n]
         plan, call = ev["plan"], ev["tool_call"]["payload"]
         assert plan["payload"]["reasoning"] == want["reasoning"] and "timings_ms" not in plan  # nothing simulated
+        assert (plan["payload"]["model"], plan["payload"]["prompt_version"], plan["payload"]["prompt_sha"]) == \
+            (mock_agent.MOCK_PLANNER, "mock", "mock")
         assert plan["payload"]["tool_calls"] == [{"name": want["tool"], "arguments": want["arguments"]}]
         assert call["name"] == want["tool"] and call["arguments"] == want["arguments"] and call["valid"] is True
         assert call["description"] == mock_agent.describe(want["tool"], want["arguments"])
@@ -115,10 +120,14 @@ def test_task_solved_by_pixel_clicks(mock_console, task):
             continue
         action = ev["action"]
         assert action["payload"]["screen_changed"] is True, f"step {n} {want['tool']}: the screen did not change"
-        assert action["timings_ms"]["act"] > 0
+        # split like the real agent (agent/session.py): act = the mouse/keyboard action alone, settle = the wait;
+        # the screenshot of the settled screen belongs to the observation that follows
+        assert set(action["timings_ms"]) == {"act", "settle"} and action["timings_ms"]["act"] > 0
+        assert action["timings_ms"]["settle"] >= mock_agent.MockConfig().settle_ms
         obs = ev["observation"]
         assert obs["payload"]["observation"]["screen_summary"] == want["screen_after"]
-        assert obs["payload"]["observation"]["screen_changed"] is True and "timings_ms" not in obs
+        assert obs["payload"]["observation"]["screen_changed"] is True
+        assert set(obs["timings_ms"]) == {"screenshot"} and obs["timings_ms"]["screenshot"] > 0
         assert obs["screenshot_url"] == f"/runs/{result['run_id']}/step_{n:02d}.png"
         assert_png(base, obs["screenshot_url"])
         if needs_grounding(want):
@@ -127,6 +136,7 @@ def test_task_solved_by_pixel_clicks(mock_console, task):
             assert (g["payload"]["x"], g["payload"]["y"]) == (want["x"], want["y"])
             assert g["payload"]["point_1000"] == [round(want["x"] / W * 1000), round(want["y"] / H * 1000)]
             assert "timings_ms" not in g and Path(g["overlay_path"]).is_file()
+            assert g["payload"]["prompt_sha"] == "mock" and g["payload"]["model"] == "base, mock"
             assert g["overlay_url"] == f"/runs/{result['run_id']}/step_{n:02d}_overlay.png"
             assert_png(base, g["overlay_url"])
             assert action["payload"]["click"] == {"x": want["x"], "y": want["y"]}
@@ -161,13 +171,35 @@ def test_free_text_request_has_no_verdict(mock_console):
     assert steps[-1]["payload"]["success_claimed"] is False and steps[-1]["payload"]["reason"] == "done"
     obs = steps[1]
     assert obs["payload"]["observation"]["url"].startswith(run["start_url"].split("?")[0])
-    assert "timings_ms" not in obs
+    assert set(obs["timings_ms"]) == {"screenshot"}
     assert_png(base, obs["screenshot_url"])
 
     info = httpx.get(f"{base}/api/runs/{run['run_id']}").json()
     assert info["status"] == "done" and info["task_id"] is None and info["verdict"] is None
     lines = (runs / result["run_id"] / "events.jsonl").read_text().splitlines()
     assert [json.loads(x)["kind"] for x in lines] == [s["kind"] for s in steps]
+
+
+@pytest.mark.e2e
+def test_typed_task_text_from_another_page_falls_back_honestly(mock_console):
+    """A task's exact text without its task_id starts at '/', not at the task's start page. The script's points
+    were measured there, so the mock must not replay them (it used to click the dashboard and then fail with a
+    developer-facing "mock script is stale" error). It says why it did nothing instead."""
+    base, _ = mock_console
+    task = next(t for t in TASKS if t["id"] == "mark-all-read")
+    assert task["start_path"] == "/messages"
+    run, stream = run_via_console(base, task["request"])
+    assert run["start_url"].endswith("/?sid=" + run["sid"])
+    kinds = [m["event"] for m in stream]
+    assert "verdict" not in kinds and kinds[-3:] == ["result", "status", "end"], kinds
+    steps = [m["data"] for m in stream if m["event"] == "step"]
+    assert [s["kind"] for s in steps] == ["start", "observation", "plan", "tool_call", "action", "done"]  # no error
+    result = stream[-3]["data"]
+    assert result["success_claimed"] is False and result["steps"] == 1
+    assert "starts on /messages, but this run started on /," in result["summary"]
+    assert "stale" not in json.dumps(steps) and "calibrate" not in json.dumps(steps)
+    assert steps[1]["payload"]["observation"]["screen_summary"] == mock_agent.NO_SUMMARY  # not the script's text
+    assert steps[2]["payload"]["content"].startswith("Mock agent: the scripted plan for this request starts on")
 
 
 # --- what makes the run above meaningful: scripts and mock are pixel-only -----------------------
@@ -178,7 +210,8 @@ def test_scripts_cover_every_task_and_hold_no_selectors():
     assert SCRIPTS_FILE["viewport"] == mock_agent.VIEWPORT
     for task in TASKS:
         script = SCRIPTS[task["id"]]
-        assert script["request"] == task["request"] and set(script) == {"request", "start_screen", "steps"}
+        assert script["request"] == task["request"] and set(script) == {"request", "start_path", "start_screen", "steps"}
+        assert script["start_path"] == (task["start_path"] or "/")  # the mock replays it only from that page
         calibrate_mock.validate_script(script)  # tool schema, viewport bounds, done last, only replay keys
     text = json.dumps(SCRIPTS)  # the replayed part (the file's _about note mentions "no selectors")
     for needle in ("testid", "selector", "locator", "AcmeTestHooks", "/api/state", "xpath"):

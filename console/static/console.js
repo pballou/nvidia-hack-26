@@ -134,6 +134,7 @@
   }
 
   function fmtSeconds(ms) {
+    if (Math.round(ms) < 1000) return `${Math.round(ms)}\u00a0ms`;  // a real click acts in ~20 ms: not "0.0 s"
     const s = ms / 1000;
     return s < 10 ? `${s.toFixed(1)}\u00a0s` : `${Math.round(s)}\u00a0s`;
   }
@@ -173,9 +174,11 @@
     return res.json();
   }
 
-  function announce(text) {
+  let announceTimer = 0;
+  function announce(text) {  // a burst (e.g. replayed events) speaks only its last message
+    window.clearTimeout(announceTimer);
     ui.srStatus.textContent = '';
-    window.setTimeout(() => { ui.srStatus.textContent = text; }, 50);
+    announceTimer = window.setTimeout(() => { ui.srStatus.textContent = text; }, 50);
   }
 
   // --- plain words for tool calls --------------------------------------------------------
@@ -221,7 +224,12 @@
     if (call && call.name) return describeCall(str(call.name), call.arguments, call.description);
     if (s.n === 0) return s.start && s.start.start_url ? `Started at ${displayUrl(s.start.start_url)}` : 'Start screen';
     if (s.plan) {
-      const failed = s.errors.some((e) => isObj(e) && !/no tool call/i.test(str(e.message)));
+      const errs = s.errors.filter(isObj);
+      if (s.plan.finish_reason === 'length' || errs.some((e) => e.finish_reason === 'length')) {
+        return 'No action: Lightning’s reply was cut off before it chose one';
+      }
+      // T2's no-tool-call errors carry the reply's finish_reason; a failed Lightning call has none
+      const failed = errs.some((e) => e.where === 'planner' && !('finish_reason' in e));
       return failed ? 'Planning failed: the Lightning call did not succeed' : 'No action: Lightning replied without a tool call';
     }
     if (s.done) return s.done.reason === 'done' ? 'Done' : 'Run ended';
@@ -284,7 +292,7 @@
       'form-error', 'follow-btn', 'log-scroll', 'step-log', 'log-empty', 'pending', 'banner', 'banner-icon',
       'banner-title', 'banner-label', 'banner-expl', 'banner-details', 'banner-summary', 'banner-claim', 'banner-extra',
       'options', 'options-summary', 'live-btn', 'view-toggle', 'view-before', 'view-after', 'screen-img', 'screen-empty',
-      'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge',
+      'screen', 'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge',
     ]) ui[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = $(id);
     ui.optionSets = OPTION_NAMES.map((n) => $(`opt-${n}`));
 
@@ -343,6 +351,7 @@
       });
     }
     ui.thumbs.addEventListener('keydown', onThumbKey);
+    document.addEventListener('keydown', onPageArrowKey);
     ui.options.addEventListener('change', renderOptionsSummary);
     ui.screenImg.addEventListener('error', () => {
       if (!ui.screenImg.getAttribute('src')) return;
@@ -456,7 +465,7 @@
     if (S.voice && ui.request.value !== S.voice.request) S.voice = null;  // edited: no longer the transcript
     if (!S.taskId) return;
     const t = S.tasksById.get(S.taskId);
-    if (t && ui.request.value !== t.request) {
+    if (t && requestKey(ui.request.value) !== requestKey(t.request)) {  // same words: still that task
       S.taskId = null;
       ui.taskSelect.value = '';
       ui.taskMeta.textContent = '';
@@ -464,9 +473,44 @@
     }
   }
 
-  /** Request text as a comparison key: case, accents, punctuation and whitespace don't matter. */
+  const NUMBER_WORDS = new Map(Object.entries({
+    zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+    nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  }));
+  const NUMBER_WORD = `(?:${[...NUMBER_WORDS.keys(), 'hundred'].join('|')})`;
+  const NUMBER_RUN_RE = new RegExp(`(?<![\\p{L}\\p{N}])${NUMBER_WORD}(?:[\\s-]+${NUMBER_WORD})*(?![\\p{L}\\p{N}])`, 'gu');
+
+  /** 'fifty' -> '50', 'fifty-five' -> '55', 'two hundred five' -> '205'; words that don't combine stay apart. */
+  function numberWordsToDigits(run) {
+    const out = [];
+    let cur = null;
+    for (const w of run.split(/[\s-]+/)) {
+      if (w === 'hundred') {
+        if (cur !== null && cur % 100 === 0 && cur > 0) { out.push(cur); cur = null; }  // 'hundred hundred'
+        cur = (cur === null ? 1 : cur) * 100;
+        continue;
+      }
+      const v = NUMBER_WORDS.get(w);
+      if (cur !== null && cur >= 100 && cur % 100 === 0 && v < 100) cur += v;        // two hundred | five
+      else if (cur !== null && cur % 100 >= 20 && cur % 10 === 0 && v < 10) cur += v;  // fifty | five
+      else {
+        if (cur !== null) out.push(cur);
+        cur = v;
+      }
+    }
+    if (cur !== null) out.push(cur);
+    return out.join(' ');
+  }
+
+  /** Request text as a comparison key: case, accents, punctuation and whitespace don't matter, and neither does
+   *  how an amount is written ('$50' = '50 dollars' = 'fifty dollars': speech-to-text spells numbers out). */
   function requestKey(text) {
-    return str(text).normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');  // NFKD splits off accents (\p{M}), dropped here
+    return str(text).normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase()  // NFKD splits off accents; dropped
+      .replace(NUMBER_RUN_RE, numberWordsToDigits)
+      .replace(/\$\s*(\d+)(?:\.00)?(?!\d)/g, '$1')
+      .replace(/(\d)\s*dollars?(?![\p{L}\p{N}])/gu, '$1')
+      .replace(/[^\p{L}\p{N}]+/gu, '');
   }
 
   function matchTask(text) {
@@ -474,6 +518,14 @@
     if (!key) return null;
     for (const t of S.tasksById.values()) if (requestKey(t.request) === key) return t;
     return null;
+  }
+
+  /** Select sandbox task `t` and put its exact text in the request box. */
+  function selectTask(t) {
+    S.taskId = String(t.id);
+    ui.taskSelect.value = S.taskId;
+    ui.request.value = t.request;
+    ui.taskMeta.textContent = taskMetaText(t);
   }
 
   /** Put text in the request box (voice input). A sandbox task's text selects that task, so its verdict shows.
@@ -484,10 +536,7 @@
     clearFormError();
     ui.requestNote.textContent = '';
     if (t) {
-      S.taskId = String(t.id);
-      ui.taskSelect.value = S.taskId;
-      ui.request.value = t.request;
-      ui.taskMeta.textContent = taskMetaText(t);
+      selectTask(t);
     } else {
       S.taskId = null;
       ui.taskSelect.value = '';
@@ -530,14 +579,18 @@
   }
 
   function setLocked(locked) {
-    const hadRunFocus = document.activeElement === ui.runBtn;
+    const prev = document.activeElement;
     ui.runBtn.disabled = locked;
     ui.request.readOnly = locked;
     ui.taskSelect.disabled = locked;
     for (const fs of ui.optionSets) fs.disabled = locked;
     ui.stopBtn.disabled = !(locked && S.run && !S.run.finished && !S.run.stopRequested);
     ui.stopBtn.textContent = S.run && S.run.stopRequested && !S.run.finished ? 'Stopping…' : 'Stop';
-    if (locked && hadRunFocus) ui.request.focus();
+    // A control that just got disabled (Run, Stop, the task picker, an option radio) drops focus to <body>,
+    // where it is invisible and Space starts the mic. Keep it in the request box instead.
+    if (locked && prev && prev !== document.body && (document.activeElement !== prev || prev.matches(':disabled'))) {
+      ui.request.focus();
+    }
   }
 
   const isRunning = () => Boolean(S.run && !S.run.finished);
@@ -545,7 +598,7 @@
   async function startRun() {
     if (S.starting || isRunning()) return;
     clearFormError();
-    const request = ui.request.value.trim();
+    let request = ui.request.value.trim();
     if (!request) {
       showFormError('Type what you want to do first.');
       ui.request.focus();
@@ -556,9 +609,16 @@
       ui.request.focus();
       return;
     }
+    const voice = voiceFor(request);
+    const match = matchTask(request);
+    if (match && (!S.taskId || S.taskId === String(match.id))) {
+      // typed text that is a sandbox task's text runs as that task (its start page and verdict), as voice does
+      selectTask(match);
+      ui.requestNote.textContent = '';
+      request = ui.request.value.trim();
+    }
     const options = readOptions();
     const taskId = S.taskId;
-    const voice = voiceFor(request);
     S.starting = true;
     if (document.activeElement === ui.runBtn) ui.request.focus();  // Run is disabled until the run ends
     ui.runBtn.disabled = true;
@@ -648,6 +708,7 @@
 
   // --- run lifecycle ---------------------------------------------------------------------
   function attach(runId, info) {
+    const prev = document.activeElement;
     closeStream();
     resetRunView();
     S.run = {
@@ -657,6 +718,7 @@
       options: isObj(info.options) ? info.options : null,
       startUrl: info.startUrl || null,
       focusOnEnd: Boolean(info.focusOnEnd),
+      quiet: Boolean(info.quiet),  // a finished run being shown again: its steps aren't announced
       status: 'starting',
       statusMessage: '',
       finished: false,
@@ -677,6 +739,8 @@
     tabStore.set(RUN_KEY, runId);
     ui.options.open = false;  // give the step log the room; the summary line still shows the choices
     setLocked(true);
+    // the banner (focused after the last run) is hidden now and Options is closed: focus inside either is lost
+    if (prev && prev !== ui.request && (ui.banner.contains(prev) || ui.options.contains(prev))) ui.request.focus();
     setStatus('starting');
     setPending('Starting a browser session…');
     if (!info.quiet) announce(`Run started: ${S.run.request}`);
@@ -918,6 +982,31 @@
     renderStep(s);
     renderViewer();
     scrollLog();
+    announceStep(s, str(ev.kind), p);
+  }
+
+  /** One sentence per step for screen readers, once its outcome is known. The step log is not a live region:
+   *  its timing line and grounder coordinates change several times per step and would be read out each time. */
+  function announceStep(s, kind, p) {
+    if (!S.run || S.run.quiet || s.n === 0) return;
+    const sentence = (t) => (/[.!?…]$/.test(t) ? t : `${t}.`);
+    let tail = null;
+    if (kind === 'action') {
+      if (p.done || p.name === 'done') tail = '';
+      else if (p.ok === false) tail = sentence(`The action failed${p.error ? `: ${oneLine(p.error)}` : ''}`);
+      else if (p.screen_changed === true) tail = 'Screen changed.';
+      else if (p.screen_changed === false) tail = 'No change on screen.';
+      else tail = '';
+    } else if (kind === 'tool_call' && p.valid === false) {
+      tail = 'Invalid tool call, asking again.';
+    } else if (kind === 'error' && p.recoverable === false) {
+      announce(`${stepLabel(s)}: ${sentence(errorLine(p))}`);
+      return;
+    } else if (kind === 'error' && !s.action) {
+      tail = 'Asking again.';
+    }
+    if (tail === null) return;
+    announce(`${stepLabel(s)}: ${sentence(actionWords(s))}${tail ? ` ${tail}` : ''}`);
   }
 
   function pendingFor(call) {
@@ -1072,9 +1161,11 @@
     setText(slots.timing, timing && obsText ? `${timing} ·` : timing);
     slots.screenBtn.hidden = !obsText;
     slots.screenBtn.setAttribute('aria-expanded', String(s.screenOpen));
-    setText(slots.screenBtn, s.screenOpen ? 'Hide screen text' : 'Screen text');
-    slots.screenBtn.setAttribute('aria-label', s.screenOpen ? 'Hide the screen description'
-      : `Show the screen description Lightning read${s.n === 0 ? ' at the start' : ` after step ${s.n}`}`);
+    const screenLabel = s.screenOpen ? 'Hide screen text' : 'Screen text';
+    setText(slots.screenBtn, screenLabel);
+    // the accessible name starts with the visible words, so "click Screen text" works in voice control
+    slots.screenBtn.setAttribute('aria-label',
+      `${screenLabel}: what Lightning read${s.n === 0 ? ' at the start' : ` after step ${s.n}`}`);
     slots.pre.hidden = !(obsText && s.screenOpen);
     setText(slots.pre, obsText);
 
@@ -1236,8 +1327,21 @@
   }
 
   function onThumbKey(e) {
+    moveThumb(e, [...ui.thumbs.children].indexOf(document.activeElement));
+  }
+
+  /** ←/→/Home/End replay steps from where focus lands after a run (the banner) or where it has no other use (the
+   *  page itself, the screenshot), not only from the thumbnails. Fields, radios and the log keep their arrows. */
+  function onPageArrowKey(e) {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && a !== ui.banner && !ui.screen.contains(a)) return;
+    moveThumb(e, [...ui.thumbs.children].findIndex((t) => t.tabIndex === 0));  // the roving tab stop: the step on screen
+  }
+
+  function moveThumb(e, i) {
     const thumbs = [...ui.thumbs.children];
-    const i = thumbs.indexOf(document.activeElement);
     if (i < 0) return;
     let j = null;
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = Math.min(i + 1, thumbs.length - 1);

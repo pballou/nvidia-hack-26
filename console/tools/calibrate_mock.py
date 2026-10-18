@@ -15,7 +15,8 @@ OVERLAYS). The texts were written from screenshots of the real pages, so keep th
 with the sandbox.
 
 For each task the tool:
-  1. resets a fresh sid and opens the start page (1280x800, dsf 1);
+  1. resets a fresh sid and opens the task's start page (1280x800, dsf 1), recorded as the
+     script's start_path: the mock replays a script only from that page;
   2. measures each click target's center with DOM locators at that moment;
   3. checks the center is really clickable (elementFromPoint). If not, it adds a scroll or
      a toast-dismiss step and reports it as "auto" (better: add an explicit step to PLANS);
@@ -624,6 +625,9 @@ async def reveal(page, step: dict) -> tuple[tuple[float, float], list[dict]]:
 def validate_script(script: dict) -> None:
     """The script must look like what Lightning + the grounder could produce: tool calls that fit the agent's
     tool schema (agent/prompts.py), pixel points inside the viewport, a final done, and no selectors."""
+    start = script.get("start_path", "/")
+    if not isinstance(start, str) or not start.startswith("/"):
+        raise CalibrationError(f"start_path must be a page path like /billing, not {start!r}")
     steps = script.get("steps") or []
     if not steps or steps[-1].get("tool") != "done":
         raise CalibrationError("script must end with done")
@@ -701,7 +705,8 @@ async def calibrate(task: dict, plan: dict, sandbox_url: str, headed: bool) -> t
                 what = step.get("testid") or step.get("canvas") or step["tool"]
                 raise CalibrationError(f"step {i} ({what}) on {_path(page)}: {type(e).__name__}: "
                                        f"{str(e).splitlines()[0][:120]}") from e
-    script = {"request": task["request"], "start_screen": plan["start_screen"], "steps": out}
+    script = {"request": task["request"], "start_path": task["start_path"] or "/", "start_screen": plan["start_screen"],
+              "steps": out}
     validate_script(script)
     passed, why = verdict(sandbox_url, sid, task)
     return script, passed, why, auto

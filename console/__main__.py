@@ -1,4 +1,4 @@
-"""python -m console --agent mock|real [--lightning local|hosted] [--host 127.0.0.1] [--port 8095] [--sandbox-url URL] [--runs-dir runs] [--headed] [--step-delay 0.8]"""
+"""python -m console --agent mock|real [--lightning local|hosted] [--asr parakeet|stub] [--host 127.0.0.1] [--port 8095] [--sandbox-url URL] [--runs-dir runs] [--headed] [--step-delay 0.8]"""
 
 from __future__ import annotations
 
@@ -12,6 +12,17 @@ from console.agent_bridge import AgentUnavailable, get_agent
 from console.app import ConsoleSettings, create_app
 
 
+def voice_note(info: dict) -> str | None:
+    """A startup line about voice input when it isn't plain speech recognition (asr.info() -> text or None)."""
+    if info.get("fixed_text"):
+        return ("note: voice input uses the stub (fixed text, not speech recognition); the page labels it "
+                "and never runs it by itself. Use --asr parakeet for real voice input.")
+    if not info.get("available"):
+        return (f"warning: voice input is off: {info.get('error') or 'no speech recognizer'}. The page turns it "
+                "on by itself once the recognizer answers.")
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m console", description="GUI assist console (FastAPI + one static page).")
     ap.add_argument("--agent", choices=("mock", "real"), default="mock",
@@ -19,7 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lightning", choices=("local", "hosted"), default="local",
                     help="initial Lightning toggle: local = official BF16 on :8000 (fast), hosted = build.nvidia.com API")
     ap.add_argument("--asr", choices=sorted(asr.ENGINES), default=None,
-                    help="voice input engine (local only); default $CONSOLE_ASR or stub")
+                    help="voice input engine, local only (default $CONSOLE_ASR or parakeet): parakeet = NVIDIA "
+                         "Parakeet TDT 0.6B v3 via scripts/run_asr.sh (voice stays off until it answers); "
+                         "stub = fixed text, not speech recognition, and never auto-runs (UI testing only)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8095)
     ap.add_argument("--sandbox-url", default="http://127.0.0.1:8090")
@@ -45,10 +58,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"warning: sandbox not reachable at {settings.sandbox_url} ({type(e).__name__}); runs will fail "
               f"until it is up (scripts/run_sandbox.sh)", file=sys.stderr)
 
+    voice = asr.info()  # one /health check of the sidecar
+    note = voice_note(voice)
+    if note:
+        print(note, file=sys.stderr, flush=True)
+
     import uvicorn
 
     print(f"GUI assist console: http://{settings.host}:{settings.port}  "
-          f"(agent={settings.agent}, lightning={settings.default_lightning}, sandbox={settings.sandbox_url}, headed={settings.headed})", flush=True)
+          f"(agent={settings.agent}, lightning={settings.default_lightning}, sandbox={settings.sandbox_url}, "
+          f"headed={settings.headed}, asr={voice.get('label')}{'' if voice.get('available') else ' (off)'})",
+          flush=True)
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port, log_level="info",
                 timeout_graceful_shutdown=3)
     return 0

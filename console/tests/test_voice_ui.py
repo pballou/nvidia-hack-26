@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import time
 import wave
 from dataclasses import dataclass, field
@@ -33,8 +34,10 @@ FAKE_MIC = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-strea
 # Keeps every getUserMedia stream and AudioContext, so a test can check the mic was released after each recording.
 SPY = """(() => {
   const md = navigator.mediaDevices, gum = md.getUserMedia.bind(md), AC = window.AudioContext;
-  window.__streams = []; window.__contexts = [];
-  md.getUserMedia = async (c) => { window.__gumArgs = c; const s = await gum(c); window.__streams.push(s); return s; };
+  window.__streams = []; window.__contexts = []; window.__gumCalls = 0;
+  md.getUserMedia = async (c) => {
+    window.__gumCalls += 1; window.__gumArgs = c; const s = await gum(c); window.__streams.push(s); return s;
+  };
   window.AudioContext = function (...a) { const c = new AC(...a); window.__contexts.push(c); return c; };
   window.AudioContext.prototype = AC.prototype;
 })();"""
@@ -130,7 +133,10 @@ class Voice:
 
     def release(self, body: dict) -> None:
         for r in self.held:
-            r.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+            try:
+                r.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+            except Exception:  # the page aborted it (a cancelled transcription)
+                pass
         self.held.clear()
 
     def assert_clean(self, allow_http_errors: bool = False) -> None:
@@ -195,7 +201,7 @@ def test_push_to_talk_fills_selects_and_runs_a_sandbox_task(voice, fast_console)
     v = voice
     open_console(v, fast_console)
     s = v.state()
-    assert s["mic"] == "idle" and s["label"] == "Speak" and s["pressed"] == "false" and not s["disabled"]
+    assert s["mic"] == "idle" and s["label"] == "Speak" and s["pressed"] is None and not s["disabled"]
     assert s["hint"] == "Or hold Right Option to talk, release to send."
 
     # hold Right Option in the request box: listening, with a live level from the fake mic's beeps
@@ -204,14 +210,16 @@ def test_push_to_talk_fills_selects_and_runs_a_sandbox_task(voice, fast_console)
     v.pg.keyboard.down("AltRight")
     v.wait_mic("listening")
     s = v.state()
-    assert s["pressed"] == "true" and s["label"] == "Stop listening" and s["status"] == "Listening… release to send"
+    assert s["pressed"] is None and s["label"] == "Stop listening" and s["status"] == "Listening… release to send"
     v.wait("parseFloat(document.querySelector('#mic-btn').style.getPropertyValue('--level')) > 0.05")
     time.sleep(0.8)
     v.pg.keyboard.up("AltRight")
     v.wait_mic("transcribing")
     s = v.state()
     assert s["label"] == "Transcribing…" and s["status"] == "Transcribing…" and s["request"] == ""  # Option typed nothing
-    assert v.pg.get_attribute("#mic-btn", "aria-disabled") == "true"
+    # the button cancels the transcription now, and its name says so
+    assert v.pg.get_attribute("#mic-btn", "aria-disabled") is None
+    assert v.pg.get_attribute("#mic-btn", "aria-label") == "Transcribing… press to cancel"
 
     # the upload: 16 kHz mono PCM16 WAV, raw body, Content-Type audio/wav; the mic is released
     assert len(v.wavs) == 1 and v.content_types == ["audio/wav"]
@@ -413,7 +421,8 @@ def test_no_recognizer_disables_the_mic(voice, fast_console):
     s = v.state()
     assert s["disabled"] and s["mic"] == "off", s
     assert s["hint"] == ("Voice input is off: the speech recognizer (Parakeet) isn’t available: "
-                         "ASR engine 'parakeet' failed to load: No module named 'nemo'.")
+                         "ASR engine 'parakeet' failed to load: No module named 'nemo'. "
+                         "This checks again every few seconds and turns voice input on by itself.")
     v.pg.focus("#request")
     v.pg.keyboard.down("AltRight")
     time.sleep(0.3)
@@ -464,4 +473,256 @@ def test_push_to_talk_key_setting(voice, fast_console):
     assert v.pg.text_content("#ptt-key") == "Right Option" and v.pg.is_hidden("#ptt-reset")
     assert v.pg.evaluate("localStorage.getItem('gui-assist.ptt-key')") is None
     assert v.state()["active"] == "ptt-change"
+    v.assert_clean()
+
+
+def patch_asr(v: Voice, asr_info: dict | None, calls: list | None = None):
+    """Route /api/config through the live backend with its "asr" replaced (None = left alone). Returns a setter."""
+    current = {"asr": asr_info}
+
+    def patch(r):
+        resp = r.fetch()
+        cfg = resp.json()
+        if calls is not None:
+            calls.append(time.time())
+        if current["asr"] is not None:
+            cfg["asr"] = current["asr"]
+        r.fulfill(response=resp, body=json.dumps(cfg), content_type="application/json")
+
+    v.pg.route("**/api/config", patch)
+    return lambda value: current.update(asr=value)
+
+
+def test_recognizer_coming_up_turns_voice_on_by_itself(voice, fast_console):
+    v = voice
+    calls: list = []
+    set_asr = patch_asr(v, {"available": False, "model": "parakeet", "label": "Parakeet TDT 0.6B v3",
+                            "error": "Parakeet server at http://127.0.0.1:8096 not ready yet (HTTP 503)"}, calls)
+    open_console(v, fast_console)
+    s = v.state()
+    assert s["mic"] == "off" and s["disabled"], s
+    assert s["hint"] == ("Voice input is off: the speech recognizer (Parakeet TDT 0.6B v3) isn’t available: "
+                         "Parakeet server at http://127.0.0.1:8096 not ready yet (HTTP 503). "
+                         "This checks again every few seconds and turns voice input on by itself.")
+    set_asr(None)  # the sidecar finished loading: the backend's own /api/config now says available
+    v.wait_mic("idle", timeout=8)
+    s = v.state()
+    assert not s["disabled"] and s["status"] == "Voice input is available again." and s["tone"] == "ok", s
+    assert s["hint"] == "Or hold Right Option to talk, release to send."
+    assert len(calls) == 2, calls  # the page load, then one check about 4 s later
+    assert 3.5 < calls[1] - calls[0] < 6, calls
+    time.sleep(4.5)
+    assert len(calls) == 2, calls  # voice is on: no more checks
+    v.assert_clean()
+
+
+def test_explicit_stub_is_labelled_and_never_runs_by_itself(voice, fast_console):
+    """`--asr stub` (/api/config asr.fixed_text): the page says it's fixed text, and never auto-runs it."""
+    v = voice
+    patch_asr(v, {"available": True, "model": "stub", "label": "stub (fixed text)", "fixed_text": True})
+    open_console(v, fast_console)
+    s = v.state()
+    assert s["mic"] == "idle" and s["hint"] == ("Voice input is a stub: it fills in fixed text, whatever you say, "
+                                                "and never runs it by itself. Hold Right Option to try it."), s
+    assert v.pg.text_content("#asr-note").startswith("Voice input is the stub (stub (fixed text)): it recognizes no")
+    v.pg.evaluate("document.activeElement.blur()")
+    v.hold("AltRight", 0.4)
+    v.wait_mic("done")
+    s = v.state()
+    assert s["request"] == TASK_REQUEST and s["task"] == TASK and s["countdown"] is None, s
+    assert re.fullmatch(rf"Stub \(fixed text, \d+ ms\): {STUB_TEXT}", s["heard"]), s
+    assert s["status"] == (f"The stub’s fixed text (not what you said), “{STUB_TEXT}” (a sandbox task) is in the "
+                           "request box. The stub never runs by itself: press Enter in the request box to run it."), s
+    time.sleep(2.0)  # past any countdown
+    assert not v.run_bodies and v.state()["run"] == "idle"
+    v.assert_clean()
+
+
+def test_stop_phrases(voice, slow_console):
+    v = voice
+    open_console(v, slow_console)
+    v.pg.evaluate("document.activeElement.blur()")
+
+    # with nothing running, a stop phrase starts nothing
+    for phrase in ["Stop it.", "Cancel that.", "Please stop.", "stop stop", "Stop, stop!", "STOP!", "stop the run"]:
+        v.say_text(phrase)
+        v.hold("AltRight", 0.3)
+        v.wait_status(f"Heard: “{phrase}”. Nothing is running, so there’s nothing to stop.")
+        s = v.state()
+        assert s["countdown"] is None and s["request"] == "", (phrase, s)
+    time.sleep(1.8)  # past a 1.5 s countdown
+    assert not v.run_bodies
+
+    # a request that only starts with "stop" is a request
+    v.say_text("Stop sending me promotions. No emails, no texts, no push notifications.")
+    v.hold("AltRight", 0.3)
+    v.wait_mic("done")
+    s = v.state()
+    assert s["task"] == "stop-promotions" and s["countdown"], s
+    v.pg.keyboard.press("Escape")
+    assert v.state()["countdown"] is None and not v.run_bodies
+
+    # during a run, "Stop it." and "Cancel that." stop it
+    for phrase in ["Stop it.", "Cancel that."]:
+        v.pg.select_option("#task-select", TASK)
+        v.pg.click("#run-btn")
+        v.wait("[...document.querySelectorAll('#step-log .step-action')]"
+               ".some(e => e.textContent.startsWith('Clicking: '))", timeout=30)
+        v.say_text(phrase)
+        v.pg.evaluate("document.activeElement.blur()")
+        v.hold("AltRight", 0.3)
+        v.wait_status("Stopping")
+        v.pg.wait_for_selector("#banner:not([hidden])", timeout=30000)
+        assert v.pg.get_attribute("#banner", "data-tone") == "stopped", phrase
+        assert v.state()["request"] == TASK_REQUEST, phrase  # the stop phrase didn't touch the box
+    assert [b["task_id"] for b in v.run_bodies] == [TASK, TASK]
+    v.assert_clean()
+
+
+def test_slow_transcription_can_be_cancelled_and_never_replaces_typing(voice, fast_console):
+    v = voice
+    open_console(v, fast_console)
+    late = {"text": STUB_TEXT, "duration_s": 0.6, "latency_ms": 5000.0, "model": "test"}
+
+    # Esc cancels a transcription that is taking long; its late reply changes nothing
+    v.reply = ("hold",)
+    v.pg.evaluate("document.activeElement.blur()")
+    v.hold("AltRight", 0.4)
+    v.wait_mic("transcribing")
+    v.pg.keyboard.press("Escape")
+    s = v.state()
+    assert s["mic"] == "idle" and s["status"] == "Transcription cancelled. Nothing will run.", s
+    v.release(late)
+    time.sleep(0.3)
+    s = v.state()
+    assert s["request"] == "" and s["heard"] is None and s["countdown"] is None and s["mic"] == "idle", s
+
+    # so does the mic button (not the second half of a double-click, though)
+    v.hold("AltRight", 0.4)
+    v.wait_mic("transcribing")
+    time.sleep(0.7)
+    v.pg.click("#mic-btn")
+    s = v.state()
+    assert s["mic"] == "idle" and s["status"] == "Transcription cancelled. Nothing will run.", s
+    v.release(late)
+
+    # typing meanwhile: the late transcript neither replaces the text nor runs
+    v.hold("AltRight", 0.4)
+    v.wait_mic("transcribing")
+    v.pg.click("#request")
+    v.pg.keyboard.type("Download my September statement.")
+    v.release(late)
+    v.wait_mic("done")
+    s = v.state()
+    assert s["request"] == "Download my September statement." and s["task"] == "" and s["countdown"] is None, s
+    assert s["status"] == (f"Heard: “{STUB_TEXT}”. You changed the request meanwhile, so yours was kept and nothing "
+                           "runs by itself."), s
+    assert s["heard"] == f"Heard (stub, 5000 ms): {STUB_TEXT}", s
+    time.sleep(1.8)
+    assert not v.run_bodies and v.state()["run"] == "idle" and len(v.wavs) == 3
+    v.assert_clean(allow_http_errors=True)
+
+
+def test_a_transcript_over_500_characters_is_cut_and_not_run(voice, fast_console):
+    v = voice
+    open_console(v, fast_console)
+    said = " ".join(f"part {i} of my very long request" for i in range(25))
+    assert len(said) > 500
+    v.say_text(said)
+    v.pg.evaluate("document.activeElement.blur()")
+    v.hold("AltRight", 0.4)
+    v.wait_mic("done")
+    s = v.state()
+    kept = s["request"]
+    assert 450 < len(kept) <= 500 and said.startswith(kept) and said[len(kept)] == " ", kept  # cut between words
+    assert s["countdown"] is None and s["active"] == "request", s
+    assert s["status"] == (f"Too long: you said {len(said)} characters and a request holds 500 at most. The request "
+                           f"box has the first {len(kept)}; check it, then press Enter to run it."), s
+    assert s["heard"].endswith(f"{said} [too long: the request box kept the first {len(kept)} characters]"), s
+    time.sleep(1.8)
+    assert not v.run_bodies
+
+    # Enter runs exactly what the box shows; the logs get the text that was used
+    v.pg.keyboard.press("Enter")
+    v.pg.wait_for_selector("#banner:not([hidden])", timeout=60000)
+    (body,) = v.run_bodies
+    assert body["request"] == kept and body["voice"]["text"] == kept, body
+    v.assert_clean()
+
+
+def test_option_chords_in_a_text_field_never_touch_the_mic(voice, fast_console):
+    v = voice
+    open_console(v, fast_console)
+    v.pg.focus("#request")
+    # Option+E (é on a Mac), Option+Shift+2 (€) and a quick tap: silent, and no getUserMedia at all
+    v.pg.keyboard.down("AltRight")
+    v.pg.keyboard.press("KeyE")
+    v.pg.keyboard.up("AltRight")
+    v.pg.keyboard.down("AltRight")
+    time.sleep(0.08)
+    v.pg.keyboard.down("Shift")
+    v.pg.keyboard.press("Digit2")
+    v.pg.keyboard.up("Shift")
+    v.pg.keyboard.up("AltRight")
+    v.pg.keyboard.down("AltRight")
+    time.sleep(0.08)
+    v.pg.keyboard.up("AltRight")
+    time.sleep(0.4)
+    s = v.state()
+    assert v.pg.evaluate("window.__gumCalls") == 0 and s["mic"] == "idle" and s["status"] == "", s
+    assert s["active"] == "request", s
+
+    # held alone past the short wait, it is push-to-talk as before
+    v.say_text("")
+    v.hold("AltRight", 0.4)
+    v.wait_status("Didn’t catch that")
+    assert v.pg.evaluate("window.__gumCalls") == 1 and len(v.wavs) == 1
+    v.assert_clean()
+
+
+def test_after_voice_setting(voice, fast_console):
+    v = voice
+    open_console(v, fast_console)
+    sel = "#voice-autorun"
+    assert v.pg.evaluate("document.getElementById('voice-autorun').closest('#options') !== null")
+    assert v.pg.text_content("label[for='voice-autorun']") == "After voice input:"
+    opts = v.pg.eval_on_selector_all(f"{sel} option", "els => els.map(o => [o.value, o.textContent])")
+    assert opts == [["1.5", "run in 1.5 s"], ["5", "run in 5 s"], ["off", "don’t auto-run"]]
+    assert v.pg.input_value(sel) == "1.5"
+    stored = "localStorage.getItem('gui-assist.voice-autorun')"
+
+    # don't auto-run: the transcript waits in the box
+    v.pg.select_option(sel, "off")
+    assert v.pg.evaluate(stored) == "off"
+    v.say_text("Please water my plants")
+    v.pg.evaluate("document.activeElement.blur()")
+    v.hold("AltRight", 0.4)
+    v.wait_mic("done")
+    s = v.state()
+    assert s["request"] == "Please water my plants" and s["countdown"] is None, s
+    assert s["status"] == "Heard: “Please water my plants”. Press Enter in the request box to run it.", s
+    time.sleep(1.8)
+    assert not v.run_bodies
+
+    # 5 s: still counting after 2 s; the screen-reader text says 5 seconds
+    v.pg.select_option(sel, "5")
+    v.pg.evaluate("document.activeElement.blur()")
+    v.hold("AltRight", 0.4)
+    v.wait_mic("done")
+    s = v.state()
+    assert re.fullmatch(r"Running in (5\.0|4\.\d) s — press Esc to cancel", s["countdown"] or ""), s
+    assert v.pg.text_content("#voice-status .visually-hidden") == " Runs in 5 seconds. Escape stops it."
+    time.sleep(2.0)
+    assert v.state()["countdown"] is not None and not v.run_bodies
+    v.pg.keyboard.press("Escape")
+    assert v.state()["countdown"] is None
+
+    # it survives a reload; the default removes the stored choice
+    v.pg.reload()
+    open_console(v, fast_console)
+    assert v.pg.input_value(sel) == "5"
+    v.pg.select_option(sel, "1.5")
+    assert v.pg.evaluate(stored) is None
+    time.sleep(0.5)
+    assert not v.run_bodies
     v.assert_clean()

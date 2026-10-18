@@ -5,29 +5,44 @@
  * page (wav.js), and sent only to this console's backend (console/asr.py runs a local engine).
  *
  * Flow: press Speak (or hold the push-to-talk key) -> "Listening" with a live level meter -> release / Stop
- * listening -> "Transcribing" -> the text goes into the request box (a sandbox task's text selects that task) ->
- * a 1.5 s countdown, then the run starts (Esc or Cancel stops the countdown). While a run is going, saying "stop"
- * or "cancel" stops it; anything else only fills the box.
+ * listening -> "Transcribing" (Esc or the mic button cancels it) -> the text goes into the request box (a sandbox
+ * task's text selects that task) -> a 1.5 s countdown, then the run starts (Esc or Cancel stops the countdown).
+ * Options sets what happens after voice input: run in 1.5 s, run in 5 s, or don't auto-run (localStorage).
+ * Nothing runs by itself when the transcript is over 500 characters (the box gets the first part), when the user
+ * edited the request while it was transcribing (their text is kept), or when the engine is the `--asr stub`
+ * (fixed text, labelled as such). While a run is going, a stop phrase ("stop", "stop it", "cancel that",
+ * "please stop", ...) stops it; anything else only fills the box. With nothing running, a stop phrase starts
+ * nothing. While voice input is off because the recognizer isn't up, /api/config is checked again every 4 s.
  *
  * Push-to-talk: hold Right Option (event.code AltRight; configurable in Options, stored in localStorage), or hold
- * Space while focus is on the page itself (not a field, button, link or other control, where Space keeps its
- * usual meaning). Every state change is announced in #voice-status (role=status), which is also the visible line
- * under the mic. Nothing here throws into the page: every failure becomes a message.
+ * Space while focus is on the page itself (not a field, button, link, scrollable region or other control, where
+ * Space keeps its usual meaning). A modifier key held in a text field opens the mic only after ~200 ms alone, so
+ * Option+E (é) and other chords never touch the microphone. Every state change is announced in #voice-status
+ * (role=status), which is also the visible line under the mic. Nothing here throws into the page: every failure
+ * becomes a message.
  */
 'use strict';
 
 (() => {
   const PTT_STORE = 'gui-assist.ptt-key';
   const DEFAULT_PTT = 'AltRight';
+  const AUTORUN_STORE = 'gui-assist.voice-autorun';
+  const AUTORUN_CHOICES = [['1.5', 'run in 1.5 s'], ['5', 'run in 5 s'], ['off', 'don’t auto-run']];
+  const DEFAULT_AUTORUN = '1.5';
   const TARGET_RATE = 16000;
   const MAX_SECONDS = 30;
   const MIN_SECONDS = 0.25;
-  const COUNTDOWN_MS = 1500;
+  const REQUEST_MAX = 500;  // the request box's limit (POST /api/run)
   const TRANSCRIBE_TIMEOUT_MS = 60000;
+  const CANCEL_GRACE_MS = 600;  // a mic click this soon after "Transcribing" is a double-click, not a cancel
+  const ARM_MS = 200;  // a modifier push-to-talk key in a text field must be held alone this long
+  const RECHECK_MS = 4000;  // voice input off because the recognizer isn't up: ask /api/config again
   const FLUSH_TIMEOUT_MS = 300;
   const DONE_MS = 2500;
   const SILENT_RMS = 0.002;  // about -54 dBFS: a muted or dead microphone
-  const STOP_WORDS = new Set(['stop', 'cancel']);
+  // A whole transcript that means "stop", after lowercasing and turning punctuation into spaces. Anchored at both
+  // ends with a closed list of words, so a request such as "Stop sending me promotions." is not a stop.
+  const STOP_RE = /^(?:(?:please|ok|okay|hey) )?(?:stop|cancel)(?: (?:it|that|this|now|the run|everything|please|stop|cancel))*$/;
   const MIC_CONSTRAINTS = { audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } };
 
   const platform = String((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '');
@@ -49,9 +64,13 @@
     state: 'off',        // off | idle | starting | listening | transcribing | done | error
     rec: null,           // the recording in progress (see startRecording)
     held: null,          // event.code of the key holding push-to-talk right now
+    armed: 0,            // timer: a modifier held in a text field, not recording yet (see onKeyDown)
     pttCode: DEFAULT_PTT,
     capturing: false,    // Options: waiting for the new push-to-talk key
-    countdown: null,     // {endsAt, timer, text}
+    autorun: DEFAULT_AUTORUN,  // Options: what happens after voice input ('1.5' | '5' | 'off')
+    countdown: null,     // {endsAt, ms, timer}
+    tx: null,            // the transcription in flight: {ctrl, since, request, task, edited}
+    recheck: 0,          // timer: the next /api/config check while the recognizer is down
     heard: null,         // {request, used}: the last transcript put in the box
     doneTimer: null,
     rafId: 0,
@@ -81,6 +100,23 @@
 
   function asrLabel() {
     return oneLine(V.asr && (V.asr.label || V.asr.model)) || 'local speech recognizer';
+  }
+
+  /** `--asr stub`: the backend returns fixed text, not what was said (/api/config asr.fixed_text). */
+  const isFixedText = () => Boolean(V.asr && V.asr.fixed_text === true);
+
+  /** True if the whole transcript asks to stop ("Stop.", "stop it", "Cancel that.", "please stop", "stop stop"). */
+  function isStopIntent(text) {
+    return STOP_RE.test(str(text).toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/g, ' ').trim());
+  }
+
+  /** `s` cut to at most `max` characters, at a word boundary when there is one in the second half. */
+  function cutToWord(s, max) {
+    if (s.length <= max) return s;
+    const head = s.slice(0, max);
+    if (s[max] === ' ') return head.trimEnd();
+    const sp = head.lastIndexOf(' ');
+    return (sp > max / 2 ? head.slice(0, sp) : head).trimEnd();
   }
 
   /** Show `text` under the mic and announce it (role=status). tone: '' | 'ok' | 'warn' | 'error'. srExtra is read
@@ -137,14 +173,36 @@
   /** Modifier and function keys don't type, so they work as push-to-talk anywhere, even in the request box. */
   const worksEverywhere = (code) => MODIFIER_RE.test(code) || FUNCTION_RE.test(code);
 
-  /** A control where Space (or a typing key) already means something: fields, buttons, links, custom widgets. */
+  /** A control where Space (or a typing key) already means something: fields, buttons, links, custom widgets,
+   *  scrollable regions. */
   function isInteractive(node) {
     if (!node || node === document.body || node === document.documentElement) return false;
     if (node.isContentEditable) return true;
     if (INTERACTIVE_TAGS.has(node.tagName)) return true;
     if (node.tagName === 'A' && node.hasAttribute('href')) return true;
     if (INTERACTIVE_ROLES.has(str(node.getAttribute('role')).toLowerCase())) return true;
-    return node.hasAttribute('tabindex') && node.tabIndex >= 0;  // e.g. the scrollable step log: Space scrolls it
+    if (node.hasAttribute('tabindex') && node.tabIndex >= 0) return true;  // e.g. the scrollable step log
+    return isScroller(node);
+  }
+
+  /** A box that scrolls and has more to show. Chromium lets Tab focus such a box (the "Screen text" of a step,
+   *  for example) even without a tabindex, and then Space scrolls it. */
+  function isScroller(node) {
+    if (!(node instanceof Element)) return false;
+    const cs = window.getComputedStyle(node);
+    const scrolls = (v) => v === 'auto' || v === 'scroll';
+    return (scrolls(cs.overflowY) && node.scrollHeight > node.clientHeight)
+      || (scrolls(cs.overflowX) && node.scrollWidth > node.clientWidth);
+  }
+
+  const NON_TEXT_INPUTS = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range',
+    'reset', 'submit']);
+
+  /** Where a modifier types characters (macOS Option+E is é, AltGr on Windows): text inputs and the request box. */
+  function isTextField(node) {
+    if (!node) return false;
+    if (node.isContentEditable || node.tagName === 'TEXTAREA') return true;
+    return node.tagName === 'INPUT' && !NON_TEXT_INPUTS.has(str(node.type).toLowerCase());
   }
 
   function pttKeyHere(code) {
@@ -184,20 +242,29 @@
       el.hint.replaceChildren(document.createTextNode(checking ? 'Checking voice input…' : `Voice input is off: ${why}`));
     } else {
       if (V.state === 'off') setState('idle');
-      if (V.wasOff) {  // e.g. the microphone permission was granted in site settings
+      if (V.wasOff) {  // e.g. the microphone permission was granted in site settings, or the recognizer came up
         V.wasOff = false;
         say('Voice input is available again.', { tone: 'ok' });
       }
-      el.hint.dataset.tone = '';
       const k = keyName(V.pttCode);
-      el.hint.replaceChildren(document.createTextNode('Or hold '), kbd(k),
-        document.createTextNode(' to talk, release to send.'));
+      if (isFixedText()) {
+        el.hint.dataset.tone = 'off';
+        el.hint.replaceChildren(document.createTextNode('Voice input is a stub: it fills in fixed text, whatever you '
+          + 'say, and never runs it by itself. Hold '), kbd(k), document.createTextNode(' to try it.'));
+      } else {
+        el.hint.dataset.tone = '';
+        el.hint.replaceChildren(document.createTextNode('Or hold '), kbd(k),
+          document.createTextNode(' to talk, release to send.'));
+      }
     }
     if (el.kbdWrap) el.kbdWrap.hidden = !on;
     setText(el.kbdPtt, keyName(V.pttCode));
     if (el.asrNote) {
       el.asrNote.hidden = !on;
-      setText(el.asrNote, `Speech is recognized on this computer (${asrLabel()}); audio goes only to this console.`);
+      setText(el.asrNote, isFixedText()
+        ? `Voice input is the stub (${asrLabel()}): it recognizes no speech. For real voice input, start `
+          + 'scripts/run_asr.sh and the console with --asr parakeet.'
+        : `Speech is recognized on this computer (${asrLabel()}); audio goes only to this console.`);
     }
   }
 
@@ -236,10 +303,11 @@
     window.clearTimeout(V.doneTimer);
     mic.dataset.state = state;
     const listening = state === 'starting' || state === 'listening';
-    mic.setAttribute('aria-pressed', String(listening));
+    // A plain action button: its name says what pressing it does ("Speak", "Stop listening"), so no aria-pressed.
+    mic.removeAttribute('aria-pressed');
     mic.disabled = state === 'off';
-    if (state === 'transcribing') mic.setAttribute('aria-disabled', 'true');
-    else mic.removeAttribute('aria-disabled');
+    if (state === 'transcribing') mic.setAttribute('aria-label', 'Transcribing… press to cancel');
+    else mic.removeAttribute('aria-label');
     setText(el.micLabel, listening ? 'Stop listening' : (state === 'transcribing' ? 'Transcribing…' : 'Speak'));
     el.timer.hidden = !listening;
     if (!listening) mic.style.setProperty('--level', '0');
@@ -458,10 +526,19 @@
 
   // --- transcription ------------------------------------------------------------------------
   async function transcribe(wav, info) {
+    // What the request box held when the recording was sent: if the user changes it meanwhile, the late
+    // transcript must not replace their text (see onTranscript).
+    const tx = {
+      ctrl: typeof AbortController === 'function' ? new AbortController() : null,
+      since: performance.now(),
+      request: el.request ? el.request.value : '',
+      task: el.taskSelect ? el.taskSelect.value : '',
+      edited: false,
+    };
+    V.tx = tx;
     setState('transcribing');
     say(info.limit ? `Reached the ${MAX_SECONDS}-second limit. Transcribing…` : 'Transcribing…');
-    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-    const timer = window.setTimeout(() => { if (ctrl) ctrl.abort(); }, TRANSCRIBE_TIMEOUT_MS);
+    const timer = window.setTimeout(() => { if (tx.ctrl) tx.ctrl.abort(); }, TRANSCRIBE_TIMEOUT_MS);
     let res;
     let data = {};
     try {
@@ -470,17 +547,21 @@
         headers: { 'Content-Type': 'audio/wav', Accept: 'application/json' },
         body: wav,
         cache: 'no-store',
-        signal: ctrl ? ctrl.signal : undefined,
+        signal: tx.ctrl ? tx.ctrl.signal : undefined,
       });
       data = await res.json().catch(() => ({}));
     } catch (err) {
       window.clearTimeout(timer);
+      if (V.tx !== tx) return;  // cancelled with Esc or the mic button; that already said so
+      V.tx = null;
       showError(err && err.name === 'AbortError'
         ? `Transcribing took longer than ${TRANSCRIBE_TIMEOUT_MS / 1000} s, so it was abandoned. Try again.`
         : 'Couldn’t reach the console backend to transcribe. Is it still running?');
       return;
     }
     window.clearTimeout(timer);
+    if (V.tx !== tx) return;  // cancelled meanwhile: a late reply changes nothing
+    V.tx = null;
     if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
     if (!res.ok) {
       const msg = oneLine(data.error);
@@ -491,10 +572,21 @@
       return;
     }
     try {
-      onTranscript(data, info);
+      onTranscript(data, info, tx);
     } catch (err) {
       showError(`Something went wrong with the transcript: ${oneLine(err && err.message) || 'unknown error'}`);
     }
+  }
+
+  /** Esc or the mic button while transcribing: drop the recording; its reply, if it still comes, is ignored. */
+  function cancelTranscribe() {
+    const tx = V.tx;
+    if (!tx || V.state !== 'transcribing') return false;
+    V.tx = null;
+    if (tx.ctrl) tx.ctrl.abort();
+    setState(isAvailable() ? 'idle' : 'off');
+    say('Transcription cancelled. Nothing will run.', { tone: 'warn' });
+    return true;
   }
 
   function showError(message) {
@@ -502,7 +594,7 @@
     say(message.replace(/\.\.$/, '.'), { tone: 'error' });
   }
 
-  function onTranscript(data, info) {
+  function onTranscript(data, info, tx) {
     const C = window.AcmeConsole;
     const text = oneLine(data.text);
     if (!text) {
@@ -512,43 +604,78 @@
       return;
     }
     const latency = Number(data.latency_ms);
+    const ms = Number.isFinite(latency) ? `, ${Math.round(latency)} ms` : '';
+    const fixed = isFixedText();
     const label = oneLine(V.asr && V.asr.label) || oneLine(data.model) || 'ASR';
-    showHeard(`Heard (${label}${Number.isFinite(latency) ? `, ${Math.round(latency)} ms` : ''}): ${text}`);
+    showHeard(fixed ? `Stub (fixed text${ms}): ${text}` : `Heard (${label}${ms}): ${text}`);
+    const heard = fixed ? `The stub’s fixed text (not what you said), “${text}”` : `Heard: “${text}”`;
+
+    // The user typed or picked a task while this was transcribing: keep their request, act on nothing.
+    const edited = tx && (tx.edited || (el.request && el.request.value !== tx.request)
+      || (el.taskSelect && el.taskSelect.value !== tx.task));
+    if (edited) {
+      V.heard = { request: null, used: false };
+      setState('done');
+      say(`${heard}. You changed the request meanwhile, so yours was kept and nothing runs by itself.`,
+        { tone: 'warn' });
+      return;
+    }
+
     // For the logs page: console.js sends this with the run only while the box still holds what it produced.
     const voice = { text, model: data.model, latency_ms: data.latency_ms, duration_s: data.duration_s };
-    const command = text.trim().toLowerCase().replace(/[\s\p{P}]+$/u, '');
+    const stop = isStopIntent(text);
     if (C.isRunning()) {
-      if (STOP_WORDS.has(command)) {
+      if (stop) {
         V.heard = { request: null, used: true };
         setState('done');
         say('Stopping', { tone: 'ok' });
         C.stop();
         return;
       }
-      const { request } = C.setRequest(text, voice);
-      V.heard = { request, used: false };
+      const fill = fillBox(text, voice);
+      V.heard = { request: fill.request, used: false };
       setState('done');
-      say(`A run is in progress — say "stop" to stop it. “${request}” is in the request box for later.`,
-        { tone: 'warn' });
+      say(`A run is in progress — say "stop" to stop it. “${fill.request}” is in the request box for later.`
+        + `${fill.cut ? ` What you said was too long (${text.length} characters), so the box has the first part.` : ''}`,
+      { tone: 'warn' });
       return;
     }
-    if (C.isStarting()) {
-      const { request } = C.setRequest(text, voice);
-      V.heard = { request, used: false };
-      setState('done');
-      say(`A run is starting, so “${request}” won’t run by itself. It’s in the request box.`, { tone: 'warn' });
-      return;
-    }
-    if (STOP_WORDS.has(command)) {
+    if (stop) {  // a stop phrase never starts a run
       V.heard = { request: null, used: true };
       setState('done');
-      say(`Heard: “${text}”. Nothing is running, so there’s nothing to stop.`);
+      say(C.isStarting() ? `${heard}. The run is still starting: press Escape once it’s running to stop it.`
+        : `${heard}. Nothing is running, so there’s nothing to stop.`, { tone: C.isStarting() ? 'warn' : '' });
       return;
     }
-    const { taskId, request } = C.setRequest(text, voice);
-    V.heard = { request, used: false };
+    const fill = fillBox(text, voice);
+    V.heard = { request: fill.request, used: false };
     setState('done');
-    startCountdown(request, taskId);
+    const task = fill.taskId ? ' (a sandbox task)' : '';
+    if (C.isStarting()) {
+      say(`A run is starting, so “${fill.request}” won’t run by itself. It’s in the request box.`, { tone: 'warn' });
+    } else if (fill.cut) {
+      say(`Too long: you said ${text.length} characters and a request holds ${REQUEST_MAX} at most. The request `
+        + `box has the first ${fill.request.length}; check it, then press Enter to run it.`, { tone: 'warn' });
+      if (el.request) el.request.focus();
+    } else if (fixed) {
+      say(`${heard}${task} is in the request box. The stub never runs by itself: press Enter in the request box `
+        + 'to run it.', { tone: 'warn' });
+    } else if (!autoRunMs()) {
+      say(`Heard: “${fill.request}”${task}. Press Enter in the request box to run it.`, { tone: 'ok' });
+    } else {
+      startCountdown(fill.request, fill.taskId, autoRunMs());
+    }
+  }
+
+  /** Put the transcript in the request box, cut to the box's 500 characters at a word boundary. */
+  function fillBox(text, voice) {
+    const cut = cutToWord(text, REQUEST_MAX);
+    const shortened = cut.length < text.length;
+    const { taskId, request } = window.AcmeConsole.setRequest(cut, shortened ? { ...voice, text: cut } : voice);
+    if (shortened && el.heard) {
+      showHeard(`${el.heard.textContent} [too long: the request box kept the first ${request.length} characters]`);
+    }
+    return { taskId, request, cut: shortened };
   }
 
   function showHeard(line) {
@@ -563,9 +690,9 @@
   }
 
   // --- auto-run countdown -------------------------------------------------------------------------
-  function startCountdown(request, taskId) {
+  function startCountdown(request, taskId, ms) {
     cancelCountdown('');
-    const cd = { endsAt: performance.now() + COUNTDOWN_MS, timer: 0 };
+    const cd = { endsAt: performance.now() + ms, ms, timer: 0 };
     V.countdown = cd;
     el.countdown.hidden = false;
     renderCountdown(cd);
@@ -574,21 +701,22 @@
       if (performance.now() >= cd.endsAt) finishCountdown(cd);
       else renderCountdown(cd);
     }, 100);
+    // Short, and still true when it's read late: Escape cancels the countdown, and stops the run once it started.
     say(`Heard: “${request}”${taskId ? ' (a sandbox task)' : ''}`, {
-      tone: 'ok', srExtra: `Running in ${COUNTDOWN_MS / 1000} seconds. Press Escape to cancel.`,
+      tone: 'ok', srExtra: `Runs in ${ms / 1000} seconds. Escape stops it.`,
     });
   }
 
   function renderCountdown(cd) {
     const left = Math.max(0, cd.endsAt - performance.now());
     setText(el.countdownText, `Running in ${(Math.ceil(left / 100) / 10).toFixed(1)} s — press Esc to cancel`);
-    el.countdown.style.setProperty('--left', (left / COUNTDOWN_MS).toFixed(3));
+    el.countdown.style.setProperty('--left', (left / cd.ms).toFixed(3));
   }
 
   function finishCountdown(cd) {
     if (V.countdown !== cd) return;
     clearCountdown();
-    const sr = el.status.querySelector('.visually-hidden');  // "Running in 1.5 seconds…" is spent (removal isn't read)
+    const sr = el.status.querySelector('.visually-hidden');  // "Runs in 1.5 seconds…" is spent (removal isn't read)
     if (sr) sr.remove();
     const C = window.AcmeConsole;
     if (C.isRunning() || C.isStarting()) return;
@@ -637,6 +765,7 @@
 
   function beginCapture() {
     if (V.capturing) return;
+    if (V.armed) disarm();
     if (V.rec) stopRecording('cancel', { quiet: true });
     V.capturing = true;
     renderPtt();
@@ -674,7 +803,51 @@
     endCapture(e.code, `Push-to-talk key: ${keyName(e.code)}.${where}`);
   }
 
+  // --- "after voice input" setting ---------------------------------------------------------------
+  function loadAutorun() {
+    const saved = oneLine(prefs.get(AUTORUN_STORE));
+    V.autorun = AUTORUN_CHOICES.some(([v]) => v === saved) ? saved : DEFAULT_AUTORUN;
+  }
+
+  /** ms before a transcript runs by itself; 0 = it never does. */
+  const autoRunMs = () => (V.autorun === 'off' ? 0 : Math.round(Number(V.autorun) * 1000));
+
+  /** Options: "After voice input: run in 1.5 s / run in 5 s / don't auto-run", below the push-to-talk key. */
+  function buildAutorunSetting() {
+    const anchor = document.getElementById('opt-ptt');
+    if (!anchor || document.getElementById('voice-autorun')) return;
+    const select = document.createElement('select');
+    select.id = 'voice-autorun';
+    select.style.width = 'auto';  // next to its label, not the full-width task picker
+    for (const [value, text] of AUTORUN_CHOICES) select.add(new Option(text, value));
+    select.value = V.autorun;
+    const label = document.createElement('label');
+    label.className = 'ptt-title';
+    label.htmlFor = select.id;
+    label.textContent = 'After voice input:';
+    const line = document.createElement('p');
+    line.className = 'ptt-line';
+    line.append(label, select);
+    const wrap = document.createElement('div');
+    wrap.className = 'opt opt-ptt';
+    wrap.id = 'opt-autorun';
+    wrap.append(line);
+    anchor.after(wrap);
+    select.addEventListener('change', () => {
+      V.autorun = AUTORUN_CHOICES.some(([v]) => v === select.value) ? select.value : DEFAULT_AUTORUN;
+      if (V.autorun === DEFAULT_AUTORUN) prefs.del(AUTORUN_STORE);
+      else prefs.set(AUTORUN_STORE, V.autorun);
+      if (!autoRunMs()) cancelCountdown('Auto-run cancelled.');
+    });
+  }
+
   // --- keyboard and pointer ---------------------------------------------------------------------
+  function disarm() {
+    window.clearTimeout(V.armed);
+    V.armed = 0;
+    V.held = null;
+  }
+
   function onKeyDown(e) {
     if (V.capturing) { onCaptureKey(e); return; }
     if (e.key === 'Escape') {
@@ -684,11 +857,21 @@
       } else if (V.rec) {
         e.preventDefault();
         stopRecording('cancel');
+      } else if (V.armed) {
+        disarm();
+      } else if (V.state === 'transcribing') {
+        // During a run, Esc also stops the run (console.js): no preventDefault then.
+        if (!(window.AcmeConsole && window.AcmeConsole.isRunning())) e.preventDefault();
+        cancelTranscribe();
       }
       return;
     }
     if (V.held) {
       if (e.code === V.held) { e.preventDefault(); return; }  // auto-repeat while holding
+      if (V.armed) {  // a chord such as Option+E (é) or a shortcut: it never was push-to-talk, and says nothing
+        disarm();
+        return;
+      }
       if (MODIFIER_RE.test(V.held) && !MODIFIER_RE.test(e.code)) {  // the modifier was part of a shortcut
         stopRecording('cancel', { why: `Cancelled: ${keyName(V.held)} was used with another key. Nothing was sent.` });
       }
@@ -703,22 +886,37 @@
     if (e.repeat) return;
     if (V.rec) return;  // already listening (the Speak button)
     if (V.state === 'transcribing') {
-      say('Still transcribing the last recording…');
+      say('Still transcribing the last recording… Esc cancels it.');
       return;
     }
-    V.held = e.code;
+    const code = e.code;
+    V.held = code;
+    if (MODIFIER_RE.test(code) && isTextField(document.activeElement)) {
+      // In a text field the modifier may be the start of a character (Option+E, AltGr+Q): wait until it has been
+      // held alone for a moment. A chord or a quick release clears this silently, before any getUserMedia.
+      V.armed = window.setTimeout(() => {
+        V.armed = 0;
+        if (V.held === code && !V.rec) startRecording('ptt');
+      }, ARM_MS);
+      return;
+    }
     startRecording('ptt');
   }
 
   function onKeyUp(e) {
     if (!V.held || e.code !== V.held) return;
     e.preventDefault();
+    if (V.armed) { disarm(); return; }  // released before the mic was asked for: nothing happened
     V.held = null;
     stopRecording('send');
   }
 
   function onMicClick() {
-    if (!isAvailable() || V.state === 'transcribing') return;
+    if (V.state === 'transcribing') {  // the button cancels it (not the second click of a double-click)
+      if (V.tx && performance.now() - V.tx.since >= CANCEL_GRACE_MS) cancelTranscribe();
+      return;
+    }
+    if (!isAvailable()) return;
     if (V.rec) stopRecording('send');
     else startRecording('toggle');
   }
@@ -738,6 +936,8 @@
   async function init() {
     if (!grab()) return;
     loadPttKey();
+    loadAutorun();
+    buildAutorunSetting();
 
     el.mic.addEventListener('click', onMicClick);
     el.mic.addEventListener('keydown', (e) => {
@@ -756,13 +956,20 @@
     window.addEventListener('keyup', onKeyUp, true);
     window.addEventListener('blur', () => {
       if (V.capturing) endCapture(null, '');
-      if (V.held) { V.held = null; stopRecording('send'); }  // the key-up will never arrive
+      if (V.armed) disarm();
+      else if (V.held) { V.held = null; stopRecording('send'); }  // the key-up will never arrive
     });
     if (el.request) {
-      el.request.addEventListener('input', () => cancelCountdown('Auto-run cancelled because you edited the request.'));
+      el.request.addEventListener('input', () => {
+        if (V.tx) V.tx.edited = true;  // a transcript still on its way must not replace this
+        cancelCountdown('Auto-run cancelled because you edited the request.');
+      });
     }
     if (el.taskSelect) {
-      el.taskSelect.addEventListener('change', () => cancelCountdown('Auto-run cancelled.'));
+      el.taskSelect.addEventListener('change', () => {
+        if (V.tx) V.tx.edited = true;
+        cancelCountdown('Auto-run cancelled.');
+      });
     }
     document.addEventListener('acme:run-start', (e) => {
       cancelCountdown('');
@@ -802,16 +1009,49 @@
     try {
       cfg = (await window.AcmeConsole.ready).config;
     } catch { /* treated as offline below */ }
+    if (applyAsr(cfg)) scheduleRecheck();
+  }
+
+  /** /api/config's "asr" -> the 'asr' reason. Returns true when checking again can help (the recognizer is down,
+   *  e.g. scripts/run_asr.sh is still loading the model). */
+  function applyAsr(cfg) {
     const asr = cfg && typeof cfg.asr === 'object' && cfg.asr ? cfg.asr : null;
     V.asr = asr || {};
-    if (!cfg) setReason('asr', 'the console backend isn’t reachable.');
-    else if (!asr) setReason('asr', 'this console backend has no speech recognizer (/api/config has no "asr").');
-    else if (asr.available !== true) {
-      setReason('asr', `the speech recognizer (${oneLine(asr.label || asr.model) || 'ASR'}) isn’t available`
-        + `${asr.error ? `: ${oneLine(asr.error)}` : ''}.`);
-    } else {
-      setReason('asr', '');
+    if (!cfg) {
+      setReason('asr', 'the console backend isn’t reachable.');
+      return false;
     }
+    if (!asr) {
+      setReason('asr', 'this console backend has no speech recognizer (/api/config has no "asr").');
+      return false;
+    }
+    if (asr.available === true) {
+      setReason('asr', '');
+      return false;
+    }
+    const err = oneLine(asr.error).replace(/\.+$/, '');
+    setReason('asr', `the speech recognizer (${oneLine(asr.label || asr.model) || 'ASR'}) isn’t available`
+      + `${err ? `: ${err}` : ''}. This checks again every few seconds and turns voice input on by itself.`);
+    return true;
+  }
+
+  function scheduleRecheck() {
+    window.clearTimeout(V.recheck);
+    V.recheck = window.setTimeout(recheckAsr, RECHECK_MS);
+  }
+
+  async function recheckAsr() {
+    V.recheck = 0;
+    if (!V.reasons.has('asr')) return;
+    let cfg = null;
+    if (!document.hidden) {
+      try {
+        const res = await fetch('/api/config', { cache: 'no-store', headers: { Accept: 'application/json' } });
+        if (res.ok) cfg = await res.json();
+      } catch { /* the backend is busy or restarting: try again later */ }
+    }
+    if (!V.reasons.has('asr')) return;
+    if (!cfg || typeof cfg !== 'object' || applyAsr(cfg)) scheduleRecheck();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

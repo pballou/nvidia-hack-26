@@ -99,7 +99,16 @@ def test_config_tasks_and_index(console, tmp_path):
     (static / "app.js").write_text("console.log(1)")
     r = httpx.get(f"{base}/")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"] and "console" in r.text
-    assert httpx.get(f"{base}/static/app.js").text == "console.log(1)"
+    js = httpx.get(f"{base}/static/app.js")
+    assert js.text == "console.log(1)"
+    # /static/* revalidates on every load (an edited console.js must not stay cached under a fresh index.html)
+    assert js.headers["cache-control"] == "no-cache" and js.headers["etag"]
+    again = httpx.get(f"{base}/static/app.js", headers={"If-None-Match": js.headers["etag"]})
+    assert again.status_code == 304 and again.headers["cache-control"] == "no-cache"
+    (static / "app.js").write_text("console.log('edited')")  # another size: a new ETag even within one mtime tick
+    edited = httpx.get(f"{base}/static/app.js", headers={"If-None-Match": js.headers["etag"]})
+    assert edited.status_code == 200 and edited.text == "console.log('edited')"
+    assert r.headers["cache-control"] == "no-store"
 
 
 # --- runs and the SSE stream -----------------------------------------------------------------
@@ -279,9 +288,10 @@ def test_real_agent_unavailable_503(console, monkeypatch):
 # --- mock agent units (headless Chromium against the live sandbox; the 12 tasks are in test_mock_e2e.py) ---
 
 
-def _write_script(tmp_path, steps, request="Mock test: click the middle"):
+def _write_script(tmp_path, steps, request="Mock test: click the middle", **extra):
     path = tmp_path / "scripts.json"
-    path.write_text(json.dumps({"tasks": {"t": {"request": request, "start_screen": "A page.", "steps": steps}}}))
+    path.write_text(json.dumps({"tasks": {"t": {"request": request, "start_screen": "A page.", "steps": steps,
+                                                **extra}}}))
     return path
 
 
@@ -324,9 +334,91 @@ def test_mock_agent_scripted_click_and_overlay(tmp_path, sandbox_url):
     action = next(e for e in events if e["kind"] == "action")
     assert action["payload"]["click"] == {"x": 640.0, "y": 400.0} and isinstance(action["payload"]["screen_changed"], bool)
     assert next(e for e in events if e["kind"] == "tool_call")["payload"]["description"] == "Clicking: the middle of the page"
+    # timings split like agent/session.py: act (the action alone) + settle on the action, screenshot on the observation
+    for e in events:
+        if e["kind"] == "action" and e["payload"]["name"] != "done":
+            assert set(e["timings_ms"]) == {"act", "settle"} and e["timings_ms"]["settle"] >= 250, e
+        elif e["kind"] == "observation":
+            assert set(e["timings_ms"]) == {"screenshot"}, e
+        else:
+            assert "timings_ms" not in e, e  # no plan / ground / summary latency: no model ran
+    # the prompt fields agent/trace.py documents, declared as "mock"
+    assert all((e["payload"]["prompt_version"], e["payload"]["prompt_sha"]) == ("mock", "mock")
+               for e in events if e["kind"] in ("plan", "grounding"))
+    assert all(e["payload"]["summary"] == {"model": "mock (no VLM)", "prompt_version": "mock", "prompt_sha": "mock"}
+               for e in events if e["kind"] == "observation")
     trace = Path(result["trace_dir"])
     assert {p.name for p in trace.iterdir()} == {"events.jsonl", "step_00.png", "step_01.png", "step_01_overlay.png",
                                                  "step_02.png"}
+
+
+def test_mock_script_start_page_matching():
+    """A script replays only from the page it was recorded on: same path and query, sid aside."""
+    script = {"start_path": "/settings?tab=accessibility"}
+    for url in ("http://s/settings?tab=accessibility&sid=x", "http://s/settings?sid=x&tab=accessibility"):
+        assert mock_agent.recorded_elsewhere(script, url) is None, url
+    for url in ("http://s/?sid=x", "http://s/settings?sid=x", "http://s/settings?tab=billing&sid=x"):
+        assert mock_agent.recorded_elsewhere(script, url) == "/settings?tab=accessibility", url
+    assert mock_agent.recorded_elsewhere({"start_path": "/"}, "http://s/?sid=x") is None
+    assert mock_agent.recorded_elsewhere({}, "http://s/messages?sid=x") is None  # older scripts: not checked
+    assert mock_agent.show_start("http://s:1/settings?sid=x&tab=accessibility") == "/settings?tab=accessibility"
+
+
+def test_mock_agent_replays_a_script_only_from_its_start_page(tmp_path, sandbox_url):
+    scripts = _write_script(tmp_path, [
+        {"tool": "scroll", "arguments": {"direction": "down", "amount": "small"}, "reasoning": "Testing.",
+         "screen_after": "The inbox, scrolled."},
+        {"tool": "done", "arguments": {"summary": "Scrolled the inbox.", "success": True}},
+    ], start_path="/messages")
+    result, events = _run_mock(tmp_path, f"{sandbox_url}/messages?sid=mock-test-6", scripts)
+    assert result["success_claimed"] is True and result["summary"] == "Scrolled the inbox."
+
+    result, events = _run_mock(tmp_path, f"{sandbox_url}/?sid=mock-test-7", scripts)  # the typed-text start page
+    assert [e["kind"] for e in events] == ["start", "observation", "plan", "tool_call", "action", "done"]
+    assert result["success_claimed"] is False and result["steps"] == 1
+    assert "Its script for this request starts on /messages, but this run started on /," in result["summary"]
+    assert events[1]["payload"]["observation"]["screen_summary"] == mock_agent.NO_SUMMARY
+    assert events[-1]["payload"]["reason"] == "done" and not [e for e in events if e["kind"] == "error"]
+
+
+def _driver_pids() -> set[int]:
+    """Playwright node drivers started by this test process (`node .../cli.js run-driver`)."""
+    psutil = pytest.importorskip("psutil")
+    out = set()
+    for proc in psutil.Process().children(recursive=True):
+        try:
+            if "run-driver" in " ".join(proc.cmdline()):
+                out.add(proc.pid)
+        except psutil.Error:
+            pass
+    return out
+
+
+def test_open_page_cancelled_while_starting_leaks_no_driver():
+    """A Stop in a mock run's first ~100 ms cancels open_page while Playwright's node driver is starting. That
+    used to skip the driver's cleanup: one ~130 MB node process left per early stop, for the life of the console."""
+    before = _driver_pids()
+
+    async def go():
+        for delay in (0.0, 0.01, 0.03, 0.06, 0.1, 0.3):
+            async def use():
+                async with mock_agent.open_page():
+                    await asyncio.sleep(30)
+
+            task = asyncio.ensure_future(use())
+            await asyncio.sleep(delay)
+            task.cancel()
+            if delay == 0.03:  # a second Stop must not cut the cleanup short either
+                await asyncio.sleep(0.005)
+                task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        deadline = time.time() + 5
+        while _driver_pids() - before and time.time() < deadline:  # a stopped driver exits on its own
+            await asyncio.sleep(0.1)
+        return _driver_pids() - before
+
+    assert asyncio.run(go()) == set()
 
 
 def test_mock_agent_stale_and_malformed_scripts(tmp_path, sandbox_url):

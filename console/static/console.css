@@ -100,6 +100,7 @@ html.hc :focus-visible { outline-width: 4px; }
 
 .app-header {
   display: flex;
+  flex-wrap: wrap;  /* 400% zoom (320 CSS px): the tools wrap below the title instead of scrolling sideways */
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
@@ -111,7 +112,7 @@ html.hc .app-header { border-bottom: 2px solid #ffffff; }
 .brand { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
 .brand h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.01em; }
 .tagline { color: var(--header-muted); font-size: 1rem; }
-.header-tools { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
+.header-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; min-width: 0; }
 
 .badge {
   padding: 0.25rem 0.75rem;
@@ -154,7 +155,8 @@ html.hc .btn-primary:hover:not(:disabled) { background: #ffe866; }
 .btn-quiet:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
 .btn-quiet[aria-pressed="true"],
 .btn-quiet[aria-pressed="true"]:hover:not(:disabled) { background: #ffd400; color: #000000; border-color: #ffd400; }
-.btn-quiet[aria-pressed="true"]::before { content: "\2713"; font-weight: 800; }
+/* `/ ""`: the glyph is decoration, kept out of the accessible name (the first `content` is the fallback) */
+.btn-quiet[aria-pressed="true"]::before { content: "\2713"; content: "\2713" / ""; font-weight: 800; }
 .btn-quiet:focus-visible { outline-color: #7dd3fc; }
 .header-link { text-decoration: none; }
 html.hc .btn-quiet:focus-visible { outline-color: var(--focus); }
@@ -557,15 +559,15 @@ html.hc .step.is-shown { border-color: var(--accent); }
   min-width: 0;
 }
 
-.viewer-bar { display: flex; align-items: center; gap: 0.75rem; }
+.viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; }
 .view-toggle { display: block; }
 .btn-live[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .btn-live[aria-pressed="true"][data-running="true"],
 .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: #ffffff; }
 html.hc .btn-live[aria-pressed="true"][data-running="true"],
 html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #000000; }
-.btn-live[aria-pressed="true"]::before { content: "\25CF"; }
-.btn-live[aria-pressed="false"]::before { content: "\25B6"; font-size: 0.75em; }
+.btn-live[aria-pressed="true"]::before { content: "\25CF"; content: "\25CF" / ""; }
+.btn-live[aria-pressed="false"]::before { content: "\25B6"; content: "\25B6" / ""; font-size: 0.75em; }
 
 .screen { flex: 1 1 0; min-height: 14rem; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .screen-wrap {
@@ -683,6 +685,9 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   .screen-img, .screen-empty { width: 100%; }
   .banner { grid-template-columns: 1fr; }
   .banner-agent { border-left: 0; padding-left: 0; }
+}
+@media (max-width: 480px) {
+  .badge { white-space: normal; border-radius: var(--radius); }
 }
 
 @media (forced-colors: active) {

@@ -10,7 +10,9 @@ is never read here: the verdict is the one the console recorded in console.json.
 Honesty rules: a field the trace doesn't have is null (the page shows "—"); nothing is estimated.
 A run is "mock" when any payload says "mock": true (or console.json says the console ran the mock).
 For mock runs the config fallbacks for model names are skipped: the mock runs no Lightning, grounder
-or VLM, so only names the mock itself declares are shown.
+or VLM, so only names the mock itself declares are shown. Prompt identity (agent/trace.py: plan
+prompt_version + prompt_sha, observation summary.prompt_sha, grounding prompt_sha) comes from the
+events only; the summary's prompt_sha is keyed like its models (lightning, grounder, summary).
 
 HTTP (binding for console/static/logs.js; see console/README.md):
   GET /logs                                  console/static/logs.html
@@ -175,6 +177,21 @@ def _first_model(events: list[dict], kind: str, config: dict, mock: bool) -> str
     return event_model({"kind": kind}, config, mock)  # the config fallback (None for mock runs)
 
 
+def event_prompt_sha(ev: dict) -> str | None:
+    """agent/trace.py prompt_sha of the prompt behind one event: plan and grounding payloads, an observation's
+    summary. Payload only (the run config doesn't record it); the mock declares "mock"."""
+    kind, p = ev.get("kind"), _payload(ev)
+    if kind in ("plan", "grounding"):
+        return _str(p.get("prompt_sha"))
+    if kind == "observation":
+        return _str(_dict(p.get("summary")).get("prompt_sha"))
+    return None
+
+
+def _first_prompt_sha(events: list[dict], kind: str) -> str | None:
+    return next((s for s in (event_prompt_sha(ev) for ev in events if ev.get("kind") == kind) if s), None)
+
+
 def _voice(console: dict | None) -> dict | None:
     v = _dict(console).get("voice")
     if not isinstance(v, dict):
@@ -261,6 +278,11 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
         # beyond the contract, for the detail view
         "n_bad_lines": n_bad_lines,
         "prompt_version": plan_pv or (None if mock else _str(config.get("prompt_version"))),
+        "prompt_sha": {  # keyed like models; from the events only
+            "lightning": _first_prompt_sha(events, "plan"),
+            "grounder": _first_prompt_sha(events, "grounding"),
+            "summary": _first_prompt_sha(events, "observation"),
+        },
         "lightning_root": None if mock else _str(_dict(config.get("lightning")).get("root")),
     }
 
@@ -277,8 +299,8 @@ def image_url(run_dir: Path, run_id: str, path: Any) -> str | None:
 
 def run_detail(run_dir: Path, run_id: str, *, events: list[dict] | None = None, n_bad_lines: int = 0,
                console_json: dict | None = None) -> dict:
-    """{"summary", "console", "events"}: the agent's events in file order with derived t_ms, model, source,
-    screenshot_url/overlay_url, plus a console 'voice' event first and a console 'verdict' event last."""
+    """{"summary", "console", "events"}: the agent's events in file order with derived t_ms, model, prompt_sha,
+    source, screenshot_url/overlay_url, plus a console 'voice' event first and a console 'verdict' event last."""
     run_dir = Path(run_dir)
     if events is None:
         events, n_bad_lines = read_events(run_dir / EVENTS_FILE)
@@ -300,6 +322,7 @@ def run_detail(run_dir: Path, run_id: str, *, events: list[dict] | None = None, 
         d = dict(ev)
         d["t_ms"] = rel(ev.get("ts"))
         d["model"] = event_model(ev, config, mock)
+        d["prompt_sha"] = event_prompt_sha(ev)
         d["source"] = "agent"
         for src, dst in (("screenshot_path", "screenshot_url"), ("overlay_path", "overlay_url")):
             d.pop(dst, None)

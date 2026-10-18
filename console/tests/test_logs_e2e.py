@@ -12,6 +12,9 @@
    observation rows with the raw screen summary, grounding rows with the raw output, the point and an overlay
    thumbnail, action rows with the click x, y, and no "mock" anywhere on the page. Text contrast is checked
    against WCAG AA in both themes. Screenshots go to the test's tmp dir (look at them after layout changes).
+   A trace with the fields the agent writes since b6b0db2 (test_logs.current_agent_trace): every plan's prompt
+   version and SHA, every summary's model, prompt SHA, tokens, error and "reused: no new summarizer call", every
+   grounding's prompt SHA and tokens, and the run's prompts in the summary card.
 3) A trace with an overflowing number (1e999 -> inf) still opens and downloads (as null), over HTTP.
 4) A run watched while it is going: the auto-refresh says once, in the live region, how it ended.
 
@@ -38,6 +41,7 @@ from console import asr
 from console.app import CONSOLE_DIR, ConsoleSettings, create_app
 from console.runner import VERDICT_LABEL
 from console.tests.conftest import ServerThread
+from console.tests.test_logs import CURRENT_RUN, GROUND_USAGE, SHA, SUMMARY_ERROR, SUMMARY_USAGE, current_agent_trace
 
 pytestmark = pytest.mark.e2e
 
@@ -86,6 +90,21 @@ def real_console(sandbox_url, tmp_path_factory):
     for rid, names in ((DONE_RUN, ("step_00.png", "step_01.png", "step_01_overlay.png")), (STOPPED_RUN, ("step_00.png",))):
         for name in names:
             Image.new("RGB", (1280, 800), (240, 244, 248)).save(runs / rid / name)
+    srv = _serve(sandbox_url, runs)
+    yield srv.start(), runs
+    srv.stop()
+
+
+@pytest.fixture(scope="module")
+def current_console(sandbox_url, tmp_path_factory):
+    """A console whose runs dir holds one trace in the current agent's shape (the mock is never started)."""
+    runs = tmp_path_factory.mktemp("e2e-current-runs")
+    d = runs / CURRENT_RUN
+    d.mkdir()
+    events = current_agent_trace(str(d))
+    (d / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+    for name in ("step_00.png", "step_01.png", "step_02.png", "step_01_overlay.png", "step_02_overlay.png"):
+        Image.new("RGB", (1280, 800), (240, 244, 248)).save(d / name)
     srv = _serve(sandbox_url, runs)
     yield srv.start(), runs
     srv.stop()
@@ -558,6 +577,55 @@ def test_real_trace_contrast_in_both_themes(page, real_console, theme):
     res = pg.evaluate(CONTRAST_JS)
     assert res["n"] > 200 and res["low"] == [], res["low"]
     pg.screenshot(path=str(runs / f"real-{theme}.png"), full_page=True)
+    watch.assert_clean()
+
+
+def test_current_agent_trace_shows_prompts_tokens_and_reused_summaries(page, current_console):
+    pg, watch = page
+    base, runs = current_console
+    evs = lines_of(runs / CURRENT_RUN / "events.jsonl")
+    kinds = [e["kind"] for e in evs]
+    open_logs(pg, base, CURRENT_RUN)
+    assert pg.eval_on_selector_all("#event-list li.ev", "els => els.map(e => e.dataset.kind)") == kinds
+    expand_all(pg)
+
+    summary = text_of(pg, "#run-summary")  # the run's prompts, keyed like its models
+    assert "Prompts" in summary and "agent-v5" in summary and all(sha in summary for sha in SHA.values()), summary
+
+    for i in [i for i, k in enumerate(kinds) if k == "plan"]:
+        det = text_of(pg, f"{ev_sel(i)} .ev-details")
+        assert "lightning (from this event)" in det and "agent-v5" in det and SHA["plan"] in det, det
+        assert pg.get_attribute(f"{ev_sel(i)} .ev-model", "title") == f"lightning · prompt SHA {SHA['plan']}"
+
+    tokens = f"{SUMMARY_USAGE['prompt_tokens']:,} prompt · {SUMMARY_USAGE['completion_tokens']} completion"
+    failed, fresh, reused = [i for i, k in enumerate(kinds) if k == "observation"]
+    det = text_of(pg, f"{ev_sel(failed)} .ev-details")
+    assert visible(pg, f"{ev_sel(failed)} .ev-desc").endswith(f"summary failed: {SUMMARY_ERROR}")
+    assert "Summary error" in det and SUMMARY_ERROR in det and SHA["summary"] in det and "base (from this event)" in det
+    det = text_of(pg, f"{ev_sel(fresh)} .ev-details")
+    assert SHA["summary"] in det and tokens in det and "reused" not in det and "earlier call" not in det
+    assert close_to(visible(pg, f"{ev_sel(fresh)} .ev-lat"), 900.0)
+    det = text_of(pg, f"{ev_sel(reused)} .ev-details")
+    assert visible(pg, f"{ev_sel(reused)} .ev-desc").endswith(" · description reused (no new summarizer call)")
+    assert "reused: no new summarizer call" in det and f"{tokens} (the earlier call that wrote it)" in det
+    assert SHA["summary"] in det and visible(pg, f"{ev_sel(reused)} .ev-lat") == "—"  # no summarizer call: no latency
+
+    gtokens = f"{GROUND_USAGE['prompt_tokens']:,} prompt · {GROUND_USAGE['completion_tokens']} completion"
+    for i in [i for i, k in enumerate(kinds) if k == "grounding"]:
+        det = text_of(pg, f"{ev_sel(i)} .ev-details")
+        assert "grounder (from this event)" in det and SHA["grounding"] in det and gtokens in det, det
+
+    pg.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
+    assert "mock" not in pg.evaluate("document.body.textContent").lower()  # a real run never says mock
+    pg.evaluate("document.activeElement.blur()")
+    for theme in ("0", "1"):  # the new rows (e.g. the reused warning) keep AA contrast in both themes
+        pg.evaluate(f"localStorage.setItem('gui-assist.high-contrast', '{theme}')")
+        open_logs(pg, base, CURRENT_RUN)
+        expand_all(pg)
+        pg.evaluate("document.activeElement.blur()")
+        res = pg.evaluate(CONTRAST_JS)
+        assert res["n"] > 200 and res["low"] == [], (theme, res["low"])
+    pg.screenshot(path=str(runs / "current-trace.png"), full_page=True)
     watch.assert_clean()
 
 

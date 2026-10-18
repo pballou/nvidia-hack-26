@@ -7,12 +7,17 @@ multipart file + response_format=json), so these tests need no model.
 from __future__ import annotations
 
 import io
+import json
 import math
+import os
 import socket
 import struct
+import subprocess
+import sys
 import threading
 import time
 import wave
+from pathlib import Path
 
 import httpx
 import pytest
@@ -22,7 +27,11 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from console import asr
+from console.__main__ import voice_note
 from console.app import ConsoleSettings, create_app
+from console.tests.conftest import TEST_ASR
+
+REPO = Path(__file__).resolve().parents[2]
 
 
 def make_wav(seconds: float = 0.5, rate: int = 16_000, channels: int = 1, width: int = 2) -> bytes:
@@ -40,9 +49,10 @@ def make_wav(seconds: float = 0.5, rate: int = 16_000, channels: int = 1, width:
 
 
 @pytest.fixture(autouse=True)
-def stub_engine_after():
+def restore_engine():
+    saved = asr._engine_name  # conftest's test stub
     yield
-    asr.configure("stub")
+    asr.configure(saved)
 
 
 class FakeSidecar:
@@ -112,10 +122,56 @@ def test_read_wav_rejects(data, match):
         asr.read_wav(data)
 
 
-def test_stub_is_the_default_engine():
-    assert asr.info() == {"available": True, "model": "stub", "label": "stub"}
+def dead_url() -> str:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return f"http://127.0.0.1:{s.getsockname()[1]}"
+
+
+@pytest.mark.parametrize("console_asr", [None, ""])
+def test_parakeet_is_the_default_and_voice_is_off_without_the_sidecar(console_asr):
+    """Fresh process, CONSOLE_ASR unset or empty: Parakeet, never the stub. No sidecar: voice is honestly off."""
+    env = {k: v for k, v in os.environ.items() if k not in ("CONSOLE_ASR", "CONSOLE_ASR_STUB_TEXT")}
+    if console_asr is not None:
+        env["CONSOLE_ASR"] = console_asr
+    env["CONSOLE_ASR_URL"] = dead_url()
+    code = ("import json; from console import asr, __main__ as m; i = asr.info(); "
+            "print(json.dumps({'name': asr._engine_name, 'info': i, 'note': m.voice_note(i)}))")
+    out = subprocess.run([sys.executable, "-c", code], env=env, cwd=REPO, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["name"] == "parakeet"
+    info = got["info"]
+    assert info["available"] is False and info["model"] == "parakeet" and info["label"] == "Parakeet TDT 0.6B v3"
+    assert "not reachable" in info["error"] and "scripts/run_asr.sh" in info["error"]
+    assert "fixed_text" not in info
+    assert got["note"].startswith("warning: voice input is off: Parakeet server not reachable")
+    assert "turns it on by itself" in got["note"]
+
+
+def test_explicit_stub_says_it_is_fixed_text():
+    asr.configure("stub")  # what --asr stub / CONSOLE_ASR=stub select
+    info = asr.info()
+    assert info == {"available": True, "model": "stub", "label": "stub (fixed text)", "fixed_text": True}
     out = asr.transcribe(make_wav())
     assert out["text"] == "Turn on high contrast." and out["model"] == "stub" and out["duration_s"] == 0.5
+    note = voice_note(info)
+    assert note.startswith("note: voice input uses the stub (fixed text, not speech recognition)")
+    assert "never runs it by itself" in note and "--asr parakeet" in note
+
+
+def test_the_tests_stub_acts_like_a_recognizer():
+    """conftest.py selects StubEngine explicitly; a set_engine(None) anywhere falls back to it, never to Parakeet."""
+    asr.set_engine(None)
+    assert asr._engine_name == TEST_ASR
+    assert asr.info() == {"available": True, "model": "stub", "label": "stub"}
+    assert voice_note(asr.info()) is None
+
+
+def test_engine_registry():
+    assert sorted(asr.ENGINES) == sorted(["parakeet", "stub", TEST_ASR])  # --asr's choices, plus the tests' entry
+    assert asr.ENGINES["stub"] is asr.FixedTextEngine and asr.FixedTextEngine.fixed_text is True
+    assert asr.ENGINES["parakeet"] is asr.NemoSpeechEngine and asr.StubEngine.fixed_text is False
 
 
 def test_parakeet_engine_speaks_the_sidecar_protocol(sidecar, monkeypatch):
@@ -145,15 +201,22 @@ def test_parakeet_errors_map_to_audio_and_engine_errors(sidecar):
 
 
 def test_parakeet_unreachable_is_reported_not_raised(monkeypatch):
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        dead = f"http://127.0.0.1:{s.getsockname()[1]}"
-    monkeypatch.setenv("CONSOLE_ASR_URL", dead)
+    monkeypatch.setenv("CONSOLE_ASR_URL", dead_url())
     asr.configure("parakeet")
     info = asr.info()
     assert info["available"] is False and "not reachable" in info["error"]
+    assert info["label"] == "Parakeet TDT 0.6B v3" and "scripts/run_asr.sh" in info["error"]
     with pytest.raises(asr.EngineUnavailable):
         asr.transcribe(make_wav())
+
+
+def test_parakeet_comes_up_later_without_a_restart(sidecar, monkeypatch):
+    """The engine isn't cached while the sidecar is down, so /api/config reports it as soon as /health answers."""
+    monkeypatch.setenv("CONSOLE_ASR_URL", dead_url())
+    asr.configure("parakeet")
+    assert asr.info()["available"] is False
+    monkeypatch.setenv("CONSOLE_ASR_URL", sidecar.url)
+    assert asr.info() == {"available": True, "model": "nvidia/parakeet-tdt-0.6b-v3", "label": "Parakeet TDT 0.6B v3"}
 
 
 def test_transcribe_endpoint_with_parakeet_and_when_it_is_down(sidecar, monkeypatch):

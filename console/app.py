@@ -1,7 +1,7 @@
 """GUI assist console backend (docs/tasks/T1-app.md Part B). Run: python -m console --agent mock|real.
 
 HTTP API (binding for console/static; details in console/README.md):
-  GET  /                          console/static/index.html (and /static/*)
+  GET  /                          console/static/index.html (and /static/*, Cache-Control: no-cache)
   GET  /api/config                {agent, sandbox_url, headed, defaults, asr}
   GET  /api/tasks                 the 12 sandbox tasks, without their checks
   POST /api/run                   {request, task_id?, options?} -> {run_id, sid, start_url}; 409 busy, 400 bad input, 503 unavailable
@@ -80,6 +80,17 @@ class ConsoleSettings:
 
     def default_options(self) -> dict:
         return {**DEFAULT_OPTIONS, "lightning": self.default_lightning}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """/static/* with Cache-Control: no-cache: every page load revalidates each file by its ETag (a cheap 304 when
+    it is unchanged). Without it browsers apply heuristic freshness and keep running an old console.js or voice.js
+    under the always-fresh index.html after the file changes on disk, until a hard reload."""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)  # 200, or 304 for a matching If-None-Match
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def _error(status: int, message: str, **extra) -> JSONResponse:
@@ -179,7 +190,7 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
     app.state.settings = settings
     app.state.runner = runner
     app.state.log_roots = log_roots
-    app.mount("/static", StaticFiles(directory=settings.static_dir, check_dir=False), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=settings.static_dir, check_dir=False), name="static")
     app.include_router(logs.make_router(static_dir=settings.static_dir, roots=log_roots,
                                         live=runner.live_agent_run_ids))
 

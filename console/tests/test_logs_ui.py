@@ -372,7 +372,7 @@ def test_event_rows_by_keyboard_voice_row_and_verdict(page, logs_console, runs):
     summary = inner(pg, "#run-summary")
     assert HEARD in summary and "test-asr" in summary and "123 ms" in summary
     assert "mock (no Lightning)" in summary and "mock (no VLM)" in summary
-    assert "scripted replay" in summary
+    assert "scripted replay" in summary and "the mock sends no prompts" in summary
 
     # a grounding row: what the grounder saw, as a thumbnail that opens full size (keyboard: Enter, Escape)
     gi = kinds.index("grounding")
@@ -381,6 +381,7 @@ def test_event_rows_by_keyboard_voice_row_and_verdict(page, logs_console, runs):
     g = detail["events"][gi]
     gdet = inner(pg, f"{row(pg, gi)} .ev-details")
     assert g["payload"]["target"] in gdet and ", ".join(str(n) for n in g["payload"]["point_1000"]) in gdet
+    assert g["payload"]["prompt_sha"] == "mock" and "mock (no prompt was sent)" in gdet
     assert "Mock script (pre-measured point)" in cell_text(pg, f"{row(pg, gi)} .ev-desc")
     thumb = f"{row(pg, gi)} .thumb-btn"
     assert pg.get_attribute(thumb, "data-src") == g["overlay_url"]

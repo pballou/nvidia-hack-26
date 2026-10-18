@@ -33,7 +33,7 @@
       <form id="run-form" class="run-form" novalidate>
         <label class="field-label" for="request">What do you want to do?</label>
         <div class="request-row">
-          <button id="mic-btn" class="mic-btn" type="button" aria-pressed="false" data-state="off" disabled
+          <button id="mic-btn" class="mic-btn" type="button" data-state="off" disabled
                   aria-describedby="voice-hint">
             <span class="mic-icon" aria-hidden="true">
               <svg class="ico ico-mic" viewBox="0 0 24 24" focusable="false">
@@ -140,14 +140,15 @@
         </div>
         <p id="heard" class="heard" hidden></p>
         <div id="log-scroll" class="log-scroll">
-          <ol id="step-log" class="step-log" aria-live="polite" aria-labelledby="log-heading"></ol>
+          <!-- not a live region: each step is announced once, as one sentence, through #sr-status -->
+          <ol id="step-log" class="step-log" aria-labelledby="log-heading"></ol>
           <p id="log-empty" class="log-empty">Steps appear here while the agent works.</p>
           <p id="pending" class="pending" hidden></p>
         </div>
       </section>
       <p id="keyboard-hint" class="kbd-hint">
         <span class="kbd-title">Keyboard:</span> <kbd>Enter</kbd> run · <kbd>Esc</kbd> stop ·
-        <kbd>←</kbd><kbd>→</kbd> screenshots<span id="kbd-ptt-wrap" hidden> · hold <kbd id="kbd-ptt">Right Option</kbd> to talk</span><span class="visually-hidden">. Shift+Enter adds a new line.</span>
+        <kbd>←</kbd><kbd>→</kbd> screenshots (on the result or a thumbnail)<span id="kbd-ptt-wrap" hidden> · hold <kbd id="kbd-ptt">Right Option</kbd> to talk</span><span class="visually-hidden">. Shift+Enter adds a new line.</span>
       </p>
     </section>
 
@@ -184,7 +185,7 @@
         <button id="live-btn" class="btn btn-small btn-live" type="button" aria-pressed="true">Live</button>
       </div>
 
-      <figure class="screen" aria-labelledby="screen-caption">
+      <figure id="screen" class="screen" aria-labelledby="screen-caption">
         <div class="screen-wrap">
           <img id="screen-img" class="screen-img" alt="" hidden>
           <p id="screen-empty" class="screen-empty">No screenshot yet. Run a request to watch the agent work.</p>

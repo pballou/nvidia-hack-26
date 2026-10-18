@@ -7,6 +7,7 @@
   "tasks": {
     "text-size-large": {
       "request": "Make the text bigger, I can't read this.",
+      "start_path": "/settings?tab=accessibility",
       "start_screen": "PAGE: Settings: Manage your profile, how we contact you, and how the portal looks. Tabs: Profile, Notifications, Accessibility. Cards: High contrast (Bold colors and outlines that are easier to see); Text size (Make words, buttons and menus larger on every page); Reduce motion.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Settings highlighted)\n- tab: Profile @ top\n- tab: Notifications @ top\n- tab: Accessibility @ top\n- toggle: High contrast, Off @ right (High contrast row)\n- segmented control: S, M, L buttons @ right (Text size row)\n- toggle: Reduce motion, Off @ right (Reduce motion row)\nSTATE: Accessibility tab selected. High contrast off. Text size M selected; the preview reads \"This is Medium text, the standard size.\" Reduce motion off.\nOVERLAYS: none",
       "steps": [
         {
@@ -32,6 +33,7 @@
     },
     "download-september-statement": {
       "request": "Download my September statement.",
+      "start_path": "/billing",
       "start_screen": "PAGE: Billing: Pay your bill, manage Autopay and download statements. Sections: Amount due; Autopay; Statements (The last 12 months, newest first).\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Billing highlighted)\n- button: Pay bill, in the dark Amount due card @ center\n- toggle: Autopay, Off, in the Autopay card @ top-right\n- table rows (Statement, Issued, Amount, Status), each with a small download icon (arrow over a line) at the right end @ center: September 2026, Oct 1, 2026, $142.37, Due; August 2026, $151.20, Paid; July 2026, $163.88, Paid; June 2026, $139.05, Paid; May 2026, $104.12, Paid (cut off at the bottom)\nSTATE: Amount due $142.37, due by October 28, 2026. Autopay Off: 'Never miss a due date: turn it on and we'll pay your full balance automatically.'\nOVERLAYS: none",
       "steps": [
         {
@@ -57,6 +59,7 @@
     },
     "mark-all-read": {
       "request": "Mark all my messages as read.",
+      "start_path": "/messages",
       "start_screen": "PAGE: Messages: Updates from Acme Utilities and the conversations you start. Tabs: Inbox, Sent. A toolbar above the message list.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Messages highlighted)\n- tab: Inbox with a badge 4 @ top-left\n- tab: Sent @ top-left\n- button: New message (pencil icon) @ top-left\n- icon button: two check marks, right of New message @ top-left\n- message row: Acme Outage Team, Power restored in Hillcrest, Oct 16 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Billing, Your September statement is ready, Oct 1 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Billing, Never miss a due date: try Autopay, Sep 28 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Energy Insights, Your usage is 22% lower than last month, Sep 25, with a star icon at the left\n- message row: Customer Support, Re: Question about my meter reading, Sep 22 (filled yellow star), with a star icon at the left\n- message row: Acme Outage Team, Scheduled tree trimming near your street, Sep 19 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Billing, Payment received. Thank you!, Sep 18, with a star icon at the left\n- more message rows continue below the bottom edge\nSTATE: Inbox tab selected. 4 unread · 14 messages. Starred: Customer Support.\nOVERLAYS: none",
       "steps": [
         {
@@ -82,6 +85,7 @@
     },
     "turn-on-autopay": {
       "request": "I keep forgetting to pay. Turn on autopay.",
+      "start_path": "/billing",
       "start_screen": "PAGE: Billing: Pay your bill, manage Autopay and download statements. Sections: Amount due; Autopay; Statements (The last 12 months, newest first).\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Billing highlighted)\n- button: Pay bill, in the dark Amount due card @ center\n- toggle: Autopay, Off, in the Autopay card @ top-right\n- table rows (Statement, Issued, Amount, Status), each with a small download icon (arrow over a line) at the right end @ center: September 2026, Oct 1, 2026, $142.37, Due; August 2026, $151.20, Paid; July 2026, $163.88, Paid; June 2026, $139.05, Paid; May 2026, $104.12, Paid (cut off at the bottom)\nSTATE: Amount due $142.37, due by October 28, 2026. Autopay Off: 'Never miss a due date: turn it on and we'll pay your full balance automatically.'\nOVERLAYS: none",
       "steps": [
         {
@@ -107,6 +111,7 @@
     },
     "high-contrast": {
       "request": "Turn on high contrast.",
+      "start_path": "/",
       "start_screen": "PAGE: Acme Utilities customer portal, Dashboard. Headings: Good afternoon, Jordan (Saturday, October 17, 2026); Amount due; Service status; Quick actions; Recent activity; Your account.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Dashboard highlighted)\n- button: Pay bill, in the dark Amount due card @ center\n- button: View statements, in the Amount due card @ center\n- link: Outage map, in the Service status card @ top-right\n- card: Pay bill, Make a one-time payment (Quick actions) @ bottom-left\n- card: Report an outage, Tell us what is happening (Quick actions) @ bottom\n- card: Message us, Write to our team (Quick actions) @ bottom\n- card: Get help, FAQs and call-backs (Quick actions) @ bottom-right\nSTATE: Amount due $142.37, due by October 28, 2026, with an Autopay off label. Service status: Riverside Power on (your area); Harbor Point Crews on site, 214 customers affected; Planned tree trimming near Maple Court, Oct 21, 2026.\nOVERLAYS: none",
       "steps": [
         {
@@ -154,6 +159,7 @@
     },
     "sms-billing-off": {
       "request": "Turn off SMS for billing alerts.",
+      "start_path": "/settings",
       "start_screen": "PAGE: Settings: Manage your profile, how we contact you, and how the portal looks. Tabs: Profile, Notifications, Accessibility. Sections: Personal details, Account details.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Settings highlighted)\n- tab: Profile @ top\n- tab: Notifications @ top\n- tab: Accessibility @ top\n- input: Full name, Jordan Lee @ center\n- input: Email, jordan.lee@example.com @ center\n- input: Mobile phone, (919) 555-0142 @ center\n- button: Discard changes @ bottom\n- button: Save changes @ bottom\n- link: Contact us, in the Account details card @ right\nSTATE: Profile tab selected (underlined). Account number 4417-2093-88 and service address 212 Maple Court, Apt 3B, Riverside are locked.\nOVERLAYS: none",
       "steps": [
         {
@@ -190,6 +196,7 @@
     },
     "max-usage-month": {
       "request": "Which month did I use the most power? Open it.",
+      "start_path": "/",
       "start_screen": "PAGE: Acme Utilities customer portal, Dashboard. Headings: Good afternoon, Jordan (Saturday, October 17, 2026); Amount due; Service status; Quick actions; Recent activity; Your account.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- button: Pay bill, in the dark Amount due card @ center\n- button: View statements, in the Amount due card @ center\n- link: Outage map, in the Service status card @ top-right\n- card: Pay bill, Make a one-time payment (Quick actions) @ bottom-left\n- card: Report an outage, Tell us what is happening (Quick actions) @ bottom\n- card: Message us, Write to our team (Quick actions) @ bottom\n- card: Get help, FAQs and call-backs (Quick actions) @ bottom-right\nSTATE: The side menu is hidden and the dashboard fills the width. Amount due $142.37, due by October 28, 2026, with an Autopay off label. Service status: Riverside Power on (your area); Harbor Point Crews on site, 214 customers affected; Planned tree trimming near Maple Court, Oct 21, 2026.\nOVERLAYS: none",
       "steps": [
         {
@@ -237,6 +244,7 @@
     },
     "report-outage-riverside": {
       "request": "Report an outage in the Riverside district.",
+      "start_path": "/outages",
       "start_screen": "PAGE: Outage map: Click your district to report an outage. A map of six districts, a legend (Active outage, Your report, Your address) and cards on the right: Current outages (1 active), Your reports, See a downed power line?\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Outage map highlighted)\n- map region: Northgate (purple) @ top-left of the map\n- map region: Hillcrest (light green) @ top-right of the map\n- map region: Old Town (tan) @ center of the map\n- map region: Harbor Point (red outline, hatched, lightning icon) @ right of the map\n- map region: Riverside (light green, with a house icon) @ bottom-left of the map\n- map region: Maple Grove (pink) @ bottom of the map\nSTATE: Current outages: Harbor Point, Crews on site, 214 customers affected, since today. Your reports: No reports yet. Click a district on the map to tell us about an outage.\nOVERLAYS: none",
       "steps": [
         {
@@ -273,6 +281,7 @@
     },
     "star-landlord-message": {
       "request": "Star the message from the landlord.",
+      "start_path": "/messages",
       "start_screen": "PAGE: Messages: Updates from Acme Utilities and the conversations you start. Tabs: Inbox, Sent. A toolbar above the message list.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Messages highlighted)\n- tab: Inbox with a badge 4 @ top-left\n- tab: Sent @ top-left\n- button: New message (pencil icon) @ top-left\n- icon button: two check marks, right of New message @ top-left\n- message row: Acme Outage Team, Power restored in Hillcrest, Oct 16 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Billing, Your September statement is ready, Oct 1 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Billing, Never miss a due date: try Autopay, Sep 28 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Energy Insights, Your usage is 22% lower than last month, Sep 25, with a star icon at the left\n- message row: Customer Support, Re: Question about my meter reading, Sep 22 (filled yellow star), with a star icon at the left\n- message row: Acme Outage Team, Scheduled tree trimming near your street, Sep 19 (unread, bold with a blue dot), with a star icon at the left\n- message row: Acme Billing, Payment received. Thank you!, Sep 18, with a star icon at the left\n- more message rows continue below the bottom edge\nSTATE: Inbox tab selected. 4 unread · 14 messages. Starred: Customer Support.\nOVERLAYS: none",
       "steps": [
         {
@@ -310,6 +319,7 @@
     },
     "pay-50": {
       "request": "Pay $50 toward my bill.",
+      "start_path": "/",
       "start_screen": "PAGE: Acme Utilities customer portal, Dashboard. Headings: Good afternoon, Jordan (Saturday, October 17, 2026); Amount due; Service status; Quick actions; Recent activity; Your account.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Dashboard highlighted)\n- button: Pay bill, in the dark Amount due card @ center\n- button: View statements, in the Amount due card @ center\n- link: Outage map, in the Service status card @ top-right\n- card: Pay bill, Make a one-time payment (Quick actions) @ bottom-left\n- card: Report an outage, Tell us what is happening (Quick actions) @ bottom\n- card: Message us, Write to our team (Quick actions) @ bottom\n- card: Get help, FAQs and call-backs (Quick actions) @ bottom-right\nSTATE: Amount due $142.37, due by October 28, 2026, with an Autopay off label. Service status: Riverside Power on (your area); Harbor Point Crews on site, 214 customers affected; Planned tree trimming near Maple Court, Oct 21, 2026.\nOVERLAYS: none",
       "steps": [
         {
@@ -380,6 +390,7 @@
     },
     "message-support-meter": {
       "request": "Send a message to support saying my meter is broken.",
+      "start_path": "/",
       "start_screen": "PAGE: Acme Utilities customer portal, Dashboard. Headings: Good afternoon, Jordan (Saturday, October 17, 2026); Amount due; Service status; Quick actions; Recent activity; Your account.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Dashboard highlighted)\n- button: Pay bill, in the dark Amount due card @ center\n- button: View statements, in the Amount due card @ center\n- link: Outage map, in the Service status card @ top-right\n- card: Pay bill, Make a one-time payment (Quick actions) @ bottom-left\n- card: Report an outage, Tell us what is happening (Quick actions) @ bottom\n- card: Message us, Write to our team (Quick actions) @ bottom\n- card: Get help, FAQs and call-backs (Quick actions) @ bottom-right\nSTATE: Amount due $142.37, due by October 28, 2026, with an Autopay off label. Service status: Riverside Power on (your area); Harbor Point Crews on site, 214 customers affected; Planned tree trimming near Maple Court, Oct 21, 2026.\nOVERLAYS: none",
       "steps": [
         {
@@ -462,6 +473,7 @@
     },
     "stop-promotions": {
       "request": "Stop sending me promotions. No emails, no texts, no push notifications.",
+      "start_path": "/",
       "start_screen": "PAGE: Acme Utilities customer portal, Dashboard. Headings: Good afternoon, Jordan (Saturday, October 17, 2026); Amount due; Service status; Quick actions; Recent activity; Your account.\nELEMENTS:\n- icon button: three horizontal lines @ top-left\n- logo: Acme Utilities, Customer portal @ top-left\n- icon button: bell with a red badge 3 @ top-right\n- icon button: gear @ top-right\n- icon button: question mark in a circle @ top-right\n- button: round JL avatar with a down arrow @ top-right\n- side menu links: Dashboard, Billing, Usage, Outage map, Messages (badge 4), Settings, Help @ left (Dashboard highlighted)\n- button: Pay bill, in the dark Amount due card @ center\n- button: View statements, in the Amount due card @ center\n- link: Outage map, in the Service status card @ top-right\n- card: Pay bill, Make a one-time payment (Quick actions) @ bottom-left\n- card: Report an outage, Tell us what is happening (Quick actions) @ bottom\n- card: Message us, Write to our team (Quick actions) @ bottom\n- card: Get help, FAQs and call-backs (Quick actions) @ bottom-right\nSTATE: Amount due $142.37, due by October 28, 2026, with an Autopay off label. Service status: Riverside Power on (your area); Harbor Point Crews on site, 214 customers affected; Planned tree trimming near Maple Court, Oct 21, 2026.\nOVERLAYS: none",
       "steps": [
         {

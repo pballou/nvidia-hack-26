@@ -284,9 +284,12 @@
         const o = isObj(p.observation) ? p.observation : {};
         const title = oneLine(o.title);
         const where = displayUrl(o.url);
-        const sum = isObj(p.summary) && p.summary.error ? ` · summary failed: ${oneLine(p.summary.error)}` : '';
+        const s = isObj(p.summary) ? p.summary : {};
+        const sum = s.error ? ` · summary failed: ${oneLine(s.error)}` : '';
+        const reused = s.reused === true ? ' · description reused (no new summarizer call)' : '';
         const what = mock ? 'Screen (scripted mock summary)' : 'Read the screen';
-        return `${what}: ${title || 'untitled page'}${where ? ` (${where})` : ''}${changedWords(o.screen_changed)}${sum}`;
+        return `${what}: ${title || 'untitled page'}${where ? ` (${where})` : ''}${changedWords(o.screen_changed)}${sum}`
+          + reused;
       }
       case 'plan': {
         const calls = Array.isArray(p.tool_calls) ? p.tool_calls : [];
@@ -886,6 +889,13 @@
     }
     if (cfg.model_family) extraModel.push(h('span', { class: 'kv-sub', text: `VLM family ${cfg.model_family}` }));
 
+    const shas = isObj(s.prompt_sha) ? s.prompt_sha : {};
+    const promptBits = [
+      ['version', s.prompt_version], ['Lightning SHA', shas.lightning], ['Grounder SHA', shas.grounder],
+      ['Screen summary SHA', shas.summary],
+    ].map(([k, v]) => h('span', { class: 'kv-pair' }, h('span', { class: 'kv-k', text: `${k} ` }),
+      has(v) ? h('span', { class: 'kv-v', text: str(v) }) : na()));
+
     const opts = c && isObj(c.options) ? c.options : null;
     const optBits = opts ? Object.entries(opts).map(([k, v]) => h('span', { class: 'kv-pair' },
       h('span', { class: 'kv-k', text: `${k} ` }), h('span', { class: 'kv-v', text: str(v) }))) : [];
@@ -932,6 +942,9 @@
       kvRow('Verdict', verdictBits),
       kvRow('Voice', voiceBits),
       kvRow('Models', h('span', { class: 'kv-line' }, joinNodes(modelBits)), extraModel),
+      kvRow('Prompts', h('span', { class: 'kv-line' }, joinNodes(promptBits)),
+        h('span', { class: 'kv-sub', text: s.agent === 'mock' ? 'the mock sends no prompts'
+          : 'SHA = first 10 hex digits of the SHA-256 of the exact prompt (from the events)' })),
       kvRow('p50 per stage', stageList),
       kvRow('Options', optBits.length ? h('span', { class: 'kv-line' }, joinNodes(optBits)) : null,
         consoleNote),
@@ -1069,7 +1082,7 @@
     h('span', { class: 'ev-step' }, Number.isInteger(ev.step) ? [sv('step '), String(ev.step)] : na('no step')),
     h('span', { class: 'ev-kind' }, kindBadge(ev.kind)),
     h('span', { class: `ev-src src-${src === 'console' ? 'console' : 'agent'}` }, sv('from '), src),
-    h('span', { class: 'ev-model', title: has(model) ? str(model) : null },
+    h('span', { class: 'ev-model', title: has(model) ? str(model) + (has(ev.prompt_sha) ? ` · prompt SHA ${ev.prompt_sha}` : '') : null },
       has(model) ? [sv('model '), str(model)] : na('no model')),
     h('span', { class: 'ev-lat' }, isNum(lat) ? [sv('latency '), fmtMs(lat)] : na('no latency')),
     h('span', { class: 'ev-desc' }, sv(': '), desc),
@@ -1243,6 +1256,13 @@
     return null;
   }
 
+  /** A prompt_sha (agent/trace.py: the first 10 hex of the SHA-256 of the exact prompt). The mock writes "mock". */
+  function shaValue(sha, mock) {
+    if (!has(sha)) return null;
+    if (mock) return [h('span', { class: 'mono', text: str(sha) }), ' ', h('span', { class: 'd-sub', text: '(no prompt was sent)' })];
+    return [h('span', { class: 'mono', title: 'first 10 hex digits of the SHA-256 of the exact prompt', text: str(sha) })];
+  }
+
   function thumb(url, title, alt) {
     if (!url) return null;
     return h('button', { type: 'button', class: 'thumb-btn', 'data-src': url, 'data-title': title, 'aria-label': `Enlarge: ${title}` },
@@ -1329,9 +1349,15 @@
         const o = isObj(p.observation) ? p.observation : {};
         const sum = isObj(p.summary) ? p.summary : {};
         const t = isObj(ev.timings_ms) ? ev.timings_ms : {};
+        const reused = sum.reused === true;
+        const tokens = usageValue(sum.usage);
         parts.push(dl(
           dRow('Summary model', modelValue(ev, sum.model)),
+          reused ? dRow('Summary call', h('span', { class: 'yn yn-warn', text: 'reused: no new summarizer call' })) : null,
           dRow('Prompt version', promptVersion(sum, { config: false })),
+          dRow('Prompt SHA', shaValue(sum.prompt_sha, p.mock === true)),
+          dRow('Tokens', tokens && reused ? [tokens, ' ', h('span', { class: 'd-sub', text: '(the earlier call that wrote it)' })]
+            : tokens),
           dRow('Summary latency', isNum(t.summary) ? fmtMs(t.summary) : null),
           dRow('Page', [has(o.title) ? h('span', { text: str(o.title) }) : na(), ' ',
             has(o.url) ? h('span', { class: 'mono d-sub', text: displayUrl(o.url) }) : null]),
@@ -1354,6 +1380,7 @@
         parts.push(dl(
           dRow('Model', modelValue(ev, p.model)),
           dRow('Prompt version', promptVersion(p)),
+          dRow('Prompt SHA', shaValue(p.prompt_sha, p.mock === true)),
           dRow('Thinking', p.thinking === true ? 'on for this call' : p.thinking === false ? 'off for this call' : null),
           dRow('Finish reason', has(p.finish_reason) ? str(p.finish_reason) : null, { mono: true }),
           dRow('Tokens', usageValue(p.usage)),
@@ -1388,6 +1415,8 @@
           dl(
             dRow('Served name', modelValue(ev, p.model)),
             dRow('Prompt version', promptVersion(p, { config: false })),
+            dRow('Prompt SHA', shaValue(p.prompt_sha, p.mock === true)),
+            dRow('Tokens', usageValue(p.usage)),
             dRow('VLM family', has(runConfig().model_family) ? [h('span', { class: 'mono', text: str(runConfig().model_family) }), ' ',
               h('span', { class: 'd-sub', text: '(from the run config)' })] : null),
             dRow('Target', has(p.target) ? h('q', { text: str(p.target) }) : null),

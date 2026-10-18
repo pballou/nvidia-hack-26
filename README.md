@@ -82,16 +82,19 @@ NeMo-Speech.cpp 0.2.0. Audio never leaves the machine, and there's no cloud spee
   ~/.local/bin/nemo-speech pull parakeet-tdt
   ```
 
-- **Serve** with `scripts/run_asr.sh` (127.0.0.1:8096). `demo_up.sh` uses it when
-  `/health` answers; otherwise voice falls back to a stub that returns fixed text.
+- **Serve** with `scripts/run_asr.sh` (127.0.0.1:8096). The console uses it by default
+  (`demo_up.sh` and `run_console.sh` alike). Until `/health` answers, the mic shows as
+  off, and the page turns voice on by itself once the sidecar is up. `--asr stub` is
+  fixed text for UI testing only: the page labels it and never runs it by itself.
 - **Use it in the console:**
   - Click the mic, or hold Right Option (or Space when no text field has focus), and
     say the request.
-  - It runs after a 1.5 s countdown, which Esc cancels.
-  - Saying "stop" during a run stops it.
+  - It runs after a 1.5 s countdown, which Esc cancels. In Options you can choose
+    5 s or no auto-run instead.
+  - Saying "stop" (or "stop it", "cancel that") during a run stops it.
 
 Run the pieces separately with `scripts/run_sandbox.sh`, `scripts/run_asr.sh` and
-`scripts/run_console.sh --agent mock|real [--asr parakeet] [--headed]`.
+`scripts/run_console.sh --agent mock|real [--headed]` (voice uses Parakeet; `--asr stub` for fixed text).
 
 Tests:
 `.venv-gym/bin/python -m pytest sandbox/tests console/tests -q`. They cover the

@@ -11,7 +11,16 @@ import httpx
 import pytest
 import uvicorn
 
+from console import asr
 from console.app import ConsoleSettings, create_app
+
+# Voice input in tests: the stub engine, chosen explicitly. The console's default is Parakeet, and the tests
+# must never call the shared sidecar on :8096 (whatever CONSOLE_ASR says on this machine). This is StubEngine
+# itself, the recognizer stand-in whose text the page treats like speech, not `--asr stub` (FixedTextEngine,
+# "stub (fixed text)", which never auto-runs). Every asr.set_engine(None) falls back to it.
+TEST_ASR = "test-stub"
+asr.ENGINES[TEST_ASR] = asr.StubEngine
+asr.configure(TEST_ASR)
 
 
 def pytest_configure(config):

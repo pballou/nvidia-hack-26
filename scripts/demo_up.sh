@@ -10,8 +10,10 @@
 #   --agent real      T2's agent (agent/core.py): Lightning plans, the VLM grounds
 #   --lightning       which Lightning the console defaults to and this script checks (default local:
 #                     the official BF16 checkpoint served as `lightning` on :8000; hosted is slow)
-#   --asr             voice input engine (default auto: Parakeet if its sidecar answers at
-#                     $CONSOLE_ASR_URL, default 127.0.0.1:8096, else the stub; $CONSOLE_ASR overrides)
+#   --asr             voice input engine (default auto = parakeet: the local sidecar at $CONSOLE_ASR_URL,
+#                     default 127.0.0.1:8096, scripts/run_asr.sh; voice stays off until it answers, and the
+#                     page turns it on by itself). stub = fixed text for UI testing, never auto-run, only
+#                     when asked for. $CONSOLE_ASR overrides the default.
 #   --headed          show the Playwright browser window (for the video)
 #   --skip-models     don't check the VLM / Lightning
 # Logs: runs/demo_logs/{sandbox,console}.log
@@ -29,7 +31,7 @@ while [ $# -gt 0 ]; do
     --asr=*) ASR="${1#*=}"; shift ;;
     --headed) HEADED=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -124,15 +126,15 @@ fi
 
 # 3. Voice input (local Parakeet sidecar, scripts/run_asr.sh)
 ASR_URL="${CONSOLE_ASR_URL:-http://127.0.0.1:8096}"
-if [ "$ASR" != stub ]; then
+if [ "$ASR" = stub ]; then
+  echo "note:    voice input uses the stub (fixed text, not speech recognition; it never runs by itself)"
+else
+  ASR=parakeet   # auto never falls back to the stub
   if up "$ASR_URL/health"; then
-    ASR=parakeet
     echo "asr      Parakeet sidecar up at $ASR_URL"
-  elif [ "$ASR" = parakeet ]; then
-    echo "warning: Parakeet sidecar not reachable at $ASR_URL (scripts/run_asr.sh); voice input will be unavailable" >&2
   else
-    ASR=stub
-    echo "note:    no Parakeet sidecar at $ASR_URL; voice input uses the stub (fixed text)"
+    echo "warning: Parakeet sidecar not answering at $ASR_URL yet (scripts/run_asr.sh). Voice input is off until" \
+      "it does; the page turns it on by itself." >&2
   fi
 fi
 

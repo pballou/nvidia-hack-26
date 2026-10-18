@@ -10,8 +10,8 @@ Three layers, checked separately:
 - The page in headless Chromium with Chromium's fake microphone (--use-fake-device-for-media-stream, a beeping test
   source) against a live console running the real mock agent and the real sandbox: click the mic, click again, the
   stub transcript fills the box and selects its sandbox task, a countdown runs it, and the verdict banner shows ✓.
-  Also: Esc during the countdown, push-to-talk (Right Option, Space off controls but not on the Run button), and
-  "stop" spoken during a slow run. Every browser test checks for no console errors, no request off 127.0.0.1 and
+  Also: Esc during the countdown, push-to-talk (Right Option, Space off controls but not on the Run button or a
+  focused scroller), and "stop" spoken during a slow run. Every browser test checks for no console errors, no request off 127.0.0.1 and
   no touch of the Web Speech API or MediaRecorder at runtime; a static scan checks console/static never names them.
 
 Browser tests are marked `e2e` like test_console_ui.py (skip with -m "not e2e").
@@ -297,7 +297,8 @@ def test_static_files_use_no_cloud_speech_or_media_recorder():
         for target in re.findall(r"fetch\(\s*([`'\"])(.*?)\1", text):
             assert target[1].startswith("/api/"), f"{f.name}: fetch({target[1]!r})"
     voice = (STATIC / "voice.js").read_text()
-    assert re.findall(r"fetch\(\s*'([^']*)'", voice) == ["/api/transcribe"]
+    # the WAV upload, and /api/config again while the recognizer is down
+    assert sorted(re.findall(r"fetch\(\s*'([^']*)'", voice)) == ["/api/config", "/api/transcribe"]
     assert "'Content-Type': 'audio/wav'" in voice
     assert "addModule('/static/pcm-worklet.js')" in voice
     html = (STATIC / "index.html").read_text()
@@ -505,14 +506,15 @@ def test_mic_click_transcribes_and_runs_a_verified_task(mic, fast_console):
     m = mic
     open_console(m, fast_console)
     s = m.state()
-    assert (s["mic"], s["pressed"], s["label"], s["disabled"]) == ("idle", "false", "Speak", False), s
+    # a plain action button: the label says what pressing it does, and there is no aria-pressed to contradict it
+    assert (s["mic"], s["pressed"], s["label"], s["disabled"]) == ("idle", None, "Speak", False), s
     assert m.pg.get_attribute("#voice-status", "role") == "status"
     assert m.pg.get_attribute("#voice-status", "aria-live") == "polite"
 
     m.pg.click("#mic-btn")
     m.wait_mic("listening")
     s = m.state()
-    assert s["pressed"] == "true" and s["label"] == "Stop listening", s
+    assert s["pressed"] is None and s["label"] == "Stop listening", s
     assert s["status"] == "Listening… press again to send", s
     time.sleep(1.2)
     m.pg.click("#mic-btn")
@@ -522,8 +524,8 @@ def test_mic_click_transcribes_and_runs_a_verified_task(mic, fast_console):
     trace = m.trace()
     assert is_subsequence(["idle", "starting", "listening", "transcribing", "done"], states(trace)), trace
     by_state = {t["state"]: t for t in trace}
-    assert by_state["starting"]["pressed"] == "true" and by_state["listening"]["pressed"] == "true"
-    assert by_state["transcribing"]["pressed"] == "false" and by_state["transcribing"]["status"] == "Transcribing…"
+    assert all(t["pressed"] is None for t in trace), trace
+    assert by_state["transcribing"]["status"] == "Transcribing…"
     assert by_state["listening"]["status"] == "Listening… press again to send"
 
     # the upload: one raw 16 kHz mono PCM16 WAV about as long as the recording, with the fake mic's beeps in it
@@ -540,6 +542,8 @@ def test_mic_click_transcribes_and_runs_a_verified_task(mic, fast_console):
     assert HEARD_STUB.match(s["heard"] or ""), s
     assert m.pg.locator(".log #heard").is_visible()
     assert s["status"].startswith(f"Heard: “{STUB_TEXT}” (a sandbox task)"), s
+    # the screen-reader part is short, and still true when it's read after the run started
+    assert m.pg.text_content("#voice-status .visually-hidden") == " Runs in 1.5 seconds. Escape stops it."
     assert s["countdown"] and re.fullmatch(r"Running in \d\.\d s — press Esc to cancel", s["countdown"]), s
 
     # the countdown runs it; the sandbox verdict shows ✓
@@ -627,13 +631,53 @@ def test_push_to_talk_keys(mic, fast_console):
     m.pg.keyboard.down("Space")
     time.sleep(0.5)
     s = m.state()
-    assert s["mic"] == "idle" and s["pressed"] == "false" and s["active"] == "run-btn", s
+    assert s["mic"] == "idle" and s["active"] == "run-btn", s
     m.pg.keyboard.up("Space")
     m.wait("document.querySelector('#form-error').textContent !== ''", timeout=5)
     time.sleep(0.3)
     s = m.state()
     assert s["formError"] == "Type what you want to do first." and s["mic"] == "idle", s
     assert len(m.trace()) == n_trace and len(m.wavs) == 2 and not m.run_bodies
+    m.assert_clean(fast_console)
+
+
+@e2e
+def test_space_on_a_focused_scroller_scrolls_it(mic, fast_console):
+    """Chromium lets Tab focus a scroller that overflows, with no tabindex (a step's "Screen text" <pre>, the banner
+    details). Space there scrolls it, as on any control; it is not push-to-talk."""
+    m = mic
+    open_console(m, fast_console)
+    m.pg.evaluate("""() => {
+      const before = document.createElement('button');
+      before.id = 't-before'; before.type = 'button'; before.textContent = 'before';
+      const box = document.createElement('pre');
+      box.id = 't-scroller'; box.style.cssText = 'overflow: auto; max-height: 4rem; white-space: pre';
+      box.textContent = Array.from({ length: 60 }, (_, i) => 'line ' + i).join('\\n');
+      document.querySelector('.log').append(before, box);
+    }""")
+    m.pg.focus("#t-before")
+    m.pg.keyboard.press("Tab")
+    focus = m.pg.evaluate("() => [document.activeElement.id, document.activeElement.hasAttribute('tabindex')]")
+    assert focus == ["t-scroller", False], focus
+    n_trace = len(m.trace())
+    m.pg.keyboard.down("Space")
+    time.sleep(0.5)
+    s = m.state()
+    m.pg.keyboard.up("Space")
+    time.sleep(0.2)
+    assert s["mic"] == "idle" and m.state()["mic"] == "idle", s
+    assert m.pg.evaluate("document.getElementById('t-scroller').scrollTop") > 0  # Space scrolled it
+    assert not m.wavs and len(m.trace()) == n_trace  # the mic never left idle
+
+    # with the scroller gone, focus is on the page itself: Space is push-to-talk again
+    m.pg.evaluate("document.getElementById('t-scroller').remove()")
+    assert m.pg.evaluate("document.activeElement === document.body")
+    m.pg.keyboard.down("Space")
+    m.wait_mic("listening")
+    m.pg.keyboard.press("Escape")
+    m.pg.keyboard.up("Space")
+    m.wait_mic("idle")
+    assert not m.wavs
     m.assert_clean(fast_console)
 
 

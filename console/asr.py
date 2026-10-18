@@ -3,13 +3,18 @@
 The browser records 16 kHz mono PCM16 WAV (console/static/wav.js) and POSTs it to
 /api/transcribe. This module validates the WAV and runs the active engine. Engines are
 local only (no cloud speech):
-- "stub" (the default) returns a fixed string, for tests and machines without the sidecar;
-- "parakeet" is NVIDIA Parakeet TDT 0.6B v3 served by NeMo-Speech.cpp on 127.0.0.1:8096
-  (scripts/run_asr.sh). It counts toward the 33B cap (contracts.md §6):
-  30 + 2 + 0.6 = 32.6B by model card.
+- "parakeet" (the default) is NVIDIA Parakeet TDT 0.6B v3 served by NeMo-Speech.cpp on
+  127.0.0.1:8096 (scripts/run_asr.sh). It counts toward the 33B cap (contracts.md §6):
+  30 + 2 + 0.6 = 32.6B by model card. Until the sidecar answers, /api/config reports voice
+  input as unavailable: the page shows the mic as off and checks again by itself.
+- "stub" returns a fixed string and recognizes nothing. Only an explicit `--asr stub` or
+  CONSOLE_ASR=stub selects it. It is labelled "stub (fixed text)", and /api/config says
+  `fixed_text: true`, so the page never runs its text by itself. Tests install StubEngine
+  directly (set_engine, console/tests/conftest.py) as a stand-in for a real recognizer.
 
 An engine is any object with `name` (model id shown in responses), `label` (short UI
-name) and `transcribe(pcm16: bytes, sample_rate: int) -> str`.
+name), `transcribe(pcm16: bytes, sample_rate: int) -> str` and optionally `fixed_text`
+(True = it returns canned text, not what was said).
 """
 
 from __future__ import annotations
@@ -43,10 +48,13 @@ class Engine(Protocol):
 
 
 class StubEngine:
-    """Returns a fixed transcript. CONSOLE_ASR_STUB_TEXT overrides the default."""
+    """Returns a fixed transcript. CONSOLE_ASR_STUB_TEXT overrides the default.
+
+    This is the tests' stand-in for a recognizer: the page treats its text like real speech."""
 
     name = "stub"
     label = "stub"
+    fixed_text = False
 
     def __init__(self, text: str | None = None):
         self.text = text if text is not None else os.environ.get("CONSOLE_ASR_STUB_TEXT", "Turn on high contrast.")
@@ -55,10 +63,20 @@ class StubEngine:
         return self.text
 
 
-ENGINES: dict[str, Callable[[], Engine]] = {"stub": StubEngine}
+class FixedTextEngine(StubEngine):
+    """`--asr stub` / CONSOLE_ASR=stub: the stub chosen by hand, to try the page without the sidecar.
+
+    It says what it is (the label, and `fixed_text` in /api/config), so the page never presents
+    its text as recognized speech and never runs it by itself."""
+
+    label = "stub (fixed text)"
+    fixed_text = True
+
+
+ENGINES: dict[str, Callable[[], Engine]] = {"stub": FixedTextEngine}
 _lock = threading.Lock()
 _engine: Engine | None = None
-_engine_name = os.environ.get("CONSOLE_ASR", "stub")
+_engine_name = os.environ.get("CONSOLE_ASR") or "parakeet"  # empty counts as unset (as in demo_up.sh)
 
 
 def configure(name: str) -> None:
@@ -95,8 +113,13 @@ def info() -> dict:
     try:
         engine = get_engine()
     except EngineUnavailable as exc:
-        return {"available": False, "model": _engine_name, "label": _engine_name, "error": str(exc)}
-    return {"available": True, "model": engine.name, "label": engine.label}
+        label = getattr(ENGINES.get(_engine_name), "label", None)  # e.g. "Parakeet TDT 0.6B v3", not "parakeet"
+        return {"available": False, "model": _engine_name, "label": label if isinstance(label, str) else _engine_name,
+                "error": str(exc)}
+    out = {"available": True, "model": engine.name, "label": engine.label}
+    if getattr(engine, "fixed_text", False):
+        out["fixed_text"] = True
+    return out
 
 
 def read_wav(data: bytes) -> tuple[bytes, float]:
@@ -153,10 +176,11 @@ class NemoSpeechEngine:
             r = self._http.get("/health", timeout=2.0)
         except httpx.HTTPError as exc:
             self._http.close()
-            raise EngineUnavailable(f"Parakeet server not reachable at {self.url}: {exc}") from exc
+            raise EngineUnavailable(f"Parakeet server not reachable at {self.url} ({exc}). "
+                                    "Start it with scripts/run_asr.sh") from exc
         if r.status_code != 200:
             self._http.close()
-            raise EngineUnavailable(f"Parakeet server at {self.url} not ready (HTTP {r.status_code})")
+            raise EngineUnavailable(f"Parakeet server at {self.url} not ready yet (HTTP {r.status_code})")
 
     def transcribe(self, pcm16: bytes, sample_rate: int) -> str:
         import httpx

@@ -9,14 +9,19 @@ API. In place of Lightning and the grounder, the plan comes from
 console/mock_scripts.json: for each sandbox task, the tool calls (target descriptions
 in the grounder's style) plus the pixel point to click, measured ahead of time by
 console/tools/calibrate_mock.py. A request picks a script by its exact text (case and
-whitespace don't matter). Anything else gets a short generic run that looks at the
-screen and gives up with done(success=false).
+whitespace don't matter), and only when the run starts where the script was recorded
+(the script's start_path: same path and query, sid aside). Its points were measured on
+that page, so replaying them anywhere else would click the wrong things. Anything else
+gets a short generic run that looks at the screen and gives up with done(success=false),
+saying why.
 
 Every payload carries "mock": true. Plans say model "mock (no Lightning)", observations
-summary.model "mock (no VLM)", and prompt_version is "mock" (the logs page shows these
-names). Only measured timings are reported (act); the mock
-doesn't run Lightning or a VLM, so it reports no plan/summary/ground latency rather than
-inventing one. cfg.step_delay_s paces the steps so the console demo looks live.
+summary.model "mock (no VLM)", and prompt_version and prompt_sha are "mock" (the logs
+page shows these names). Only measured timings are reported, split as agent/session.py
+splits them: an action's act (the mouse/keyboard action alone) and settle (the wait for
+the page to react), and an observation's screenshot (capturing the settled screen). The
+mock doesn't run Lightning or a VLM, so it reports no plan/summary/ground latency rather
+than inventing one. cfg.step_delay_s paces the steps so the console demo looks live.
 
 Self-contained on purpose (no agent/ imports), so it keeps working while agent/ changes.
 """
@@ -33,7 +38,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
@@ -50,12 +55,15 @@ FALLBACK_PLAN = "Mock agent: no scripted plan for this request"
 FALLBACK_SUMMARY = ("This is the mock agent. It only replays the scripted sandbox tasks, "
                     "so it did not do anything for this request.")
 NO_SUMMARY = "(mock agent: no screen description for this step)"
-# Model names the mock declares (the same optional fields as agent/: plan.model, plan.prompt_version,
-# observation.summary, grounding.prompt_version). They say plainly that no model ran.
+# Model and prompt names the mock declares (the same optional fields as agent/trace.py: plan.model,
+# plan.prompt_version, plan.prompt_sha, observation.summary.{model, prompt_sha}, grounding.prompt_sha).
+# They say plainly that no model ran and no prompt was sent.
 MOCK_PLANNER = "mock (no Lightning)"
 MOCK_SUMMARIZER = "mock (no VLM)"
 MOCK_PROMPT_VERSION = "mock"
-MOCK_SUMMARY_INFO = {"model": MOCK_SUMMARIZER, "prompt_version": MOCK_PROMPT_VERSION}
+MOCK_PROMPT_SHA = "mock"
+MOCK_PROMPT = {"prompt_version": MOCK_PROMPT_VERSION, "prompt_sha": MOCK_PROMPT_SHA}
+MOCK_SUMMARY_INFO = {"model": MOCK_SUMMARIZER, **MOCK_PROMPT}
 NO_CHANGE_NOTE = (  # same words as agent/observation.py
     "The screen did NOT change after your last action. The click probably missed or the "
     "element is not interactive: describe the target differently or try another way."
@@ -112,12 +120,35 @@ class ScriptError(Exception):
 # --- pixels-only browser helpers (shared with console/tools/calibrate_mock.py) ----------
 
 
-@asynccontextmanager
-async def open_page(headed: bool = False):
-    """A fresh Chromium page at 1280x800, dsf 1, reduced motion, en-US, America/New_York."""
+async def start_playwright():
+    """async_playwright().start(), safe to cancel. Playwright's own start is not: a cancel while the node
+    driver is starting (a Stop in a run's first ~100 ms) skips its cleanup and leaves the driver (~130 MB)
+    running until the process exits. Here a cancel lets the start finish (well under a second), stops the
+    driver, then re-raises. Repeated cancels (two Stops) don't cut that wait short."""
     from playwright.async_api import async_playwright
 
-    async with async_playwright() as pw:
+    starting = asyncio.ensure_future(async_playwright().start())
+    try:
+        return await asyncio.shield(starting)
+    except asyncio.CancelledError:
+        while not starting.done():
+            try:
+                await asyncio.shield(starting)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not starting.cancelled() and starting.exception() is None:
+            await starting.result().stop()  # stop() closes the driver's pipe at once; it exits on its own
+        raise
+
+
+@asynccontextmanager
+async def open_page(headed: bool = False):
+    """A fresh Chromium page at 1280x800, dsf 1, reduced motion, en-US, America/New_York.
+    The browser and the Playwright driver are always closed on the way out, including on a cancel."""
+    pw = await start_playwright()
+    try:
         browser = await pw.chromium.launch(headless=not headed)
         try:
             ctx = await browser.new_context(viewport=dict(VIEWPORT), device_scale_factor=1, reduced_motion="reduce",
@@ -125,6 +156,8 @@ async def open_page(headed: bool = False):
             yield await ctx.new_page()
         finally:
             await browser.close()
+    finally:
+        await pw.stop()
 
 
 async def screenshot(page) -> Image.Image:
@@ -132,23 +165,40 @@ async def screenshot(page) -> Image.Image:
     return Image.open(io.BytesIO(png)).convert("RGB")
 
 
-async def settle(page, settle_ms: int = 250) -> Image.Image:
-    """Let a click-triggered fetch + reload finish, then return a screenshot that has stopped changing."""
-    await asyncio.sleep(0.25)
-    for state, timeout in (("load", 5000), ("networkidle", 2000)):
+async def settle(page, settle_ms: int = 250, timings: dict | None = None) -> Image.Image:
+    """Let a click-triggered fetch + reload finish, then return a screenshot that has stopped changing.
+    With `timings`, records settle (the waits, in ms) and screenshot (time spent capturing, in ms)."""
+    t0 = time.perf_counter()
+    shot_s = 0.0
+
+    async def capture() -> Image.Image:
+        nonlocal shot_s
+        t = time.perf_counter()
         try:
-            await page.wait_for_load_state(state, timeout=timeout)
-        except Exception:  # timeouts are fine; the screenshot loop below decides
-            pass
-    await asyncio.sleep(settle_ms / 1000)
-    img = await screenshot(page)
-    for _ in range(3):
-        await asyncio.sleep(0.1)
-        nxt = await screenshot(page)
-        if ImageChops.difference(img, nxt).getbbox() is None:
-            return nxt
-        img = nxt
-    return img
+            return await screenshot(page)
+        finally:
+            shot_s += time.perf_counter() - t
+
+    try:
+        await asyncio.sleep(0.25)
+        for state, timeout in (("load", 5000), ("networkidle", 2000)):
+            try:
+                await page.wait_for_load_state(state, timeout=timeout)
+            except Exception:  # timeouts are fine; the screenshot loop below decides
+                pass
+        await asyncio.sleep(settle_ms / 1000)
+        img = await capture()
+        for _ in range(3):
+            await asyncio.sleep(0.1)
+            nxt = await capture()
+            if ImageChops.difference(img, nxt).getbbox() is None:
+                return nxt
+            img = nxt
+        return img
+    finally:
+        if timings is not None:
+            timings["settle"] = (time.perf_counter() - t0 - shot_s) * 1000
+            timings["screenshot"] = shot_s * 1000
 
 
 def screen_changed(before: Image.Image, after: Image.Image, threshold: int = 12, min_pixels: int = 3) -> bool:
@@ -288,6 +338,28 @@ def find_script(path: str | Path, request: str) -> tuple[dict | None, str | None
     return None, None
 
 
+def start_key(url: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """(path, sorted query pairs without sid) of a start URL or a script's start_path ("/settings?tab=x")."""
+    parts = urlsplit(url or "/")
+    query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "sid")
+    return parts.path or "/", tuple(query)
+
+
+def show_start(url: str) -> str:
+    """A start URL as the page it opens: "/settings?tab=accessibility" (no host, no sid)."""
+    path, query = start_key(url)
+    return path + ("?" + "&".join(f"{k}={v}" for k, v in query) if query else "")
+
+
+def recorded_elsewhere(script: dict, start_url: str) -> str | None:
+    """The script's start_path when the run starts on another page (its points would hit the wrong things), else
+    None. Scripts written before start_path was recorded aren't checked (their path_after checks still are)."""
+    want = script.get("start_path")
+    if not isinstance(want, str) or start_key(want) == start_key(start_url):
+        return None
+    return want
+
+
 class _Run:
     def __init__(self, request: str, start_url: str, cfg: MockConfig,
                  on_event: Callable[[MockStepEvent], Awaitable[None]] | None):
@@ -330,7 +402,8 @@ class _Run:
         draw_overlay(img, x, y, target, self.step).save(path)
         return str(path)
 
-    async def observe(self, page, img: Image.Image, changed: bool | None, last_result: str, summary: str) -> None:
+    async def observe(self, page, img: Image.Image, changed: bool | None, last_result: str, summary: str,
+                      timings_ms: dict | None = None) -> None:
         try:
             title = await page.title()
         except Exception as e:  # mid-navigation
@@ -339,7 +412,7 @@ class _Run:
                "last_action_result": last_result, "screen_summary": summary or NO_SUMMARY}
         await self.emit("observation", {"observation": obs, "text": render_observation(obs),
                                         "summary": dict(MOCK_SUMMARY_INFO)},
-                        screenshot_path=self.save(img))
+                        screenshot_path=self.save(img), timings_ms=timings_ms)
 
     async def finish(self, success: bool, summary: str, reason: str) -> dict:
         if self.finished is None:
@@ -357,13 +430,18 @@ class _Run:
 
     async def play(self, page) -> dict:
         script, script_error = find_script(self.cfg.scripts_path, self.request)
+        elsewhere = recorded_elsewhere(script, self.start_url) if script is not None else None
+        if elsewhere is not None:
+            script = None
         t = time.perf_counter()
         await page.goto(self.start_url, wait_until="load", timeout=15000)
-        img = await settle(page, self.cfg.settle_ms)
+        timings: dict[str, float] = {}
+        img = await settle(page, self.cfg.settle_ms, timings)
         log.debug("start page ready in %.0f ms", (time.perf_counter() - t) * 1000)
-        await self.observe(page, img, None, "", (script or {}).get("start_screen", ""))
+        await self.observe(page, img, None, "", (script or {}).get("start_screen", ""),
+                           {"screenshot": timings["screenshot"]})
         if script is None:
-            return await self.fallback(script_error)
+            return await self.fallback(script_error, elsewhere)
 
         steps = script.get("steps")
         if not isinstance(steps, list) or not steps:
@@ -380,7 +458,7 @@ class _Run:
             await self.pace(0.5)
             await self.emit("plan", {"content": step.get("content", ""), "reasoning": step.get("reasoning", ""),
                                      "thinking": thinking, "tool_calls": [{"name": tool, "arguments": args}],
-                                     "model": MOCK_PLANNER, "prompt_version": MOCK_PROMPT_VERSION})
+                                     "model": MOCK_PLANNER, **MOCK_PROMPT})
             await self.emit("tool_call", {"name": tool, "arguments": args, "valid": True,
                                           "description": describe(tool, args)})
             if tool == "done":
@@ -397,22 +475,22 @@ class _Run:
                 pt = [round(x / VIEWPORT["width"] * 1000), round(y / VIEWPORT["height"] * 1000)]
                 await self.emit("grounding", {"target": target, "x": x, "y": y, "point_1000": pt,
                                               "raw": json.dumps({"point_2d": pt}),
-                                              "model": f"{self.cfg.grounder_model}, mock",
-                                              "prompt_version": MOCK_PROMPT_VERSION},
+                                              "model": f"{self.cfg.grounder_model}, mock", **MOCK_PROMPT},
                                 overlay_path=overlay)
                 click = {"x": x, "y": y}
             t = time.perf_counter()
             result = await perform(page, step, self.step)
-            img = await settle(page, self.cfg.settle_ms)
-            act_ms = (time.perf_counter() - t) * 1000
+            timings = {"act": (time.perf_counter() - t) * 1000}  # the mouse/keyboard action alone
+            img = await settle(page, self.cfg.settle_ms, timings)
             changed = screen_changed(before, img)
             self.stats["actions"] += 1
             self.stats["clicks"] += 1 if click else 0
             await self.emit("action", {"name": tool, "arguments": args, "ok": True, "screen_changed": changed,
                                        **({"click": click} if click else {})},
-                            overlay_path=overlay, timings_ms={"act": act_ms})
+                            overlay_path=overlay, timings_ms={"act": timings["act"], "settle": timings["settle"]})
             await self.pace(0.3)
-            await self.observe(page, img, changed, result, step.get("screen_after", ""))
+            await self.observe(page, img, changed, result, step.get("screen_after", ""),
+                               {"screenshot": timings["screenshot"]})
             want = step.get("path_after")
             got = urlsplit(page.url).path
             if want and got != want:
@@ -421,19 +499,27 @@ class _Run:
             last_changed = changed
         return await self.finish(False, "The script ended without calling done.", "max_steps")
 
-    async def fallback(self, script_error: str | None) -> dict:
+    async def fallback(self, script_error: str | None, elsewhere: str | None = None) -> dict:
+        """No usable script: say so with done(success=false). `elsewhere` = the start_path of the script that
+        matched the request text, when this run started on another page."""
         if script_error:
             await self.emit("error", {"message": script_error, "where": "mock_scripts", "recoverable": True})
         self.step = 1
-        args = {"summary": FALLBACK_SUMMARY, "success": False}
+        plan, summary = FALLBACK_PLAN, FALLBACK_SUMMARY
+        if elsewhere is not None:
+            here = show_start(self.start_url)
+            plan = f"Mock agent: the scripted plan for this request starts on {elsewhere}, but this run started on {here}"
+            summary = (f"This is the mock agent. Its script for this request starts on {elsewhere}, but this run "
+                       f"started on {here}, so it did not do anything. Choose this task in the Sandbox task list to replay it.")
+        args = {"summary": summary, "success": False}
         await self.pace(0.5)
-        await self.emit("plan", {"content": FALLBACK_PLAN, "reasoning": "", "thinking": False,
+        await self.emit("plan", {"content": plan, "reasoning": "", "thinking": False,
                                  "tool_calls": [{"name": "done", "arguments": args}],
-                                 "model": MOCK_PLANNER, "prompt_version": MOCK_PROMPT_VERSION})
+                                 "model": MOCK_PLANNER, **MOCK_PROMPT})
         await self.emit("tool_call", {"name": "done", "arguments": args, "valid": True,
                                       "description": describe("done", args)})
         await self.emit("action", {"name": "done", "arguments": args, "ok": True, "screen_changed": None, "done": True})
-        return await self.finish(False, FALLBACK_SUMMARY, "done")
+        return await self.finish(False, summary, "done")
 
     def close(self) -> None:
         self._events.close()

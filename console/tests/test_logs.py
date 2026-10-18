@@ -64,6 +64,81 @@ def hand_trace() -> list[dict]:
     ]
 
 
+CURRENT_RUN = "20261017-191633-1a67b1"
+SHA = {"plan": "cc1d9edb42", "summary": "b00fd27100", "grounding": "f9ed0fa621"}
+SUMMARY_USAGE = {"prompt_tokens": 1702, "completion_tokens": 233}
+GROUND_USAGE = {"prompt_tokens": 1650, "completion_tokens": 14}
+SUMMARY_ERROR = "base: request timed out after 45 s"
+
+
+def current_agent_trace(run_dir: str = f"/path/to/repo/runs/{CURRENT_RUN}") -> list[dict]:
+    """A real-agent trace with the fields agent/core.py writes since b6b0db2 (documented at the top of agent/trace.py):
+    plan {model, prompt_version, prompt_sha}, observation summary {model, prompt_sha, usage?, error?, reused?},
+    grounding {prompt_sha, usage}. Built from that field list (no real trace with them was recorded yet), shaped
+    like core.py's output. The first summary call fails (summary.error); step 1 clicks; step 2's grounding fails,
+    so its observation carries step 1's description over (reused: no new summarizer call); step 3 is done."""
+    rid = Path(run_dir).name
+    cfg = {"lightning": {"base_url": "http://127.0.0.1:8000/v1", "model": "lightning",
+                         "root": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"},
+           "grounder_model": "grounder", "summary_model": "base", "model_family": "qwen3_5", "max_steps": 12,
+           "thinking": "retry", "prompt_version": "agent-v5"}
+
+    def e(kind, step, ts, payload, **extra):
+        return {"run_id": rid, "step": step, "kind": kind, "ts": ts, "payload": payload, **extra}
+
+    def plan(step, ts, name, args, prompt_tokens, ms):
+        return e("plan", step, ts, {"content": "", "reasoning": "", "thinking": False,
+                                    "tool_calls": [{"name": name, "arguments": args}],
+                                    "usage": {"completion_tokens": 20, "prompt_tokens": prompt_tokens,
+                                              "total_tokens": prompt_tokens + 20},
+                                    "model": "lightning", "prompt_version": "agent-v5", "prompt_sha": SHA["plan"]},
+                 timings_ms={"plan": ms})
+
+    def obs(step, ts, path, changed, last, text, summary, timings):
+        o = {"step": step, "url": f"http://127.0.0.1:8090{path}?sid=console-c-0f0f0f0f", "title": "Acme Utilities",
+             "screen_changed": changed, "last_action_result": last, "screen_summary": text}
+        return e("observation", step, ts, {"observation": o, "text": f"Step {step} | URL: {path}", "summary": summary},
+                 screenshot_path=f"{run_dir}/step_{step:02d}.png", timings_ms=timings)
+
+    gear, unicorn = {"target_description": "the gear icon"}, {"target_description": "the purple unicorn button"}
+    fresh = {"model": "base", "prompt_sha": SHA["summary"], "usage": SUMMARY_USAGE}
+    failed = {"model": "base", "prompt_sha": SHA["summary"], "error": SUMMARY_ERROR}
+    return [
+        e("start", 0, 2000.0, {"request": "Turn on high contrast.", "start_url": "http://127.0.0.1:8090/?sid=x",
+                               "config": cfg}),
+        obs(0, 2001.0, "/", None, "", f"(no screen description: {SUMMARY_ERROR})", failed,
+            {"screenshot": 40.0, "summary": 45000.0, "settle": 350.0}),
+        plan(1, 2002.0, "click", gear, 1800, 1500.0),
+        e("tool_call", 1, 2002.0, {"name": "click", "arguments": gear, "valid": True, "description": "Clicking: the gear icon"}),
+        e("grounding", 1, 2002.5, {"target": "the gear icon", "x": 1180.0, "y": 32.0, "point_1000": [922, 40],
+                                   "raw": "(922, 40)", "model": "grounder", "prompt_sha": SHA["grounding"],
+                                   "usage": GROUND_USAGE},
+          overlay_path=f"{run_dir}/step_01_overlay.png", timings_ms={"ground": 600.0}),
+        e("action", 1, 2003.0, {"name": "click", "arguments": gear, "ok": True, "screen_changed": True, "done": False,
+                                "click": {"x": 1180, "y": 32}}, timings_ms={"act": 20.0, "settle": 500.0}),
+        obs(1, 2004.0, "/settings", True, 'clicked "the gear icon" at (1180, 32)', "PAGE: Settings", fresh,
+            {"screenshot": 50.0, "summary": 900.0}),
+        plan(2, 2005.0, "click", unicorn, 2300, 1700.0),
+        e("tool_call", 2, 2005.0, {"name": "click", "arguments": unicorn, "valid": True,
+                                   "description": "Clicking: the purple unicorn button"}),
+        e("grounding", 2, 2005.5, {"target": "the purple unicorn button", "x": None, "y": None, "point_1000": None,
+                                   "raw": "I can't see it", "model": "grounder", "prompt_sha": SHA["grounding"],
+                                   "usage": GROUND_USAGE, "error": "no point in the reply"},
+          overlay_path=f"{run_dir}/step_02_overlay.png", timings_ms={"ground": 700.0}),
+        e("action", 2, 2006.0, {"name": "click", "arguments": unicorn, "ok": False, "screen_changed": None, "done": False,
+                                "error": "could not locate 'the purple unicorn button': no point in the reply"}),
+        obs(2, 2006.0, "/settings", None, "click failed: could not locate 'the purple unicorn button'",
+            "PAGE: Settings", {**fresh, "reused": True}, {"screenshot": 30.0}),
+        plan(3, 2007.0, "done", {"summary": "I could not finish.", "success": False}, 2800, 1300.0),
+        e("tool_call", 3, 2007.0, {"name": "done", "arguments": {"summary": "I could not finish.", "success": False},
+                                   "valid": True, "description": "Finishing: I could not finish."}),
+        e("action", 3, 2007.0, {"name": "done", "arguments": {"summary": "I could not finish.", "success": False},
+                                "ok": True, "screen_changed": None, "done": True}),
+        e("done", 3, 2008.0, {"success_claimed": False, "summary": "I could not finish.", "steps": 3, "reason": "done",
+                              "stats": {"n_actions": 2}}),
+    ]
+
+
 def console_doc(**over) -> dict:
     doc = {"console_run_id": "c-1234abcd", "agent": "real", "request": "Do the thing.", "task_id": TASK,
            "options": {"grounder": "base", "thinking": "retry", "lightning": "local"}, "sid": "console-c-1234abcd",
@@ -125,6 +200,7 @@ def test_summary_math_on_a_hand_made_trace():
     assert s["models"] == {"lightning": "lightning-from-payload", "grounder": "grounder-from-payload",
                            "summary": "summary-from-payload", "asr": None}
     assert (s["prompt_version"], s["lightning_root"]) == ("agent-v9", "nvidia/ckpt")
+    assert s["prompt_sha"] == {"lightning": None, "grounder": None, "summary": None}  # the run config doesn't record it: nothing to fall back to
     assert (s["verified"], s["verdict_explanation"], s["voice"]) == (None, None, None)
     json.dumps(s, allow_nan=False)
 
@@ -214,16 +290,47 @@ def test_mock_runs_are_labelled_and_never_borrow_config_models():
     s = logs.summarize_run(old_mock)
     assert s["agent"] == "mock"
     assert s["models"] == {"lightning": None, "grounder": None, "summary": None, "asr": None}  # "—", not "base"
-    assert s["prompt_version"] is None and s["lightning_root"] is None
+    assert s["prompt_version"] is None and s["lightning_root"] is None and s["prompt_sha"] == {"lightning": None, "grounder": None, "summary": None}
     new_mock = [dict(e, payload=dict(e["payload"])) for e in old_mock]
-    new_mock[1]["payload"]["summary"] = {"model": "mock (no VLM)", "prompt_version": "mock"}
-    new_mock[2]["payload"].update(model="mock (no Lightning)", prompt_version="mock")
+    new_mock[1]["payload"]["summary"] = {"model": "mock (no VLM)", "prompt_version": "mock", "prompt_sha": "mock"}
+    new_mock[2]["payload"].update(model="mock (no Lightning)", prompt_version="mock", prompt_sha="mock")
     s = logs.summarize_run(new_mock)
     assert s["models"]["lightning"] == "mock (no Lightning)" and s["models"]["summary"] == "mock (no VLM)"
     assert s["prompt_version"] == "mock"
+    assert s["prompt_sha"] == {"lightning": "mock", "grounder": None, "summary": "mock"}
     # console.json alone can mark a run as mock (the console ran --agent mock)
     assert logs.summarize_run(_done("done"), {"agent": "mock"})["agent"] == "mock"
     assert logs.summarize_run(_done("done"), {"agent": "real"})["agent"] == "real"
+
+
+def test_prompt_identity_tokens_and_reused_summaries(tmp_path):
+    """The fields agent/core.py writes since b6b0db2: prompt_version + prompt_sha per plan, summary model / prompt_sha /
+    usage / error / reused per observation, prompt_sha + usage per grounding."""
+    events = current_agent_trace()
+    s = logs.summarize_run(events, run_id=CURRENT_RUN)
+    assert s["prompt_version"] == "agent-v5"
+    assert s["prompt_sha"] == {"lightning": SHA["plan"], "grounder": SHA["grounding"], "summary": SHA["summary"]}
+    assert s["models"] == {"lightning": "lightning", "grounder": "grounder", "summary": "base", "asr": None}
+    # the summary p50 counts real summarizer calls only: the reused observation made none (no summary timing)
+    assert s["stage_p50_ms"]["summary"] == round(statistics.median([45000.0, 900.0]), 1)
+    assert (s["status"], s["steps"], s["n_errors"]) == ("done", 3, 0)
+
+    d = write_run(tmp_path, CURRENT_RUN, events)
+    evs = logs.run_detail(d, CURRENT_RUN)["events"]
+    assert [(e["kind"], e["prompt_sha"]) for e in evs if e["prompt_sha"]] == [
+        ("observation", SHA["summary"]), ("plan", SHA["plan"]), ("grounding", SHA["grounding"]),
+        ("observation", SHA["summary"]), ("plan", SHA["plan"]), ("grounding", SHA["grounding"]),
+        ("observation", SHA["summary"]), ("plan", SHA["plan"])]
+    assert all(e["prompt_sha"] is None for e in evs if e["kind"] in ("start", "tool_call", "action", "done"))
+    obs = [e for e in evs if e["kind"] == "observation"]
+    assert [e["model"] for e in obs] == ["base"] * 3  # a reused description still names the model that wrote it
+    assert [e["payload"]["summary"].get("reused") for e in obs] == [None, None, True]
+    assert all(e["payload"] == events[i]["payload"] for i, e in enumerate(evs))  # kept as written
+    # payload-declared names beat the config, even when the config disagrees
+    assert logs.event_model(events[2], {"lightning": {"model": "other"}}) == "lightning"
+    assert logs.event_prompt_sha({"kind": "observation", "payload": {"summary": "a string"}}) is None
+    assert logs.event_prompt_sha({"kind": "action", "payload": {"prompt_sha": "x"}}) is None
+    json.dumps(s, allow_nan=False)
 
 
 # --- reading and details --------------------------------------------------------------------------
@@ -357,7 +464,7 @@ def test_real_traces(tmp_path):
     assert (done["started_ts"], done["ended_ts"], done["total_ms"]) == (1792273825.135, 1792273839.482, 14347)
     assert done["models"] == {"lightning": "lightning", "grounder": "base", "summary": "base", "asr": None}
     assert done["lightning_root"] == "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
-    assert done["prompt_version"] == "agent-v4"
+    assert done["prompt_version"] == "agent-v4" and done["prompt_sha"] == {"lightning": None, "grounder": None, "summary": None}  # recorded before b6b0db2
     assert done["stage_p50_ms"] == {"voice": None, "summary": round(statistics.median([2102.1, 2101.6]), 1),
                                     "plan": round(statistics.median([3025.3, 4465.6]), 1), "ground": 675.7,
                                     "act": 18.2}
@@ -377,6 +484,7 @@ def test_real_traces(tmp_path):
     assert evs[4]["overlay_url"] == f"/runs/{DONE_RUN}/step_01_overlay.png"
     assert evs[6]["screenshot_url"] == f"/runs/{DONE_RUN}/step_01.png"
     assert [e["model"] for e in evs[1:5]] == ["base", "lightning", None, "base"]
+    assert all(e["prompt_sha"] is None for e in evs)
     assert evs[0]["t_ms"] == 0.0 and evs[-1]["t_ms"] == 14347.0
 
 
@@ -608,6 +716,7 @@ def test_real_mock_run_with_voice(console, tmp_path):
     assert s["models"] == {"lightning": "mock (no Lightning)", "grounder": "base, mock", "summary": "mock (no VLM)",
                            "asr": "stub"}
     assert s["prompt_version"] == "mock" and s["lightning_root"] is None
+    assert s["prompt_sha"] == {"lightning": "mock", "grounder": "mock", "summary": "mock"}
     p50 = s["stage_p50_ms"]
     assert (p50["voice"], p50["plan"], p50["summary"], p50["ground"]) == (812.4, None, None, None)  # nothing invented
     assert p50["act"] > 0 and s["n_errors"] == 0 and s["n_bad_lines"] == 0
@@ -615,6 +724,10 @@ def test_real_mock_run_with_voice(console, tmp_path):
     assert kinds[0] == "voice" and kinds[1] == "start" and kinds[-2:] == ["done", "verdict"]
     grounding = next(e for e in detail["events"] if e["kind"] == "grounding")
     assert grounding["payload"]["prompt_version"] == "mock" and grounding["payload"]["mock"] is True
+    assert grounding["payload"]["prompt_sha"] == grounding["prompt_sha"] == "mock"
+    acts = [e for e in detail["events"] if e["kind"] == "action" and e["payload"]["name"] != "done"]
+    assert acts and all(set(e["timings_ms"]) == {"act", "settle"} for e in acts)  # split like the real agent
+    assert p50["act"] == round(statistics.median(e["timings_ms"]["act"] for e in acts), 1)
     shot = next(e for e in detail["events"] if e.get("screenshot_url"))
     img = httpx.get(base + shot["screenshot_url"])
     assert img.status_code == 200 and img.content[:4] == b"\x89PNG"
