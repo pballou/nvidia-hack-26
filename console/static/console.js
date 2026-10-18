@@ -1,4 +1,4 @@
-/* GUI assist console: vanilla JS, no build step, no external resources.
+/* GUI Assist console: vanilla JS, no build step, no external resources.
  *
  * Talks to the console backend (console/app.py): GET /api/config, GET /api/tasks,
  * POST /api/run, GET /api/runs/{id}, SSE /api/runs/{id}/events, POST /api/runs/{id}/stop.

@@ -1,4 +1,4 @@
-"""GUI assist console backend (docs/tasks/T1-app.md Part B). Run: python -m console --agent mock|real.
+"""GUI Assist console backend (docs/tasks/T1-app.md Part B). Run: python -m console --agent mock|real.
 
 HTTP API (binding for console/static; details in console/README.md):
   GET  /                          console/static/index.html (and /static/*, Cache-Control: no-cache)
@@ -429,7 +429,7 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
         yield
         await run_in_threadpool(runner.shutdown)
 
-    app = FastAPI(title="GUI assist console", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app = FastAPI(title="GUI Assist console", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.runner = runner
     app.state.log_roots = log_roots

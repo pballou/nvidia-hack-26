@@ -22,13 +22,13 @@ tags:
 - qwen3.5
 ---
 
-# GUI assist grounder (Qwen3.5-2B + LoRA)
+# GUI Assist grounder (Qwen3.5-2B + LoRA)
 
 A 2B vision-language model fine-tuned for **GUI click grounding**. It takes a screenshot and a
 plain-language target ("the gear icon at the top right", "open more options") and answers with
 one click point: `{"point_2d": [x, y]}` on a 0–1000 grid.
 
-It is the grounding tool of **GUI assist**, a vision-only accessibility agent built at the
+It is the grounding tool of **GUI Assist**, a vision-only accessibility agent built at the
 NVIDIA x Red Hat Small Models Hack (October 2026). NVIDIA Nemotron 3.5 Lightning plans each step
 from a text description of the screen and calls this model to turn the target description into
 pixels. The agent never reads the app's DOM or code. Code, envs and eval logs:
@@ -552,5 +552,5 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
 }
 ```
 
-GUI assist (team sherpas: Patrick, Kyle, Charlie), NVIDIA x Red Hat Small Models Hack,
+GUI Assist (team sherpas: Patrick, Kyle, Charlie), NVIDIA x Red Hat Small Models Hack,
 Raleigh NC, 17–18 October 2026. <https://github.com/pballou/nvidia-hack-26>

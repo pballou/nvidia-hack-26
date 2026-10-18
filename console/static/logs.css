@@ -1,4 +1,4 @@
-/* GUI assist logs page (/logs). Builds on console.css (its variables, header, buttons, chips, kbd, high-contrast
+/* GUI Assist logs page (/logs). Builds on console.css (its variables, header, buttons, chips, kbd, high-contrast
    theme html.hc). Kind swatches use the categorical slots validated with the dataviz palette checker (light on
    #fff, dark steps on #000); every swatch sits next to its text label, so identity is never color alone. */
 

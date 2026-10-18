@@ -1,4 +1,4 @@
-# GUI assist
+# GUI Assist
 
 Team **sherpas**: Patrick, Kyle, Charlie.
 
@@ -7,7 +7,7 @@ Team **sherpas**: Patrick, Kyle, Charlie.
 Only 14% of customer-service issues are fully resolved in self-service, mostly because
 people can't find what they need, so they call: a median $13.50 per agent contact
 against $1.84 for self-service ([Gartner](https://www.gartner.com/en/newsroom/press-releases/2024-08-19-gartner-survey-finds-only-14-percent-of-customer-service-issues-are-fully-resolved-in-self-service)).
-GUI assist lets a bank, utility or benefits portal's customers say what they want and
+GUI Assist lets a bank, utility or benefits portal's customers say what they want and
 watch it happen on the real site, with small models that run on the company's own
 hardware. Market sizing, ROI assumptions and sources: [docs/pitch.md](docs/pitch.md).
 

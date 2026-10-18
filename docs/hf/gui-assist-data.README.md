@@ -1,6 +1,6 @@
 ---
 license: cc-by-4.0  # the most restrictive source license we include (UIBert expressions, CC BY 4.0); OS-Atlas-derived parts are also Apache-2.0. See "Sources and licenses"
-pretty_name: "GUI assist grounding data: OS-Atlas slice + Nemotron Lightning instructions"
+pretty_name: "GUI Assist grounding data: OS-Atlas slice + Nemotron Lightning instructions"
 language:
 - en
 task_categories:
@@ -39,12 +39,12 @@ configs:
     path: manifest.jsonl
 ---
 
-# GUI assist grounding data
+# GUI Assist grounding data
 
 This is the training and dev data for
 [`patrickballou/gui-assist-grounder`](https://huggingface.co/patrickballou/gui-assist-grounder),
 a 2B GUI click-grounding model: given a screenshot and an instruction, it returns where to
-click. We built the data for the GUI assist accessibility agent at the NVIDIA x Red Hat Small
+click. We built the data for the GUI Assist accessibility agent at the NVIDIA x Red Hat Small
 Models Hack (October 2026). Code: <https://github.com/pballou/nvidia-hack-26>.
 
 The repo contains four things:
@@ -526,12 +526,12 @@ AndroidWorld, FineWeb), and this dataset:
   primaryClass  = {cs.CV}
 }
 @misc{guiassist2026data,
-  title        = {GUI assist grounding data: OS-Atlas slice + Nemotron Lightning instructions},
-  author       = {{GUI assist team (sherpas)}},
+  title        = {GUI Assist grounding data: OS-Atlas slice + Nemotron Lightning instructions},
+  author       = {{GUI Assist team (sherpas)}},
   year         = {2026},
   howpublished = {\url{https://huggingface.co/datasets/patrickballou/gui-assist-data}}
 }
 ```
 
-GUI assist (team sherpas: Patrick, Kyle, Charlie), NVIDIA x Red Hat Small Models Hack,
+GUI Assist (team sherpas: Patrick, Kyle, Charlie), NVIDIA x Red Hat Small Models Hack,
 Raleigh NC, 17–18 October 2026. <https://github.com/pballou/nvidia-hack-26>

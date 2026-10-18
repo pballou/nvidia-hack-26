@@ -9,7 +9,7 @@ chat.
 | Path | Owner |
 | --- | --- |
 | `sandbox/` (target web app, tasks, checks) | T1 |
-| `console/` (GUI assist user-facing app) | T1 |
+| `console/` (GUI Assist user-facing app) | T1 |
 | `agent/` (planner, browser, grounder client, traces) | T2 |
 | `resources_servers/web_agent/` (Gym env) | T2 |
 | `configs/agent.yaml` | T2 |

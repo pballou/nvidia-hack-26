@@ -7,7 +7,7 @@ parallel. Where each task stands right now: [../status.md](../status.md).
 
 | Task | What | Needed by |
 | --- | --- | --- |
-| [T1-app.md](T1-app.md) | Sandbox target app (12 verifiable tasks) + the GUI assist console | Sandbox ~4pm Sat; console ~10pm Sat |
+| [T1-app.md](T1-app.md) | Sandbox target app (12 verifiable tasks) + the GUI Assist console | Sandbox ~4pm Sat; console ~10pm Sat |
 | [T2-orchestrator.md](T2-orchestrator.md) | `common/grounding.py` (first 30 min), Lightning agent core, NeMo Gym `web_agent` env | grounding.py ASAP; loop ~5pm; Gym env ~8pm |
 | [T3-lightning-data-engine.md](T3-lightning-data-engine.md) | Lightning rewrites raw labels into training instructions; publishable method | Dry run ~4pm; full run ~6pm |
 | [B-night-loop.md](B-night-loop.md) | Overnight NeMo Gym improvement loop (profile → GRPO → dev gate), Kyle | Starts ~8pm Sat; hard end 05:40 |

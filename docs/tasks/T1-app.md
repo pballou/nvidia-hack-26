@@ -1,4 +1,4 @@
-# T1: Sandbox target app + GUI assist console
+# T1: Sandbox target app + GUI Assist console
 
 **Owner:** Patrick (stream C). **Time box:** ~3 h. Sandbox tasks usable by ~4pm
 Saturday; console demo-ready by ~10pm Saturday.
@@ -9,13 +9,13 @@ that file in the same commit.
 
 ## Why this exists
 
-GUI assist is an accessibility agent: a user says what they want, and the agent does
+GUI Assist is an accessibility agent: a user says what they want, and the agent does
 it in an app **from pixels alone**. We need two things:
 
 1. **A sandbox target app** that the agent operates in our NeMo Gym `web_agent` env
    and in the demo. It must give verifiable per-session state, and it must include UI
    that defeats DOM-based agents.
-2. **The GUI assist console:** the localhost app a judge or user sees. Type a request,
+2. **The GUI Assist console:** the localhost app a judge or user sees. Type a request,
    watch the agent work step by step, see where it clicked and why.
 
 ## Part A: sandbox target app (`sandbox/`), done first
@@ -101,7 +101,7 @@ functions, unit-tested.
   `sandbox/screenshots/*.png` for the README and the video.
 - **Network:** a Playwright route check that no request leaves `127.0.0.1`.
 
-## Part B: GUI assist console (`console/`), the user-facing app
+## Part B: GUI Assist console (`console/`), the user-facing app
 
 **Stack:** FastAPI backend plus one static HTML/JS page. No build step. Port **8095**.
 

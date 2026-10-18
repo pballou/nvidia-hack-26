@@ -365,7 +365,7 @@ def test_demo_up_help_lists_the_flags():
     for flag in ("--agent", "--lightning", "--grounder", "--vlm-url", "--summary-model", "--vlm-label", "--asr",
                  "--headed", "--skip-models"):
         assert flag in out.stdout, flag
-    assert ('scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder'
+    assert ('scripts/demo_up.sh --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model base'
             in out.stdout)
     for bad in (["--grounder", "large"], ["--summary-model", "x"], ["--vlm-url", "ftp://x"], ["--nope"]):
         r = subprocess.run(["bash", str(DEMO_UP), *bad], capture_output=True, text=True, timeout=20)

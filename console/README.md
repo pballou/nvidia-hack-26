@@ -1,4 +1,4 @@
-# GUI assist console
+# GUI Assist console
 
 The localhost app a user or judge sees: type a request, watch the agent work step by
 step in the sandbox, see where it clicked and why, and get a verdict checked against

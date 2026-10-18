@@ -1,4 +1,4 @@
-/* GUI assist logs page (/logs): every run's trace, event by event. Vanilla JS, no build step, no external resources.
+/* GUI Assist logs page (/logs): every run's trace, event by event. Vanilla JS, no build step, no external resources.
  *
  * Reads the console backend's logs API (console/README.md):
  *   GET /api/logs/runs?limit=200          {runs: [RunSummary, ...]} newest first

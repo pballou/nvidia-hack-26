@@ -1,4 +1,4 @@
-"""Mock GUI assist agent: the same interface, events and trace layout as T2's agent.core.
+"""Mock GUI Assist agent: the same interface, events and trace layout as T2's agent.core.
 
     async run_task(request, *, start_url, cfg, on_event=None, parent_run_id=None) -> dict (RunResult fields)
 

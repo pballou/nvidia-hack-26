@@ -8,7 +8,7 @@ Target: everything finished by 10:30.
 
 | Form field | What we put there | Owner | Source |
 | --- | --- | --- | --- |
-| Project Name / Team Name | **GUI assist** / **sherpas** | — | — |
+| Project Name / Team Name | **GUI Assist** / **sherpas** | — | — |
 | Team Member Names & Email Addresses | Patrick, Kyle, Charlie + emails | Patrick | — |
 | Submission Track | Fine-Tuned & Specialized | — | — |
 | Submission Description | 1 paragraph: problem → approach → results | Patrick | README pitch |
@@ -58,7 +58,7 @@ Condensed from the organizers' bounty slides. "Open" is what a judge could push 
 - [x] **HF model** public: https://huggingface.co/patrickballou/gui-assist-grounder
 - [x] **HF data** public: https://huggingface.co/datasets/patrickballou/gui-assist-data (10:27)
 - [ ] **Airtable form**, using the values below. Paste the description, then the three bounty boxes from §Form text.
-  - Project / team: **GUI assist** / **sherpas**
+  - Project / team: **GUI Assist** / **sherpas**
   - Members: Patrick (pballou@sherpa6.com), Kyle (kodonnell@sherpa6.com), Charlie (carleth@sherpa6.com)
   - Track: **Fine-Tuned & Specialized**
   - Bounties: ☑ Nemotron Lightning ☑ NeMo Gym ☑ Red Hat vLLM
@@ -68,7 +68,7 @@ Condensed from the organizers' bounty slides. "Open" is what a judge could push 
 
 **Submission description** (paste-ready):
 
-> GUI assist lets people do things on any website just by saying what they want. It's an
+> GUI Assist lets people do things on any website just by saying what they want. It's an
 > accessibility and self-service layer that works from pixels alone, with no API, DOM or site
 > changes. Only 14% of customer-service issues get resolved in self-service today, and a call costs
 > $13.50 against $1.84. NVIDIA Nemotron 3.5 Lightning plans each step from a text description of

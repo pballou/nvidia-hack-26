@@ -19,7 +19,7 @@ tiny icon. Then the team, on camera, briefly.
 **Narration:**
 > Every website makes you learn where its buttons are. For people with low vision,
 > limited mobility, or just no patience for a confusing portal, that's the whole
-> problem. We're team sherpas: Patrick, Kyle and Charlie. We built GUI assist.
+> problem. We're team sherpas: Patrick, Kyle and Charlie. We built GUI Assist.
 
 ## 2. What it is (0:20–0:40)
 
@@ -27,7 +27,7 @@ tiny icon. Then the team, on camera, briefly.
 pixels alone."
 
 **Narration:**
-> GUI assist is a navigation layer for any app. You say what you want, and it does it,
+> GUI Assist is a navigation layer for any app. You say what you want, and it does it,
 > by looking at the screen the way you do. No API, no integration, no access to the
 > page's code. If you can see it, it can click it.
 
@@ -119,7 +119,7 @@ Mac."
 
 **Narration:**
 > Most software was never built with accessibility in mind, and most of it will never
-> be rewritten. GUI assist doesn't need it to be. It works on the app you already
+> be rewritten. GUI Assist doesn't need it to be. It works on the app you already
 > have: customer self-service without the support call, and real access for people
 > who struggle with a mouse and a crowded screen. And it's small: everything in this
 > demo ran on this Mac, so it can run privately, on your own hardware.
@@ -130,7 +130,7 @@ Mac."
 `patrickballou/gui-assist-grounder`.
 
 **Narration:**
-> Say what you want. GUI assist does the rest. Thanks for watching.
+> Say what you want. GUI Assist does the rest. Thanks for watching.
 
 ---
 

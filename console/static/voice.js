@@ -1,4 +1,4 @@
-/* Voice input for the GUI assist console: mic button, push-to-talk, local capture, POST /api/transcribe.
+/* Voice input for the GUI Assist console: mic button, push-to-talk, local capture, POST /api/transcribe.
  *
  * No cloud speech. The Web Speech API is never used. The microphone is read as raw PCM with Web Audio
  * (pcm-worklet.js, or a ScriptProcessor where AudioWorklet is missing), encoded to a 16 kHz mono PCM16 WAV in the

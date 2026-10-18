@@ -28,7 +28,7 @@ def voice_note(info: dict) -> str | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="python -m console", description="GUI assist console (FastAPI + one static page).")
+    ap = argparse.ArgumentParser(prog="python -m console", description="GUI Assist console (FastAPI + one static page).")
     ap.add_argument("--agent", choices=("mock", "real"), default="mock",
                     help="mock = console/mock_agent.py (scripted, no models); real = T2's agent.core")
     ap.add_argument("--lightning", choices=("local", "hosted"), default="local",
@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    print(f"GUI assist console: http://{settings.host}:{settings.port}  "
+    print(f"GUI Assist console: http://{settings.host}:{settings.port}  "
           f"(agent={settings.agent}, lightning={settings.default_lightning}, grounder={settings.default_grounder}, "
           f"thinking={settings.default_thinking}, clarify={settings.default_clarify}, "
           f"sandbox={settings.sandbox_url}, headed={settings.headed}, "

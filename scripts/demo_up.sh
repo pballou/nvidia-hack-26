@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command for the demo: start the sandbox (:8090) and the GUI assist console (:8095),
+# One command for the demo: start the sandbox (:8090) and the GUI Assist console (:8095),
 # check that the VLM (configs/agent.yaml vlm.base_url, normally :8001, or --vlm-url) and Lightning
 # (hosted or :8000) respond and serve the names the console will ask for, print the URL.
 # Ctrl-C stops whatever this script started.

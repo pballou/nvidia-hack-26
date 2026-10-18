@@ -1,4 +1,4 @@
-# GUI assist: the pitch
+# GUI Assist: the pitch
 
 Team **sherpas** (Patrick, Kyle, Charlie). Fine-Tuned & Specialized track.
 
@@ -6,7 +6,7 @@ Market figures link to their sources. **Illustrative** means our own arithmetic 
 
 ## 1. One line
 
-**Say what you want to do on a website, and GUI assist does it on the real page.** It works from screenshots alone, with small models that run on your own hardware. Companies have already built self-service. Customers can't find it. We connect the two.
+**Say what you want to do on a website, and GUI Assist does it on the real page.** It works from screenshots alone, with small models that run on your own hardware. Companies have already built self-service. Customers can't find it. We connect the two.
 
 ## 2. The problem
 
@@ -111,7 +111,7 @@ Cutaways:
 
 **Pricing:** per resolved task, priced well under the $11.66 that each deflected contact saves (illustrative). Regulated buyers can take an on-prem annual license instead. Price points are not yet validated.
 
-| Alternative | Its gap | GUI assist |
+| Alternative | Its gap | GUI Assist |
 |---|---|---|
 | FAQ chatbots and in-app assistants | Most answer but don't act on the page, and the ones that act need API work per task. Only 28% of bank and card app customers use the virtual assistant, and satisfaction drops on complex problems ([J.D. Power 2026][jdp]). | It acts on the site the customer already uses. |
 | RPA | Scripted per process, tied to a fixed UI, built for the back office. | It takes free-form requests and reads the screen again at every step. |
@@ -132,10 +132,10 @@ Cutaways:
 ## 10. 60-second video script
 
 **Segment 2, pitch (~35 s).** Show each source as a caption.
-> "Only fourteen percent of customer-service problems get solved through self-service, and the top reason is that people can't find what they need. So they call. An agent contact costs about thirteen fifty, against under two dollars for self-service. More than one in four US adults has a disability, and ninety-six percent of the top million home pages fail automated accessibility checks. GUI assist closes that gap. You say what you want, and it does it on the real website, from the screen alone."
+> "Only fourteen percent of customer-service problems get solved through self-service, and the top reason is that people can't find what they need. So they call. An agent contact costs about thirteen fifty, against under two dollars for self-service. More than one in four US adults has a disability, and ninety-six percent of the top million home pages fail automated accessibility checks. GUI Assist closes that gap. You say what you want, and it does it on the real website, from the screen alone."
 
 **Segment 5, so what (~25 s).** Caption: *illustrative, assumptions in docs/pitch.md*.
-> "For a two-million-customer utility, moving twenty to forty percent of calls to self-service is worth about four to eight million dollars a year. GUI assist needs no API, and about two hours of fine-tuning took icon clicks from seventy-eight to eighty-five percent. It runs on this Mac, so screens never leave the building. We're looking for one utility, credit union or benefits agency to pilot it."
+> "For a two-million-customer utility, moving twenty to forty percent of calls to self-service is worth about four to eight million dollars a year. GUI Assist needs no API, and about two hours of fine-tuning took icon clicks from seventy-eight to eighty-five percent. It runs on this Mac, so screens never leave the building. We're looking for one utility, credit union or benefits agency to pilot it."
 
 **Don't say:**
 - "ADA compliant" or "EAA compliant".

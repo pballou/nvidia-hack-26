@@ -1,6 +1,6 @@
 # Sandbox: "Acme Utilities" customer portal
 
-The target app the GUI assist agent operates in, both in the NeMo Gym `web_agent`
+The target app the GUI Assist agent operates in, both in the NeMo Gym `web_agent`
 env and in the demo. It's a realistic utility account portal with verifiable
 per-session state, and with UI that accessibility-tree agents can't handle: icon-only
 buttons with no accessible name, and `<canvas>` widgets with no DOM element per target.
