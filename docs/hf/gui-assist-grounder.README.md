@@ -537,9 +537,8 @@ Both environments are in the GitHub repo, in Gym's layout (`resources_servers/`)
     - The 1,003 rows from the downloaded BF16 checkpoint fall under its OpenMDW-1.1 license,
       which places no restrictions on outputs.
     - The 8,028 rows from NVIDIA's hosted API fall under the NVIDIA API Trial Terms of Service,
-      which limit trial use to non-production. **TBD (open question for the dataset card):**
-      Patrick's ~9:30 release check decides whether these rows are published or only the local
-      rows are.
+      which limit trial use to non-production. They are published in the dataset (team decision, Sun 2026-10-18):
+      we own the generated content (§6.3), and the hackathon requires publishing model-generated training data.
   - Details and the open questions are in the dataset card.
 
 ## Citation
