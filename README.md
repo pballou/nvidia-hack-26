@@ -199,4 +199,9 @@ points on dev), then one ScreenSpot-v2-clean eval of the final adapter.
 
 ## License
 
-TBD. Model and dataset licenses are recorded per component before publication.
+Code in this repo: [Apache License 2.0](LICENSE). Vendored NeMo Gym skills under `.agents/skills/` keep
+their own license ([LICENSE-NeMo-Gym](.agents/skills/LICENSE-NeMo-Gym)).
+
+Models and data carry their own licenses, which are recorded on each Hugging Face card: the base
+model [Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B), NVIDIA Nemotron 3.5 Lightning and
+Parakeet (NVIDIA's model licenses), and the OS-Atlas source data.
