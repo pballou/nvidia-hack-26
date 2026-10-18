@@ -272,7 +272,7 @@ vllm-metal has no prefix cache for Lightning, so every step re-prefills the whol
 | Sat, interactive, all tasks⁴ | `base` | retry | 12 × 1 | 6/12 | 7/12 | 1/96 | n=1 |
 | Sat night, Gym⁵ | `base` | off | 12 × 3 | 18/36 | 24/36 (26 match, 8 false) | 10/259 | reportable (`agent-v4`) |
 | Sat night, Gym⁵ | `grounder` = sft-template | off | 12 × 3 | **22/36** | 25/36 (31 match, 4 false) | 6/234 | reportable (`agent-v4`) |
-| Sun, Gym (if the overnight adapter beats sft-template on dev) | `grounder` (final) | off | 12 × 3 | TBD | TBD | TBD | final |
+| Sat night, Gym⁶ | `grounder` = FINAL (sft-lightning + GRPO) | off | 12 × 3 | 17/36 | 27/36 (24 match, 11 false) | 6/256 | reportable (`agent-v4`) |
 | Sat night, interactive (§4.3) | `grounder` = sft-template | off / retry / on | 12 × 3 (on: 32) | 20/36 · 22/36 · **26/32** | 28/36 · 32/36 · 30/32 | 6/374 · 7/328 · 0/189 | reportable (`agent-v4`) |
 
 All Saturday reads used prompt `agent-v3` (see §4.2) and the task checks from before sandbox
@@ -300,6 +300,15 @@ claims matched the sandbox 31/36 vs 26/36. `gym eval compare`: reward +0.111, 95
 `mark-all-read` check, tuned is 20/36 (+2), as the current check doesn't guard the bell
 notifications ([BLADE](blade/agent_base_vs_sft.md)); the check stays as-is until after Sunday's
 grounder rerun.
+
+⁶ `docs/runs.md` Sat 22:04: the FINAL grounder arm only, against the same base arm (identical
+rows, planner and thinking). Its 17/36 is within noise of base (reward −0.028, 95% CI
+[−0.20, +0.14]); failed actions 10 → 0 and text-size-large 3/3 still hold. The drop from SFT's
+22/36 is not a click problem: about 6 of the 9 rollouts that changed trace to the planner or the
+screen summaries, the 2 grounder-caused ones cancel, and FINAL hits 96.5% of well-posed targets
+([blade/agent_final_vs_sft.md](blade/agent_final_vs_sft.md)). For
+the planner this is the point: the agent's end-to-end success now depends mostly on Lightning's
+choices and on what the description shows, which is where thinking on helps (§4.3).
 
 ⁴ `$PY scripts/run_agent_tasks.py --tasks sandbox/tasks.json --sandbox-url http://127.0.0.1:8091
 --grounder base --thinking off|retry` (`runs/summary_20261017-165130.json` and

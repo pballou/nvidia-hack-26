@@ -25,6 +25,39 @@ Lightning, the real sandbox, and grounder choices made on the dev split.
 
 ## Agent (sandbox tasks, verified from sandbox state)
 
+### Gym `web_agent`: FINAL grounder rerun (Sat 22:05–22:29, reportable)
+
+Same rows (sha checked against the base arm below via `BASELINE=`), planner, thinking (off) and
+`max_steps` 12. `grounder` = FINAL (`sft-lightning` + GRPO round 1, dev 87.00), served on `:8001`
+from start to end (root checked both times). 0 masked, 0 VLM infra errors. Latency isn't
+reportable (another job shared `:8001`).
+
+| Verified (12 tasks × 3) | `base` | `sft-template` | **FINAL** |
+| --- | --- | --- | --- |
+| All tasks | 18/36 | 22/36 | 17/36 |
+| text-size-large (small adjacent "L" option) | 0/3 | 2/3 | **3/3** |
+| Failed actions (no usable point) | 10 | 0 | **0** |
+| False success claims | 8 | 4 | 11 |
+
+- **Agent success is within noise for all three grounders.** FINAL vs base: `mean/reward`
+  −0.028, 95% CI [−0.20, +0.14]; SFT vs base CI [−0.06, +0.28]; SFT vs FINAL Fisher p ≈ 0.34
+  (n=3 per task, planner at T=1.0). Don't claim that SFT or GRPO improved agent success, or that
+  one adapter is the better agent grounder.
+- **What the grounders clearly change inside the agent:** the tuned ones always return a usable
+  point (failed actions 10 → 0, significant), they fix the small adjacent-option target
+  (text-size-large 0/3 → 3/3 with FINAL), and FINAL hits 96.5% of well-posed targets vs SFT's
+  92.6% (hand-labelled). FINAL also makes fewer unrequested setting changes (stop-promotions: 3
+  vs 14 failed conditions).
+- **The 22 → 17 drop is not a grounder regression.** About 6 of the 9 changed rollouts come from
+  the planner or the summarizer. For example, all 3 FINAL `mark-all-read` runs leave the path at
+  the planner's first call, before any grounder call. The `base` summarizer, on the `:8001`
+  process restarted at 22:00:59, dropped the high-contrast state line it had shown in 6/6 earlier
+  views. Add the lenient `mark-all-read` check. A clean end-to-end grounder comparison needs both
+  adapters interleaved on one vLLM process.
+- **Diagnosis:** [docs/blade/agent_final_vs_sft.md](blade/agent_final_vs_sft.md). It also
+  recommends demoing with FINAL, scripted on tasks it passed 3/3.
+- **Artifacts (T2's Mac):** `results/agent_final/` (rollouts, run_info, `agent_compare/`).
+
 ### Gym `web_agent`: base vs SFT grounder (Sat 18:45–19:25, reportable)
 
 All 12 sandbox tasks × 3 repeats, the same rows and planner for both conditions: official BF16

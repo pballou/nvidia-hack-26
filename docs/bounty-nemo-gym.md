@@ -76,7 +76,15 @@ tools; only the grounder's served name changes):
 | --- | --- | --- | --- | --- |
 | `base` | 18/36 (50%) | 24/36 (8 false) | 10/259 | Sat 18:45, `agent-v4`, reportable |
 | `grounder` = sft-template | **22/36 (61%)** | 25/36 (4 false) | 6/234 | Sat 19:05, `agent-v4`, reportable |
-| `grounder` (final overnight adapter, if it beats sft-template on dev) | TBD | TBD | TBD | Sunday |
+| `grounder` = FINAL (sft-lightning + GRPO round 1) | 17/36 (47%) | 27/36 (11 false) | 6/256 | Sat 22:05, `agent-v4`, reportable |
+
+- **All three are within noise on agent success.** FINAL vs base: `mean/reward` −0.028, 95% CI
+  [−0.20, +0.14]; failed actions 10 → 0 (significant); text-size-large 0/3 → 3/3. The 22 → 17
+  drop is not a grounder regression. FINAL hits 96.5% of well-posed targets vs SFT's 92.6%, and
+  about 6 of the 9 changed rollouts come from the planner or the summarizer. FINAL also ran on a
+  restarted serving process. Details: [blade/agent_final_vs_sft.md](blade/agent_final_vs_sft.md).
+  The Gym-driven gains are therefore the grounding ones (dev, ScreenSpot-v2-clean) and the
+  robust in-agent click fixes. End-to-end success at n=36 can't separate the grounders.
 
 - **Strict-check caveat:** with a strict `mark-all-read` check, tuned is 20/36 (+2), as the
   current check doesn't guard the bell notifications ([BLADE](blade/agent_base_vs_sft.md)). The

@@ -175,18 +175,24 @@ choose checkpoints on dev only and report both.
 only the grounder changes): verified success 18/36 with `base` vs **22/36** with
 `grounder` = `sft-template`. Failed actions went from 10 to 0, and false success claims
 from 8 to 4. With a strict `mark-all-read` check, tuned is 20/36 (+2): the current check
-doesn't guard the bell notifications ([BLADE report](docs/blade/agent_base_vs_sft.md)).
+doesn't guard the bell notifications ([BLADE report](docs/blade/agent_base_vs_sft.md)). The
+FINAL grounder (SFT + GRPO) scored 17/36. All three are within noise at n=36. The robust in-agent
+gains are that the tuned grounders always return a usable point (failed actions 10 → 0) and fix
+the small adjacent-option target (text-size-large 0/3 → 3/3). End-to-end success depends mostly
+on the planner's choices and on what the screen description shows
+([diagnosis](docs/blade/agent_final_vs_sft.md)).
 
-*TBD Sunday:* SFT+GRPO from the overnight loop (a round is kept only if it gains ≥ 0.5
-points on dev), then one ScreenSpot-v2-clean eval of the final adapter.
+The overnight loop kept a round only if it gained ≥ 0.5 points on dev: round 1 (GRPO) was kept,
+round 2 (−0.11) was not, so round 1 is the final adapter above.
 
 ## Known limitations & next steps
 
 - **One sandbox app** for the agent eval, and the prompts were tuned on its traces, so treat
   absolute success as in-domain. Base vs tuned (same rows, prompts and tools) is the
   comparable number.
-- **Small n:** the agent gain (+4 of 36) is suggestive but not significant (mean reward
-  gain +0.11, 95% CI [-0.06, +0.28]). The drop in failed actions is significant.
+- **Small n:** agent success with the three grounders (18, 22 and 17 of 36) is within noise:
+  SFT vs base +0.11 mean reward, 95% CI [-0.06, +0.28]; FINAL vs base −0.03, CI [-0.20, +0.14].
+  The drop in failed actions is significant.
 - **Still 0/3:** the canvas-chart task and the two scroll-dependent tasks.
 
 Next steps, ranked by the [BLADE report](docs/blade/agent_base_vs_sft.md). The agent pipeline
