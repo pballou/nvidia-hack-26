@@ -4,14 +4,22 @@ HTTP API (binding for console/static; details in console/README.md):
   GET  /                          console/static/index.html (and /static/*, Cache-Control: no-cache)
   GET  /api/config                {agent, sandbox_url, headed, defaults, asr, endpoints}
   GET  /api/tasks                 the 12 sandbox tasks, without their checks
-  POST /api/run                   {request, task_id?, options?, voice?, task_match?} -> {run_id, sid, start_url};
+  POST /api/run                   {request, task_id?, options?, voice?, task_match?, clarifies?}
+                                  -> {run_id, sid, start_url, request};
                                   409 busy, 400 bad input (or a grounder the VLM doesn't serve), 503 unavailable
   GET  /api/runs/{run_id}         run summary
   GET  /api/runs/{run_id}/events  SSE: status, step, result, verdict, end (replay + live; honors Last-Event-ID)
   POST /api/runs/{run_id}/stop    {ok: true}
+  POST /api/runs/{run_id}/task_match  {task_id, method: "restated", score, matched_from}: check a free-text run as a
+                                  task because the agent's restatement (its clarify event's normalized_request)
+                                  matches it -> {ok, run_id, task_id, task_match}; 404 / 400 / 409 {error}
   POST /api/transcribe            16 kHz mono PCM16 WAV (raw audio/wav or multipart "audio") -> {text, duration_s, latency_ms, model}
   GET  /runs/{agent_run_id}/{step_XX[_overlay].png}  trace images
   GET  /logs, /api/logs/runs[/{run_id}[/download]]   the logs page and its API (console/logs.py)
+
+Follow-ups (agent/clarify.py): a run that ends with done reason "needs_input" asked the user a question. The answer
+starts a new run with `clarifies: {parent_run_id: <that run's agent run id>, answer}`; the backend builds its request
+with agent.clarify.follow_up_request(<the parent's done.payload.request>, answer) and passes parent_run_id to run_task.
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -41,14 +50,20 @@ log = logging.getLogger("console")
 CONSOLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CONSOLE_DIR.parent
 
-OPTION_CHOICES = {"grounder": ("base", "grounder"), "thinking": ("off", "retry", "on"), "lightning": ("hosted", "local")}
-DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
+OPTION_CHOICES = {"grounder": ("base", "grounder"), "thinking": ("off", "retry", "on"), "lightning": ("hosted", "local"),
+                  "clarify": ("on", "off")}
+# The console's defaults (python -m console --thinking / --clarify change the last two): thinking off (the recording
+# setting; retry and on stay in Options), and the pre-flight request check (agent/clarify.py) on, with its toggle.
+DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"}
 MAX_REQUEST_CHARS = 500
+MAX_ANSWER_CHARS = 300   # clarifies.answer: the user's answer to the agent's question
 MAX_VOICE_TEXT_CHARS = 500
 MAX_VOICE_MODEL_CHARS = 120
 VOICE_KEYS = ("text", "model", "latency_ms", "duration_s")
 TASK_MATCH_KEYS = ("method", "score", "matched_from")
-TASK_MATCH_METHODS = ("picked", "exact", "fuzzy")
+TASK_MATCH_METHODS = ("picked", "exact", "fuzzy")  # POST /api/run; "restated" only via POST /api/runs/{id}/task_match
+LATE_TASK_MATCH_KEYS = ("task_id", *TASK_MATCH_KEYS)
+CLARIFIES_KEYS = ("parent_run_id", "answer")
 IMAGE_RE = logs.IMAGE_RE                 # one definition: the logs page builds image URLs with the same rules
 AGENT_RUN_ID_RE = logs.IMAGE_RUN_ID_RE
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -68,6 +83,8 @@ class ConsoleSettings:
     step_delay_s: float = 0.8  # mock pacing
     default_lightning: str = "local"  # the console's initial Lightning toggle (local :8000 or hosted API)
     default_grounder: str = "grounder"  # the console's initial Grounder choice (--grounder base|grounder)
+    default_thinking: str = "off"       # --thinking off|retry|on
+    default_clarify: str = "on"         # --clarify on|off: the pre-flight request check (agent/clarify.py)
     # Real agent only (load_config overrides; None = the agent's config and env vars decide):
     vlm_url: str | None = None          # --vlm-url -> vlm={"base_url": ...}
     summary_model: str | None = None    # --summary-model base|grounder
@@ -92,13 +109,18 @@ class ConsoleSettings:
             raise ValueError(f"default_lightning must be one of {OPTION_CHOICES['lightning']}")
         if self.default_grounder not in OPTION_CHOICES["grounder"]:
             raise ValueError(f"default_grounder must be one of {OPTION_CHOICES['grounder']}")
+        if self.default_thinking not in OPTION_CHOICES["thinking"]:
+            raise ValueError(f"default_thinking must be one of {OPTION_CHOICES['thinking']}")
+        if self.default_clarify not in OPTION_CHOICES["clarify"]:
+            raise ValueError(f"default_clarify must be one of {OPTION_CHOICES['clarify']}")
         if self.summary_model is not None and self.summary_model not in SERVED_NAMES:
             raise ValueError(f"summary_model must be one of {SERVED_NAMES}")
         self.vlm_url = self.vlm_url.strip().rstrip("/") if self.vlm_url and self.vlm_url.strip() else None
         self.vlm_label = self.vlm_label.strip() if self.vlm_label and self.vlm_label.strip() else None
 
     def default_options(self) -> dict:
-        return {**DEFAULT_OPTIONS, "grounder": self.default_grounder, "lightning": self.default_lightning}
+        return {**DEFAULT_OPTIONS, "grounder": self.default_grounder, "lightning": self.default_lightning,
+                "thinking": self.default_thinking, "clarify": self.default_clarify}
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -116,16 +138,71 @@ def _error(status: int, message: str, **extra) -> JSONResponse:
     return JSONResponse({"error": message, **extra}, status_code=status)
 
 
-def parse_run_body(body, tasks_by_id: dict, defaults: dict = DEFAULT_OPTIONS) -> tuple[dict | None, str | None]:
-    """Validate POST /api/run. Returns (clean, None) or (None, error message)."""
+ResolveParent = Callable[[str], tuple[str | None, str | None]]
+
+
+def follow_up_text(previous: str, answer: str) -> str:
+    """agent.clarify.follow_up_request (imported here, lazily: the console must start even if agent/ is mid-edit)."""
+    from agent.clarify import follow_up_request
+
+    return follow_up_request(previous, answer)
+
+
+def parse_clarifies(value) -> tuple[dict | None, str | None]:
+    """Optional `clarifies` of POST /api/run: {parent_run_id: agent run id, answer: 1..300 characters}. The answer's
+    whitespace is collapsed (as agent.clarify.follow_up_request does)."""
+    if value is None:
+        return None, None
+    if not isinstance(value, dict):
+        return None, "clarifies must be an object"
+    unknown = sorted(set(value) - set(CLARIFIES_KEYS))
+    if unknown:
+        return None, f"unknown clarifies field(s): {', '.join(unknown)}"
+    pid = value.get("parent_run_id")
+    if not isinstance(pid, str) or not logs.valid_run_id(pid) or not AGENT_RUN_ID_RE.match(pid):
+        return None, "clarifies.parent_run_id must be the agent run id of the run that asked"
+    answer = value.get("answer")
+    answer = " ".join(answer.split()) if isinstance(answer, str) else None
+    if not answer or len(answer) > MAX_ANSWER_CHARS:
+        return None, f"clarifies.answer must be a string of 1 to {MAX_ANSWER_CHARS} characters"
+    return {"parent_run_id": pid, "answer": answer}, None
+
+
+def parse_run_body(body, tasks_by_id: dict, defaults: dict = DEFAULT_OPTIONS,
+                   resolve_parent: ResolveParent | None = None) -> tuple[dict | None, str | None]:
+    """Validate POST /api/run. Returns (clean, None) or (None, error message).
+
+    A follow-up (`clarifies`) gets its request from the backend: follow_up_request(<the parent's question-time
+    request>, answer). `resolve_parent(parent_run_id)` -> (that request, None) or (None, why not). A `request` sent
+    along must be the same text (whitespace aside), so a page that builds it differently is caught, not run."""
     if not isinstance(body, dict):
         return None, "body must be a JSON object"
+    clarifies, problem = parse_clarifies(body.get("clarifies"))
+    if problem:
+        return None, problem
     request = body.get("request")
-    if not isinstance(request, str) or not request.strip():
-        return None, "request is required"
-    request = request.strip()
-    if len(request) > MAX_REQUEST_CHARS:
-        return None, f"request is too long ({len(request)} > {MAX_REQUEST_CHARS} characters)"
+    if clarifies is None:
+        if not isinstance(request, str) or not request.strip():
+            return None, "request is required"
+        request = request.strip()
+        if len(request) > MAX_REQUEST_CHARS:
+            return None, f"request is too long ({len(request)} > {MAX_REQUEST_CHARS} characters)"
+    else:
+        if resolve_parent is None:
+            return None, "follow-up runs (clarifies) are not available here"
+        previous, problem = resolve_parent(clarifies["parent_run_id"])
+        if problem:
+            return None, problem
+        try:
+            built = follow_up_text(previous, clarifies["answer"])
+        except ImportError as e:
+            return None, f"agent.clarify is not available ({e})"
+        if request is not None:
+            if not isinstance(request, str) or " ".join(request.split()) != " ".join(built.split()):
+                return None, (f"request does not match the follow-up request the console builds from the question's "
+                              f"request and the answer: {built!r}")
+        request = built
+        clarifies = {**clarifies, "previous_request": previous}
     task_id = body.get("task_id")
     if task_id is not None and (not isinstance(task_id, str) or task_id not in tasks_by_id):
         return None, f"unknown task_id {task_id!r}"
@@ -146,7 +223,33 @@ def parse_run_body(body, tasks_by_id: dict, defaults: dict = DEFAULT_OPTIONS) ->
     task_match, problem = parse_task_match(body.get("task_match"), task_id, request, tasks_by_id)
     if problem:
         return None, problem
-    return {"request": request, "task_id": task_id, "options": clean, "voice": voice, "task_match": task_match}, None
+    return {"request": request, "task_id": task_id, "options": clean, "voice": voice, "task_match": task_match,
+            "clarifies": clarifies}, None
+
+
+def parse_late_task_match(body, tasks_by_id: dict) -> tuple[tuple[str, dict] | None, str | None]:
+    """POST /api/runs/{id}/task_match: {task_id, method: "restated", score: 0..1 | null, matched_from: the agent's
+    restatement}. Returns ((task_id, {method, score, matched_from}), None) or (None, error message)."""
+    if not isinstance(body, dict):
+        return None, "body must be a JSON object"
+    unknown = sorted(set(body) - set(LATE_TASK_MATCH_KEYS))
+    if unknown:
+        return None, f"unknown field(s): {', '.join(unknown)}"
+    missing = [k for k in LATE_TASK_MATCH_KEYS if k not in body]
+    if missing:
+        return None, f"needs {', '.join(missing)}"
+    task_id = body["task_id"]
+    if not isinstance(task_id, str) or task_id not in tasks_by_id:
+        return None, f"unknown task_id {task_id!r}"
+    if body["method"] != "restated":
+        return None, "method must be restated (other methods are sent with POST /api/run)"
+    match, problem = parse_task_match({k: body[k] for k in TASK_MATCH_KEYS} | {"method": "fuzzy"}, task_id, "",
+                                      tasks_by_id)  # the same score / matched_from rules
+    if problem:
+        return None, problem.replace("task_match.", "")
+    if not match["matched_from"].strip():
+        return None, "matched_from must be the agent's restatement"
+    return (task_id, {**match, "method": "restated"}), None
 
 
 def parse_task_match(match, task_id: str | None, request: str, tasks_by_id: dict) -> tuple[dict | None, str | None]:
@@ -295,6 +398,32 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
         """Where the logs page looks for <run_id>/events.jsonl: --runs-dir, then the agent's cfg.run_dir_root."""
         return logs.dedupe_roots([settings.runs_dir, agent_root, *runner.run_roots()])
 
+    def resolve_parent(parent_id: str) -> tuple[str | None, str | None]:
+        """The request a needs_input run asked about (its done.payload.request), from this console's runs, else
+        from its trace on disk. (None, why) when there is no such run or it didn't end with a question."""
+        done, start = runner.agent_run_events(parent_id)
+        if done is None and start is None:
+            d = runner.trace_dir(parent_id)
+            if d is None or not (d / logs.EVENTS_FILE).is_file():
+                d = logs.find_run_dir(log_roots(), parent_id)
+            if d is None:
+                return None, f"unknown parent run {parent_id!r}"
+            events, _ = logs.read_events(d / logs.EVENTS_FILE)
+            done = next((e for e in reversed(events) if e.get("kind") == "done"), None)
+            start = next((e for e in events if e.get("kind") == "start"), None)
+        if done is None:
+            return None, f"parent run {parent_id!r} has not ended"
+        dp = done.get("payload") if isinstance(done.get("payload"), dict) else {}
+        if dp.get("reason") != "needs_input":
+            return None, (f"parent run {parent_id!r} did not end with a question (done reason "
+                          f"{dp.get('reason')!r}, not 'needs_input')")
+        sp = (start or {}).get("payload") if isinstance((start or {}).get("payload"), dict) else {}
+        previous = next((v.strip() for v in (dp.get("request"), sp.get("request")) if isinstance(v, str) and v.strip()),
+                        None)
+        if previous is None:
+            return None, f"parent run {parent_id!r} recorded no request"
+        return previous, None
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
@@ -333,7 +462,9 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
             body = await request.json()
         except ValueError:
             return _error(400, "body must be JSON")
-        clean, problem = parse_run_body(body, tasks_by_id, settings.default_options())
+        # in a worker thread: a follow-up reads its parent's trace
+        clean, problem = await run_in_threadpool(parse_run_body, body, tasks_by_id, settings.default_options(),
+                                                 resolve_parent)
         if problem:
             return _error(400, problem)
         if agent_error:
@@ -344,12 +475,34 @@ def create_app(settings: ConsoleSettings | None = None, agent: tuple | None = No
             return _error(400, unserved)
         try:
             run = await run_in_threadpool(runner.start, clean["request"], clean["task_id"], clean["options"],
-                                          clean["voice"], snapshot, task_match=clean["task_match"])
+                                          clean["voice"], snapshot, task_match=clean["task_match"],
+                                          clarifies=clean["clarifies"])
         except Busy as e:
             return _error(409, "a run is already in progress; stop it first", active_run_id=e.active_run_id)
         except StartFailed as e:
             return _error(503, str(e))
-        return {"run_id": run.run_id, "sid": run.sid, "start_url": run.start_url}
+        return {"run_id": run.run_id, "sid": run.sid, "start_url": run.start_url, "request": run.request}
+
+    @app.post("/api/runs/{run_id}/task_match")
+    async def late_task_match(run_id: str, request: Request):
+        """Check a free-text run as a task: the agent's restatement of the request (its clarify event's
+        normalized_request) matches that task. Only before the verdict, and only for a task whose start (page and
+        state) is the run's own; the agent never sees any of it."""
+        run = runner.get(run_id)
+        if run is None:
+            return _error(404, f"unknown run {run_id!r}")
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "body must be JSON")
+        parsed, problem = parse_late_task_match(body, tasks_by_id)
+        if problem:
+            return _error(400, problem)
+        task_id, match = parsed
+        status, problem = await run_in_threadpool(runner.set_task_match, run, task_id, match)
+        if problem:
+            return _error(status, problem)
+        return {"ok": True, "run_id": run.run_id, "task_id": task_id, "task_match": match}
 
     @app.post("/api/transcribe")
     async def transcribe(request: Request):

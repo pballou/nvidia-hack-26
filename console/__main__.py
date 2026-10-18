@@ -1,6 +1,6 @@
-"""python -m console --agent mock|real [--lightning local|hosted] [--grounder base|grounder] [--asr parakeet|stub]
-[--vlm-url URL] [--summary-model base|grounder] [--vlm-label TEXT] [--host 127.0.0.1] [--port 8095] [--sandbox-url URL]
-[--runs-dir runs] [--headed] [--step-delay 0.8]"""
+"""python -m console --agent mock|real [--lightning local|hosted] [--grounder base|grounder] [--thinking off|retry|on]
+[--clarify on|off] [--asr parakeet|stub] [--vlm-url URL] [--summary-model base|grounder] [--vlm-label TEXT]
+[--host 127.0.0.1] [--port 8095] [--sandbox-url URL] [--runs-dir runs] [--headed] [--step-delay 0.8]"""
 
 from __future__ import annotations
 
@@ -35,6 +35,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="initial Lightning toggle: local = official BF16 on :8000 (fast), hosted = build.nvidia.com API")
     ap.add_argument("--grounder", choices=SERVED_NAMES, default="grounder",
                     help="initial Grounder choice: grounder = the LoRA (default), base = adapter off")
+    ap.add_argument("--thinking", choices=("off", "retry", "on"), default="off",
+                    help="initial Thinking choice (default off, the recording setting): retry = think on the call "
+                         "after a problem step, on = every call")
+    ap.add_argument("--clarify", choices=("on", "off"), default="on",
+                    help="initial Request check toggle (default on): one short Lightning call before the browser "
+                         "opens; an unclear request ends with a question (done reason needs_input) and the answer "
+                         "starts a follow-up run (agent/clarify.py)")
     ap.add_argument("--vlm-url", default=None, metavar="URL",
                     help="real agent: the grounder/summary VLM's OpenAI base URL, e.g. http://127.0.0.1:8011/v1 "
                          "(default: configs/agent.yaml vlm.base_url or $AGENT_VLM_BASE_URL)")
@@ -65,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = ConsoleSettings(agent=args.agent, sandbox_url=args.sandbox_url, runs_dir=args.runs_dir,
                                headed=args.headed, step_delay_s=args.step_delay, host=args.host, port=args.port,
                                default_lightning=args.lightning, default_grounder=args.grounder,
+                               default_thinking=args.thinking, default_clarify=args.clarify,
                                vlm_url=args.vlm_url, summary_model=args.summary_model, vlm_label=args.vlm_label)
     if args.asr:
         asr.configure(args.asr)
@@ -101,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"GUI assist console: http://{settings.host}:{settings.port}  "
           f"(agent={settings.agent}, lightning={settings.default_lightning}, grounder={settings.default_grounder}, "
+          f"thinking={settings.default_thinking}, clarify={settings.default_clarify}, "
           f"sandbox={settings.sandbox_url}, headed={settings.headed}, "
           f"asr={voice.get('label')}{'' if voice.get('available') else ' (off)'})",
           flush=True)

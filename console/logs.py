@@ -8,9 +8,17 @@ Sources, read-only:
 roots = the console's --runs-dir plus the agent's cfg.run_dir_root (deduplicated). Sandbox state
 is never read here: the verdict is the one the console recorded in console.json.
 
-Status = the done event's reason (done, max_steps, stuck, stopped, error), else console.json's
+Status = the done event's reason (done, max_steps, stuck, needs_input, stopped, error), else console.json's
 running/stopped/error, else "unknown". "stuck" (agent/progress.py): the agent stopped a run that made
 no progress; success_claimed is false and the done summary is its question to the user ("I'm stuck: ...").
+"needs_input" (agent/clarify.py): the pre-flight request check asked a question before the browser opened
+(steps 0); the done payload carries question and request.
+
+Request check: `clarify` (the step-0 clarify event, cfg.clarify only, else null) = {action: proceed|ask, question,
+normalized_request, model, prompt_version, prompt_sha, usage, latency_ms (timings_ms.clarify, else the payload's),
+error, skipped}. Follow-ups: parent_run_id (console.json's, else the start event's) is the needs_input run this run
+answers; child_run_ids are the runs that answer this one (every run whose parent_run_id is this run, oldest first;
+filled in by list_runs and the detail endpoint, [] from summarize_run alone).
 n_stuck_warnings / n_stuck_stops come from the done event's stats, else from the action events' "stuck"
 verdicts (warn | stuck), else null (a trace from before the progress check).
 
@@ -19,10 +27,12 @@ Endpoints (where the run's VLM and Lightning were): console.json's snapshot, tak
 (source "trace": the label comes from the port, served/reachable are null: nobody checked). Mock runs
 have none (they run no models).
 
-Task: task_match (console.json) says how the console chose task_id: "picked" from the list, or "exact" / "fuzzy"
-matched from the request. task_line is the line the console banner shows too: "Checked as task: pay-50 (matched
-from your request)" or "(picked from the list)"; no parenthesis when console.json predates task_match; "Sandbox
-task: ..." when no verdict was recorded; null for free text.
+Task: task_match (console.json) says how the console chose task_id: "picked" from the list, "exact" / "fuzzy"
+matched from the request, or "restated": matched from the agent's restatement of a free-text request (its clarify
+event's normalized_request). task_line is the line the console banner shows too: "Checked as task: pay-50 (matched
+from your request)", "(picked from the list)" or "(matched from the agent's restatement: "Pay $50 toward my
+bill.")"; no parenthesis when console.json predates task_match; "Sandbox task: ..." when no verdict was recorded;
+null for free text.
 
 Honesty rules: a field the trace doesn't have is null (the page shows "—"); nothing is estimated.
 A run is "mock" when any payload says "mock": true (or console.json says the console ran the mock).
@@ -66,9 +76,11 @@ RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")             # a run dir name t
 IMAGE_RE = re.compile(r"^step_\d{2,3}(_overlay)?\.png$")      # the only files GET /runs/... serves
 IMAGE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 STAGES = ("voice", "summary", "plan", "ground", "act")
-DONE_REASONS = ("done", "max_steps", "stuck", "stopped", "error")
+DONE_REASONS = ("done", "max_steps", "stuck", "needs_input", "stopped", "error")
 STUCK_VERDICTS = ("warn", "stuck")  # action.payload.stuck.verdict (agent/core.py)
-TASK_MATCH_METHODS = ("picked", "exact", "fuzzy")  # console.json task_match.method (console/app.py parse_task_match)
+# console.json task_match.method: console/app.py parse_task_match, and "restated" from POST /api/runs/{id}/task_match
+TASK_MATCH_METHODS = ("picked", "exact", "fuzzy", "restated")
+CLARIFY_ACTIONS = ("proceed", "ask")  # clarify.payload.action (agent/clarify.py)
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 1000
 
@@ -175,10 +187,10 @@ def is_mock(events: list[dict], console: dict | None = None) -> bool:
 
 
 def event_model(ev: dict, config: dict, mock: bool = False) -> str | None:
-    """The model behind one event: plan -> Lightning, grounding -> grounder, observation -> screen summary.
-    Payload first; then the start event's config, except for mock runs (they run none of these models)."""
+    """The model behind one event: plan and clarify -> Lightning, grounding -> grounder, observation -> screen
+    summary. Payload first; then the start event's config, except for mock runs (they run none of these models)."""
     kind, p = ev.get("kind"), _payload(ev)
-    if kind == "plan":
+    if kind in ("plan", "clarify"):
         own, fallback = _str(p.get("model")), _str(_dict(config.get("lightning")).get("model"))
     elif kind == "grounding":
         own, fallback = _str(p.get("model")), _str(config.get("grounder_model"))
@@ -202,7 +214,7 @@ def event_prompt_sha(ev: dict) -> str | None:
     """agent/trace.py prompt_sha of the prompt behind one event: plan and grounding payloads, an observation's
     summary. Payload only (the run config doesn't record it); the mock declares "mock"."""
     kind, p = ev.get("kind"), _payload(ev)
-    if kind in ("plan", "grounding"):
+    if kind in ("plan", "grounding", "clarify"):
         return _str(p.get("prompt_sha"))
     if kind == "observation":
         return _str(_dict(p.get("summary")).get("prompt_sha"))
@@ -232,14 +244,46 @@ def _task_match(console: dict | None) -> dict | None:
 
 
 def task_line(task_id: str | None, task_match: dict | None, checked: bool) -> str | None:
-    """"Checked as task: pay-50 (matched from your request)" / "(picked from the list)", the console banner's line
-    (console.js taskLine). "Sandbox task: ..." if no verdict was recorded; None for free text."""
+    """"Checked as task: pay-50 (matched from your request)" / "(picked from the list)" / "(matched from the agent's
+    restatement: "Pay $50 toward my bill.")", the console banner's line (console.js taskLine). "Sandbox task: ..." if
+    no verdict was recorded; None for free text. A restated match always names the restatement that chose it."""
     if not task_id:
         return None
-    how = _dict(task_match).get("method")
+    m = _dict(task_match)
+    how = m.get("method")
+    restated = " ".join(m["matched_from"].split()) if isinstance(m.get("matched_from"), str) else ""
     why = (" (picked from the list)" if how == "picked"
-           else " (matched from your request)" if how in ("exact", "fuzzy") else "")
+           else " (matched from your request)" if how in ("exact", "fuzzy")
+           else f" (matched from the agent's restatement: \"{restated}\")" if how == "restated" and restated
+           else " (matched from the agent's restatement)" if how == "restated" else "")
     return f"{'Checked as task' if checked else 'Sandbox task'}: {task_id}{why}"
+
+
+def clarify_info(events: list[dict]) -> dict | None:
+    """The run's request check (its first clarify event), or None (clarify off, or a trace from before it)."""
+    ev = next((e for e in events if e.get("kind") == "clarify"), None)
+    if ev is None:
+        return None
+    p = _payload(ev)
+    latency = _num(_dict(ev.get("timings_ms")).get("clarify"))
+    return {"action": p.get("action") if p.get("action") in CLARIFY_ACTIONS else None,
+            "question": _str(p.get("question")), "normalized_request": _str(p.get("normalized_request")),
+            "model": _str(p.get("model")), "prompt_version": _str(p.get("prompt_version")),
+            "prompt_sha": _str(p.get("prompt_sha")), "usage": p.get("usage") if isinstance(p.get("usage"), dict) else None,
+            "latency_ms": latency if latency is not None else _num(p.get("latency_ms")),
+            "error": _str(p.get("error")), "skipped": _str(p.get("skipped"))}
+
+
+def parent_run_id(events: list[dict], console: dict | None) -> str | None:
+    """The needs_input run this run answers: console.json's parent_run_id (or clarifies.parent_run_id), else the
+    start event's (agent/trace.py start.parent_run_id). None for a run that answers nothing."""
+    c = _dict(console)
+    for v in (c.get("parent_run_id"), _dict(c.get("clarifies")).get("parent_run_id")):
+        if isinstance(v, str) and valid_run_id(v):
+            return v
+    start = next((e for e in events if e.get("kind") == "start"), None)
+    v = _payload(start).get("parent_run_id") if start else None
+    return v if isinstance(v, str) and valid_run_id(v) else None
 
 
 def _count(v: Any) -> int | None:
@@ -345,6 +389,10 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
     task_id = _str(c.get("task_id"))
     task_match = _task_match(console) if task_id else None
     verified = verdict.get("passed") if isinstance(verdict.get("passed"), bool) else None
+    clarify = clarify_info(events)
+    lightning_model = _first_model(events, "plan", config, True) or (clarify or {}).get("model") \
+        or _first_model([], "plan", config, mock)  # a needs_input run has no plan: its request check names it
+    question = _str(dp.get("question")) if dp.get("reason") == "needs_input" else None
 
     return {
         "run_id": run_id if run_id is not None else (_str(events[0].get("run_id")) if events else None),
@@ -357,7 +405,7 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
         "task_match": task_match,
         "task_line": task_line(task_id, task_match, verified is not None),
         "models": {
-            "lightning": _first_model(events, "plan", config, mock),
+            "lightning": lightning_model,
             "grounder": _first_model(events, "grounding", config, mock),
             "summary": _first_model(events, "observation", config, mock),
             "asr": voice["model"] if voice else None,
@@ -376,6 +424,10 @@ def summarize_run(events: list[dict], console_json: dict | None = None, *, run_i
         "n_stuck_stops": n_stuck_stops,
         "endpoints": run_endpoints(console, config, mock),
         "voice": voice,
+        "clarify": clarify,
+        "question": question,  # needs_input: what the agent asked the user
+        "parent_run_id": parent_run_id(events, console),
+        "child_run_ids": [],   # filled in by list_runs / the detail endpoint (needs the other runs)
         # beyond the contract, for the detail view
         "n_bad_lines": n_bad_lines,
         "prompt_version": plan_pv or (None if mock else _str(config.get("prompt_version"))),
@@ -527,14 +579,27 @@ class RunIndex:
                 del self._cache[d]
 
 
+def child_runs(summaries: Iterable[dict]) -> dict[str, list[str]]:
+    """{parent run id: [ids of the runs that answer it, oldest first]} from RunSummaries (their parent_run_id)."""
+    kids: dict[str, list[tuple[float, str]]] = {}
+    for s in summaries:
+        pid = s.get("parent_run_id")
+        if pid and s.get("run_id") and pid != s["run_id"]:
+            kids.setdefault(pid, []).append((s["started_ts"] if s.get("started_ts") is not None else 0.0, s["run_id"]))
+    return {pid: [rid for _, rid in sorted(v)] for pid, v in kids.items()}
+
+
 def list_runs(roots: Iterable[Path], limit: int | None = DEFAULT_LIMIT, index: RunIndex | None = None) -> list[dict]:
-    """RunSummaries for every run under `roots`, newest first (by the first event's ts), at most `limit` (None: all)."""
+    """RunSummaries for every run under `roots`, newest first (by the first event's ts), at most `limit` (None: all).
+    child_run_ids come from every run found, not only the listed ones."""
     index = index or RunIndex()
     dirs = iter_run_dirs(roots)
     rows = [index.summary(d, rid) for rid, d in dirs.items()]
     index.forget_except(dirs.values())
     rows.sort(key=lambda r: (r[1], r[0]["run_id"]), reverse=True)
-    return [dict(s) for s, _ in (rows if limit is None else rows[:max(0, limit)])]
+    kids = child_runs(s for s, _ in rows)
+    return [{**s, "child_run_ids": list(kids.get(s["run_id"], []))}
+            for s, _ in (rows if limit is None else rows[:max(0, limit)])]
 
 
 def apply_live(summary: dict, live_run_ids: set[str]) -> dict:
@@ -568,11 +633,13 @@ def make_router(*, static_dir: Path, roots: Callable[[], list[Path]],
     index = RunIndex()
 
     def detail(run_id: str) -> dict | None:
-        d = find_run_dir(roots(), run_id)
+        all_roots = roots()
+        d = find_run_dir(all_roots, run_id)
         if d is None:
             return None
         out = run_detail(d, run_id)
-        out["summary"] = apply_live(out["summary"], live())
+        kids = child_runs(list_runs(all_roots, limit=None, index=index))  # cached: a stat per run
+        out["summary"] = {**apply_live(out["summary"], live()), "child_run_ids": kids.get(run_id, [])}
         return out
 
     @router.get("/logs", include_in_schema=False)

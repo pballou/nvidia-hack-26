@@ -98,7 +98,7 @@ def test_config_tasks_and_index(console, tmp_path):
     base, _ = console(fake_agent(trace_root=tmp_path), static_dir=static)
     cfg = httpx.get(f"{base}/api/config").json()
     assert cfg == {"agent": "mock", "sandbox_url": cfg["sandbox_url"], "headed": False,
-                   "defaults": {"grounder": "grounder", "thinking": "retry", "lightning": "local"},
+                   "defaults": {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"},
                    "asr": {"available": True, "model": "stub", "label": "stub"},
                    "endpoints": {"vlm": None, "lightning": None}}  # the mock runs no models
     tasks = httpx.get(f"{base}/api/tasks").json()
@@ -127,7 +127,7 @@ def test_config_tasks_and_index(console, tmp_path):
 
 def test_stream_order_replay_and_last_event_id(console, tmp_path):
     base, _ = console(fake_agent(steps=2, trace_root=tmp_path / "elsewhere"))
-    run = start(base, options={"grounder": "grounder", "thinking": "off", "lightning": "local"})
+    run = start(base, options={"grounder": "grounder", "thinking": "retry", "lightning": "local"})
     assert run["run_id"].startswith("c-") and run["sid"] == "console-" + run["run_id"]
     assert run["start_url"].endswith("/?sid=" + run["sid"])
 
@@ -137,13 +137,15 @@ def test_stream_order_replay_and_last_event_id(console, tmp_path):
     assert kinds == ["status", "status", "start", "observation", "grounding", "observation", "grounding",
                      "observation", "done", "result", "status", "end"]
     assert [m["data"]["status"] for m in stream if m["event"] == "status"] == ["starting", "running", "done"]
-    assert stream[2]["data"]["payload"]["config"] == {"grounder": "grounder", "thinking": "off", "lightning": "local"}
+    # an option left out takes the console's default (clarify on)
+    assert stream[2]["data"]["payload"]["config"] == {"grounder": "grounder", "thinking": "retry", "lightning": "local",
+                                                      "clarify": "on"}
     assert stream[-3]["data"]["success_claimed"] is True and "verdict" not in [m["event"] for m in stream]
 
     info = httpx.get(f"{base}/api/runs/{run['run_id']}").json()
     assert info["status"] == "done" and info["n_events"] == len(stream) and info["verdict"] is None
     assert info["agent_run_id"] == stream[2]["data"]["run_id"] and info["result"]["summary"] == "did it"
-    assert info["options"] == {"grounder": "grounder", "thinking": "off", "lightning": "local"}
+    assert info["options"] == {"grounder": "grounder", "thinking": "retry", "lightning": "local", "clarify": "on"}
 
     # replay after the fact is identical; Last-Event-ID skips what the client already has
     assert messages(read_sse(f"{base}/api/runs/{run['run_id']}/events")) == stream
@@ -258,6 +260,7 @@ def test_verdict_after_stop(console, tmp_path):
     {"request": "hi", "task_id": "no-such-task"}, {"request": "hi", "task_id": 3},
     {"request": "hi", "options": {"grounder": "big"}}, {"request": "hi", "options": {"thinking": True}},
     {"request": "hi", "options": {"lightning": "cloud"}}, {"request": "hi", "options": {"headed": True}},
+    {"request": "hi", "options": {"clarify": True}}, {"request": "hi", "options": {"clarify": "maybe"}},
     {"request": "hi", "options": "fast"}, ["hi"],
     {"request": "hi", "task_match": {"method": "fuzzy", "score": 1, "matched_from": "hi"}},  # no task_id
     {"request": "hi", "task_id": TASK, "task_match": {"method": "fuzzy", "score": 2, "matched_from": "hi"}},

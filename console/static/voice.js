@@ -32,6 +32,12 @@
  * ends, and by Turn off; the next press opens it again. A press resumes a suspended context (Safari) inside the key
  * or click handler.
  *
+ * Answering the agent's question (done reason "needs_input", console.js): while one waits (AcmeConsole.pendingQuestion()),
+ * the next transcript is the answer, not a new request: it fills the answer box and the same countdown sends it
+ * ("Answer: “…”", "Answering in 1.5 s", Esc or Cancel stops it). The rules above hold for it too: no auto-send over
+ * 300 characters, after an edit meanwhile, with the fixed-text stub or with auto-run off; a stop phrase is never an
+ * answer. The banner says the next voice input answers.
+ *
  * window.AcmeVoice (for tests): setIdleReleaseMs(ms) -> ms in use, mic() -> {warm, recording, kind, rate,
  * idleReleaseMs}, lastTake() -> {cold, preRollMs, seconds, heldSeconds, rate, sent} | null, release().
  */
@@ -47,6 +53,8 @@
   const MAX_SECONDS = 30;
   const MIN_SECONDS = 0.25;
   const REQUEST_MAX = 500;  // the request box's limit (POST /api/run)
+  const ANSWER_MAX = 300;   // the answer box's limit (POST /api/run clarifies.answer)
+  const ANSWER_CANCELLED = 'Cancelled: the answer wasn’t sent. It’s in the answer box: press Enter there to send it.';
   const TRANSCRIBE_TIMEOUT_MS = 60000;
   const CANCEL_GRACE_MS = 600;  // a mic click this soon after "Transcribing" is a double-click, not a cancel
   const ARM_MS = 200;  // a modifier push-to-talk key in a text field must be held alone this long
@@ -94,10 +102,10 @@
     pttCode: DEFAULT_PTT,
     capturing: false,    // Options: waiting for the new push-to-talk key
     autorun: DEFAULT_AUTORUN,  // Options: what happens after voice input ('1.5' | '5' | 'off')
-    countdown: null,     // {endsAt, ms, timer}
-    tx: null,            // the transcription in flight: {ctrl, since, request, task, edited}
+    countdown: null,     // {endsAt, ms, timer, kind: 'run' | 'answer'}
+    tx: null,            // the transcription in flight: {ctrl, since, request, task, answer, edited}
     recheck: 0,          // timer: the next /api/config check while the recognizer is down
-    heard: null,         // {request, used}: the last transcript put in the box
+    heard: null,         // {request, answer?, used}: the last transcript put in the request (or answer) box
     doneTimer: null,
     rafId: 0,
     level: 0,
@@ -286,6 +294,11 @@
     }
     if (el.kbdWrap) el.kbdWrap.hidden = !on;
     setText(el.kbdPtt, keyName(V.pttCode));
+    if (el.answerVoice) {  // the needs_input banner: say that voice answers too
+      el.answerVoice.hidden = !on;
+      el.answerVoice.replaceChildren(...(on ? [document.createTextNode(' Or hold '), kbd(keyName(V.pttCode)),
+        document.createTextNode(' and say it: your next voice input answers.')] : []));
+    }
     if (el.asrNote) {
       el.asrNote.hidden = !on;
       setText(el.asrNote, isFixedText()
@@ -847,6 +860,7 @@
       since: performance.now(),
       request: el.request ? el.request.value : '',
       task: el.taskSelect ? el.taskSelect.value : '',
+      answer: el.answer ? el.answer.value : '',
       edited: false,
     };
     V.tx = tx;
@@ -926,7 +940,7 @@
 
     // The user typed or picked a task while this was transcribing: keep their request, act on nothing.
     const edited = tx && (tx.edited || (el.request && el.request.value !== tx.request)
-      || (el.taskSelect && el.taskSelect.value !== tx.task));
+      || (el.taskSelect && el.taskSelect.value !== tx.task) || (el.answer && el.answer.value !== tx.answer));
     if (edited) {
       V.heard = { request: null, used: false };
       setState('done');
@@ -954,11 +968,15 @@
       { tone: 'warn' });
       return;
     }
-    if (stop) {  // a stop phrase never starts a run
+    if (stop) {  // a stop phrase never starts a run (and is never an answer)
       V.heard = { request: null, used: true };
       setState('done');
       say(C.isStarting() ? `${heard}. The run is still starting: press Escape once it’s running to stop it.`
         : `${heard}. Nothing is running, so there’s nothing to stop.`, { tone: C.isStarting() ? 'warn' : '' });
+      return;
+    }
+    if (!C.isStarting() && C.pendingQuestion && C.pendingQuestion()) {  // the agent asked: this is the answer
+      onAnswer(text, voice, heard, fixed);
       return;
     }
     const fill = fillBox(text, voice);
@@ -978,6 +996,29 @@
       say(`Heard: “${fill.request}”${task}. Press Enter in the request box to run it.`, { tone: 'ok' });
     } else {
       startCountdown(fill.request, fill.taskId, autoRunMs());
+    }
+  }
+
+  /** A transcript while the agent's question waits: it fills the answer box, and the countdown sends it. */
+  function onAnswer(text, voice, heard, fixed) {
+    const C = window.AcmeConsole;
+    const cut = cutToWord(text, ANSWER_MAX);
+    const shortened = cut.length < text.length;
+    const { answer } = C.setAnswer(cut, shortened ? { ...voice, text: cut } : voice);
+    V.heard = { request: null, answer, used: false };
+    setState('done');
+    if (shortened) {
+      if (el.heard) showHeard(`${el.heard.textContent} [too long: the answer box kept the first ${answer.length} characters]`);
+      say(`Too long for an answer: you said ${text.length} characters and an answer holds ${ANSWER_MAX} at most. The `
+        + `answer box has the first ${answer.length}; check it, then press Enter to send it.`, { tone: 'warn' });
+      if (el.answer) el.answer.focus();
+    } else if (fixed) {
+      say(`${heard} is in the answer box. The stub never sends by itself: press Enter in the answer box to send it.`,
+        { tone: 'warn' });
+    } else if (!autoRunMs()) {
+      say(`Answer: “${answer}”. Press Enter in the answer box to send it.`, { tone: 'ok' });
+    } else {
+      startCountdown(answer, null, autoRunMs(), 'answer');
     }
   }
 
@@ -1004,11 +1045,15 @@
   }
 
   // --- auto-run countdown -------------------------------------------------------------------------
-  function startCountdown(request, taskId, ms) {
+  /** kind 'run': the request runs when it ends; 'answer': the answer box's text is sent (a follow-up run). */
+  function startCountdown(request, taskId, ms, kind = 'run') {
     cancelCountdown('');
-    const cd = { endsAt: performance.now() + ms, ms, timer: 0 };
+    const cd = { endsAt: performance.now() + ms, ms, timer: 0, kind };
     V.countdown = cd;
     el.countdown.hidden = false;
+    if (el.cancel) {
+      el.cancel.setAttribute('aria-label', kind === 'answer' ? 'Cancel sending the answer' : 'Cancel the automatic run');
+    }
     renderCountdown(cd);
     cd.timer = window.setInterval(() => {
       if (V.countdown !== cd) return;
@@ -1016,6 +1061,10 @@
       else renderCountdown(cd);
     }, 100);
     // Short, and still true when it's read late: Escape cancels the countdown, and stops the run once it started.
+    if (kind === 'answer') {
+      say(`Answer: “${request}”`, { tone: 'ok', srExtra: `Sends in ${ms / 1000} seconds. Escape stops it.` });
+      return;
+    }
     say(`Heard: “${request}”${taskId ? ' (a sandbox task)' : ''}`, {
       tone: 'ok', srExtra: `Runs in ${ms / 1000} seconds. Escape stops it.`,
     });
@@ -1023,7 +1072,8 @@
 
   function renderCountdown(cd) {
     const left = Math.max(0, cd.endsAt - performance.now());
-    setText(el.countdownText, `Running in ${(Math.ceil(left / 100) / 10).toFixed(1)} s — press Esc to cancel`);
+    const verb = cd.kind === 'answer' ? 'Answering' : 'Running';
+    setText(el.countdownText, `${verb} in ${(Math.ceil(left / 100) / 10).toFixed(1)} s — press Esc to cancel`);
     el.countdown.style.setProperty('--left', (left / cd.ms).toFixed(3));
   }
 
@@ -1034,7 +1084,8 @@
     if (sr) sr.remove();
     const C = window.AcmeConsole;
     if (C.isRunning() || C.isStarting()) return;
-    C.run();
+    if (cd.kind === 'answer') C.answer();
+    else C.run();
   }
 
   function clearCountdown() {
@@ -1048,10 +1099,12 @@
     return true;
   }
 
-  /** message '' = silent (e.g. the run started anyway). */
-  function cancelCountdown(message) {
-    if (!clearCountdown()) return;
-    if (message) say(message, { tone: 'warn' });
+  /** message '' = silent (e.g. the run started anyway). An answer's countdown says so in its own words
+   *  (`answerMessage`, else ANSWER_CANCELLED). */
+  function cancelCountdown(message, answerMessage = ANSWER_CANCELLED) {
+    const kind = V.countdown ? V.countdown.kind : 'run';
+    if (!clearCountdown() || !message) return;
+    say(kind === 'answer' ? answerMessage : message, { tone: 'warn' });
   }
 
   // --- push-to-talk key setting ------------------------------------------------------------------
@@ -1243,6 +1296,7 @@
       countdown: 'voice-countdown', countdownText: 'voice-countdown-text', cancel: 'voice-cancel', heard: 'heard',
       pttKey: 'ptt-key', pttChange: 'ptt-change', pttReset: 'ptt-reset', pttMsg: 'ptt-msg',
       kbdWrap: 'kbd-ptt-wrap', kbdPtt: 'kbd-ptt', request: 'request', taskSelect: 'task-select', asrNote: 'asr-note',
+      answer: 'answer-input', answerVoice: 'answer-voice',
     };
     for (const [k, id] of Object.entries(ids)) el[k] = document.getElementById(id);
     return Boolean(el.mic && el.status && el.hint && el.countdown && el.pttChange);
@@ -1303,11 +1357,22 @@
         cancelCountdown('Auto-run cancelled.');
       });
     }
+    if (el.answer) {
+      el.answer.addEventListener('input', () => {
+        if (V.tx) V.tx.edited = true;  // a transcript still on its way must not replace this
+        cancelCountdown('Cancelled because you edited the answer.',
+          'Cancelled because you edited the answer: press Enter in the answer box to send it.');
+      });
+    }
     document.addEventListener('acme:run-start', (e) => {
       cancelCountdown('');
       const req = e.detail && e.detail.request;
-      if (V.heard && !V.heard.used && V.heard.request === req) V.heard.used = true;  // this run came from voice
-      else hideHeard();
+      const answer = e.detail && e.detail.answer;
+      if (V.heard && !V.heard.used && (V.heard.request === req || (answer && V.heard.answer === answer))) {
+        V.heard.used = true;  // this run came from voice (a request, or the answer that started a follow-up)
+      } else {
+        hideHeard();
+      }
       // Old "Heard…" / "Cancelled…" lines give the step log their room; errors and "Listening…" stay.
       if (!V.rec && el.status.dataset.tone !== 'error') {
         V.sayId += 1;  // drops a pending re-announce too

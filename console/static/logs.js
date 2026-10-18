@@ -13,6 +13,10 @@
  * "stuck" (agent/progress.py) is a status of its own: the agent stopped a run that made no progress and asks the
  * user what to do; action rows carry its warn/stuck verdicts. Endpoints (where the VLM and Lightning ran) come
  * from console.json, else the start event (summary.endpoints.source).
+ * The request check (agent/clarify.py) is a "clarify" row at step 0: proceed (with the agent's restatement) or
+ * ask; an ask ends the run as "needs_input" (status "Needs input", the done row quotes the question). A follow-up
+ * run answers it: summary.parent_run_id / child_run_ids become "Follow-up of <id>" / "Answered by <id>" links.
+ * A task matched from the agent's restatement says so ("matched from the agent's restatement: …"), never hidden.
  */
 'use strict';
 
@@ -26,18 +30,20 @@
     voice: 'speech to text', summary: 'screen summary (VLM)', plan: 'planning (Lightning)',
     ground: 'grounding (VLM)', act: 'browser action',
   };
-  const KIND_ORDER = ['voice', 'start', 'observation', 'plan', 'tool_call', 'grounding', 'action', 'error', 'done',
-    'verdict'];
+  const KIND_ORDER = ['voice', 'start', 'clarify', 'observation', 'plan', 'tool_call', 'grounding', 'action', 'error',
+    'done', 'verdict'];
   const KIND_LABEL = { tool_call: 'tool call' };
-  const KIND_LATENCY = { plan: 'plan', grounding: 'ground', action: 'act', observation: 'summary' };
+  const KIND_LATENCY = { plan: 'plan', grounding: 'ground', action: 'act', observation: 'summary', clarify: 'clarify' };
   const STATUS = {
-    done: ['Done', 'ok'], max_steps: ['Step limit', 'warn'], stuck: ['Stuck', 'warn'], stopped: ['Stopped', 'warn'],
+    done: ['Done', 'ok'], max_steps: ['Step limit', 'warn'], stuck: ['Stuck', 'warn'],
+    needs_input: ['Needs input', 'warn'], stopped: ['Stopped', 'warn'],
     error: ['Error', 'bad'], running: ['Running', 'live'], unknown: ['Unknown', 'muted'],
   };
-  const STATUS_ORDER = ['running', 'done', 'stuck', 'max_steps', 'stopped', 'error', 'unknown'];
+  const STATUS_ORDER = ['running', 'done', 'needs_input', 'stuck', 'max_steps', 'stopped', 'error', 'unknown'];
   const REASON_WORDS = {
     done: 'the agent called done', max_steps: 'it reached the step limit',
-    stuck: 'no progress, so it stopped and asks you what to do', stopped: 'stopped by the user',
+    stuck: 'no progress, so it stopped and asks you what to do',
+    needs_input: 'the request was unclear, so it asked you a question before acting', stopped: 'stopped by the user',
     error: 'it stopped after an error',
   };
   const VERDICT_LABEL = 'verified by sandbox state, not seen by the agent';
@@ -288,6 +294,22 @@
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+  /** The request check (agent/clarify.py clarify event) in plain words. */
+  function clarifyWords(p) {
+    const who = p.mock === true ? 'Mock request check' : 'Request check';
+    if (p.action === 'ask') {
+      const q = oneLine(p.question);
+      return `${who}: unclear, asked the user ${q ? `“${q}”` : '(no question recorded)'}`;
+    }
+    if (p.action === 'proceed') {
+      if (has(p.error)) return `${who} failed, went ahead with the request as said: ${oneLine(p.error)}`;
+      if (has(p.skipped)) return `${who} skipped (${oneLine(p.skipped)}), went ahead`;
+      const r = oneLine(p.normalized_request);
+      return `${who}: clear, went ahead${r ? ` · restated as “${r}”` : ''}`;
+    }
+    return `${who}: ${compactJson(p, 140)}`;
+  }
+
   /** One line, plain words. Mock events (payload.mock) never claim a model did something. */
   function describe(ev) {
     const p = isObj(ev.payload) ? ev.payload : {};
@@ -296,8 +318,10 @@
       case 'voice': return `Heard: “${oneLine(p.text)}”`;
       case 'start': {
         const where = displayUrl(p.start_url);
-        return `Run started${where ? ` at ${where}` : ''}: “${oneLine(p.request)}”`;
+        const follow = has(p.parent_run_id) ? ` · follow-up of ${oneLine(p.parent_run_id)}` : '';
+        return `Run started${where ? ` at ${where}` : ''}: “${oneLine(p.request)}”${follow}`;
       }
+      case 'clarify': return clarifyWords(p);
       case 'observation': {
         const o = isObj(p.observation) ? p.observation : {};
         const title = oneLine(o.title);
@@ -359,6 +383,10 @@
           const question = oneLine(p.summary);
           return `Run ended: stuck, no progress${steps} · the agent asks: ${question ? `“${question}”` : '(no question recorded)'}`;
         }
+        if (p.reason === 'needs_input') {  // agent/clarify.py: asked before the browser opened
+          const question = oneLine(p.question || p.summary);
+          return `Run ended: needs your input${steps} · the agent asks: ${question ? `“${question}”` : '(no question recorded)'}`;
+        }
         const reason = REASON_WORDS[p.reason] || (p.reason ? `reason ${oneLine(p.reason)}` : 'no reason given');
         const claim = p.success_claimed === true ? 'the agent claims success'
           : p.success_claimed === false ? 'the agent does not claim success' : 'no success claim';
@@ -391,6 +419,7 @@
     if (ev.kind === 'action' && p.ok === false) return 'bad';
     if (ev.kind === 'action' && p.screen_changed === false) return 'warn';
     if (ev.kind === 'grounding' && (p.error || !isNum(p.x))) return 'warn';
+    if (ev.kind === 'clarify' && (p.action === 'ask' || has(p.error))) return 'warn';
     if (ev.kind === 'verdict') return p.passed === true ? 'ok' : p.passed === false ? 'bad' : '';
     if (ev.kind === 'done') return p.reason === 'done' ? '' : p.reason === 'error' ? 'bad' : 'warn';
     return '';
@@ -434,6 +463,13 @@
     });
     ui.runsBody.addEventListener('keydown', onRunsKey);
     ui.runsBody.addEventListener('click', onRunsClick);
+    ui.runSummary.addEventListener('click', (e) => {  // "Follow-up of <id>" / "Answered by <id>": open it in place
+      const a = e.target.closest && e.target.closest('a.run-ref');
+      if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      selectRun(a.dataset.runId);
+      ui.runSection.focus({ preventScroll: true });
+    });
 
     ui.eventList.addEventListener('keydown', onEventKey);
     ui.eventList.addEventListener('click', onEventClick);
@@ -673,9 +709,17 @@
     }
     else if (r.console_run_id) task = h('span', { class: 'task-id is-free', title: 'Free text: no sandbox check', text: 'free text' });
     else task = h('span', { class: 'task-id is-free' }, h('span', { 'aria-hidden': 'true', text: 'task —' }), sv('no task recorded'));
+    // follow-ups (agent/clarify.py): plain text here (the table is one tab stop); the links are in the summary card
+    const kids = Array.isArray(r.child_run_ids) ? r.child_run_ids : [];
+    const thread = [
+      has(r.parent_run_id) ? h('span', { class: 'thread-tag', title: `Follow-up of ${r.parent_run_id}: answers its question`,
+        text: 'follow-up' }) : null,
+      kids.length ? h('span', { class: 'thread-tag', title: `Answered by ${kids.join(', ')}`,
+        text: kids.length > 1 ? `answered ×${kids.length}` : 'answered' }) : null,
+    ];
     const tr = h('tr', { class: 'run-row', 'data-run-id': r.run_id, 'data-status': str(r.status) || 'unknown' },
       cell(when, 'c-time'),
-      cell(h('div', { class: 'req-cell' }, link, task), 'c-request'),
+      cell(h('div', { class: 'req-cell' }, link, task, thread), 'c-request'),
       cell(agentBadge(r.agent), 'c-agent'),
       cell(statusCell(r), 'c-status'),
       cell(tick(r.success_claimed, 'claimed success', 'did not claim success', 'no claim recorded'), 'num c-check'),
@@ -1049,9 +1093,61 @@
       } else if (tm && tm.method === 'exact') {
         task.push(h('span', { class: 'kv-sub', text: 'the request is the task’s text (case, punctuation and how an '
           + 'amount is written aside)' }));
+      } else if (tm && tm.method === 'restated') {
+        task.push(h('span', { class: 'kv-sub', text: [
+          `matched from the agent’s restatement${isNum(tm.score) ? `, score ${tm.score.toFixed(2)}` : ''}`,
+          'the agent’s request check chose this check, not your words; the agent got the request as written',
+        ].join(' · ') }));
       }
     } else if (c) task = h('span', { class: 'muted-text', text: 'free text (no sandbox check)' });
     else task = na('no console record for this run');
+
+    // the request check (agent/clarify.py): one Lightning call before the browser opens
+    const cl = isObj(s.clarify) ? s.clarify : null;
+    const clarifyOpt = opts && has(opts.clarify) ? str(opts.clarify)
+      : typeof cfg.clarify === 'boolean' ? (cfg.clarify ? 'on' : 'off') : '';
+    let check;
+    if (cl) {
+      let lead;
+      if (cl.action === 'ask') lead = h('span', { class: 'warn-text', text: `Asked: “${oneLine(cl.question)}”` });
+      else if (has(cl.error)) lead = h('span', { class: 'warn-text', text: `Failed, went ahead: ${oneLine(cl.error)}` });
+      else if (has(cl.skipped)) lead = h('span', { text: `Skipped (${oneLine(cl.skipped)}), went ahead` });
+      else if (has(cl.normalized_request)) {
+        lead = h('span', {}, 'Clear, went ahead · restated as ',
+          h('span', { class: 'restated', text: `“${oneLine(cl.normalized_request)}”` }));
+      } else lead = h('span', { text: 'Clear, went ahead' });
+      const tokens = usageValue(cl.usage);
+      check = [lead, h('span', { class: 'kv-sub', text: [
+        has(cl.model) ? `model ${cl.model}` : null,
+        isNum(cl.latency_ms) ? `${fmtMs(cl.latency_ms)}` : (s.agent === 'mock' ? 'no latency (no model ran)' : null),
+        has(cl.prompt_version) ? `prompt ${cl.prompt_version}` : null,
+        has(cl.prompt_sha) ? `SHA ${cl.prompt_sha}` : null,
+        tokens ? `tokens ${tokens}` : null,
+        cl.action === 'ask' ? 'the run ended before the browser opened' : null,
+        cl.action === 'proceed' && has(cl.normalized_request) ? 'the restatement is shown, not planned with: the '
+          + 'agent got the request as written' : null,
+      ].filter(Boolean).join(' · ') })];
+    } else if (clarifyOpt === 'off') {
+      check = [h('span', { class: 'muted-text', text: 'off for this run' })];
+    } else {
+      check = [na('no request check in this trace')];
+    }
+
+    // follow-ups: this run answers a question (parent) / its question was answered (children)
+    const runRef = (id) => h('a', { class: 'run-ref', href: runHref(id), 'data-run-id': id }, h('code', { text: id }));
+    const kids = Array.isArray(s.child_run_ids) ? s.child_run_ids.filter((x) => RUN_ID_RE.test(str(x))) : [];
+    const parentId = has(s.parent_run_id) && RUN_ID_RE.test(str(s.parent_run_id)) ? str(s.parent_run_id) : null;
+    const answer = c && isObj(c.clarifies) && has(c.clarifies.answer) ? oneLine(c.clarifies.answer) : null;
+    const thread = [];
+    if (parentId) {
+      thread.push(h('span', { class: 'kv-line follow-of' }, 'Follow-up of ', runRef(parentId),
+        answer ? [' · your answer: ', h('span', { class: 'answer', text: `“${answer}”` })] : null));
+    }
+    if (kids.length) {
+      thread.push(h('span', { class: 'kv-line answered-by' }, 'Answered by ', joinNodes(kids.map(runRef), ', ')));
+    } else if (s.status === 'needs_input') {
+      thread.push(h('span', { class: 'muted-text', text: 'not answered yet' }));
+    }
 
     const ids = [h('span', { class: 'kv-pair' }, h('span', { class: 'kv-k', text: 'agent ' }),
       h('code', { text: str(s.run_id || S.detailFor) }))];
@@ -1106,7 +1202,9 @@
 
     const grid = h('dl', { class: 'kv' },
       kvRow('Request', has(s.request) ? h('q', { class: 'req-text', text: oneLine(s.request) }) : null),
+      thread.length ? kvRow('Follow-ups', thread) : null,
       kvRow('Task', task),
+      kvRow('Request check', check),
       kvRow('Verdict', verdictBits),
       kvRow('Voice', voiceBits),
       kvRow('Models', h('span', { class: 'kv-line' }, joinNodes(modelBits)), extraModel),
@@ -1509,10 +1607,38 @@
           dRow('Grounder', has(cfg.grounder_model) ? str(cfg.grounder_model) : null, { mono: true }),
           dRow('Screen summary', has(cfg.summary_model) ? str(cfg.summary_model) : null, { mono: true }),
           dRow('Thinking', has(cfg.thinking) ? str(cfg.thinking) : null),
+          dRow('Request check', typeof cfg.clarify === 'boolean' ? (cfg.clarify ? 'on' : 'off')
+            : has(cfg.clarify) ? str(cfg.clarify) : null),
+          has(p.parent_run_id) ? dRow('Follow-up of', h('span', { class: 'mono', text: str(p.parent_run_id) })) : null,
           dRow('Prompt version', promptVersion(cfg, { config: false })),
           dRow('Step limit', has(cfg.max_steps) ? str(cfg.max_steps) : null),
         ));
         parts.push(codeBlock(prettyJson(p.config), { label: 'Full run config (JSON)' }));
+        break;
+      }
+      case 'clarify': {
+        const t = isObj(ev.timings_ms) ? ev.timings_ms : {};
+        const lat = isNum(t.clarify) ? t.clarify : isNum(p.latency_ms) ? p.latency_ms : null;
+        const decision = p.action === 'ask' ? h('span', { class: 'yn yn-warn', text: 'ask: the request is unclear' })
+          : p.action === 'proceed' ? h('span', { class: 'yn yn-yes', text: '✓ proceed: the request is clear' })
+            : (has(p.action) ? str(p.action) : null);
+        parts.push(dl(
+          dRow('Model', modelValue(ev, p.model)),
+          dRow('Prompt version', promptVersion(p, { config: false })),
+          dRow('Prompt SHA', shaValue(p.prompt_sha, p.mock === true)),
+          dRow('Tokens', usageValue(p.usage)),
+          dRow('Latency', isNum(lat) ? fmtMs(lat) : null),
+          dRow('Request', has(p.request) ? h('q', { text: str(p.request) }) : null),
+          dRow('Decision', decision),
+          p.action === 'ask' ? dRow('Question for the user', has(p.question) ? h('q', { text: str(p.question) }) : null) : null,
+          has(p.normalized_request) ? dRow('Restated as', [h('q', { text: str(p.normalized_request) }), ' ',
+            h('span', { class: 'd-sub', text: '(display only: the agent plans with the request as written)' })]) : null,
+          has(p.error) ? dRow('Error', [str(p.error), ' ', h('span', { class: 'd-sub', text: '(so the run went ahead)' })]) : null,
+          has(p.skipped) ? dRow('Skipped', [str(p.skipped), ' ', h('span', { class: 'd-sub', text: '(no call was made)' })]) : null,
+        ));
+        if (isObj(p.tool_call)) {
+          parts.push(codeBlock(prettyJson(p.tool_call), { label: `Tool call ${str(p.tool_call.name) || '?'} (JSON)`, open: true }));
+        }
         break;
       }
       case 'observation': {
@@ -1641,7 +1767,10 @@
           dRow('Reason', has(p.reason) ? [h('span', { class: 'mono', text: str(p.reason) }), REASON_WORDS[p.reason] ? h('span', { class: 'd-sub', text: ` (${REASON_WORDS[p.reason]})` }) : null] : null),
           dRow('Claimed success', p.success_claimed === true ? yesNo(true) : p.success_claimed === false ? yesNo(false) : null),
           dRow('Steps', has(p.steps) ? str(p.steps) : null),
-          dRow(p.reason === 'stuck' ? 'The agent asks' : 'Summary', has(p.summary) ? h('q', { text: str(p.summary) }) : null),
+          p.reason === 'needs_input'
+            ? dRow('The agent asks', has(p.question || p.summary) ? h('q', { text: str(p.question || p.summary) }) : null)
+            : dRow(p.reason === 'stuck' ? 'The agent asks' : 'Summary', has(p.summary) ? h('q', { text: str(p.summary) }) : null),
+          p.reason === 'needs_input' && has(p.request) ? dRow('About the request', h('q', { text: str(p.request) })) : null,
           dRow('Stats', statsValue(p.stats)),
         ));
         break;

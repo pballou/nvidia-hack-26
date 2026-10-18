@@ -15,15 +15,19 @@ after the run; the agent never sees it.
 console.json (read by the logs page, console/logs.py) goes into the agent's trace dir
 (the parent of the events' screenshot paths, or cfg.run_dir_root/<agent run id>) as soon
 as that dir is known, with status "running", and is rewritten atomically at the end,
-before the final status and `end` messages:
-  {console_run_id, agent, request, task_id, task_match, options, sid, start_url, voice, endpoints, status,
-   result, verdict, started_ts, ended_ts}
+before the final status and `end` messages (and when a late task match is accepted):
+  {console_run_id, agent, request, task_id, task_match, options, sid, start_url, voice, endpoints,
+   parent_run_id, clarifies, status, result, verdict, started_ts, ended_ts}
 `voice` ({text, model, latency_ms, duration_s} from the voice UI) is only recorded there;
-it is never passed to the agent. `task_match` ({method: picked|exact|fuzzy, score, matched_from}, or null) says how
-the console chose task_id: picked from the list, or matched from the request (console/app.py parse_task_match). The
-agent gets the request as the user wrote it either way; the task only sets the start page, the state and the verdict. `endpoints` is the /api/config endpoints snapshot for this run's
-options, taken at run start ({"vlm": {base_url, label, summary_model, served, reachable} | null,
+it is never passed to the agent. `task_match` ({method: picked|exact|fuzzy|restated, score, matched_from}, or null)
+says how the console chose task_id: picked from the list, matched from the request (console/app.py
+parse_task_match), or "restated": matched from the agent's restatement of a free-text request (the clarify event's
+normalized_request, set during the run by set_task_match). The agent gets the request as the user wrote it either way;
+the task only sets the start page, the state and the verdict. `endpoints` is the /api/config endpoints snapshot for
+this run's options, taken at run start ({"vlm": {base_url, label, summary_model, served, reachable} | null,
 "lightning": {base_url, model, label} | null}; both null for the mock): where its VLM and Lightning ran.
+`clarifies` ({parent_run_id, answer, previous_request}, or null) marks a follow-up: the run answers the question of the
+needs_input run `parent_run_id` (also top-level), and `request` is follow_up_request(previous_request, answer).
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import httpx
 
@@ -87,6 +91,9 @@ class Run:
     voice: dict | None = None       # recorded in console.json only; never given to the agent
     task_match: dict | None = None  # how task_id was chosen (console.json, /api/runs/{id}); never given to the agent
     endpoints: dict | None = None   # where the VLM and Lightning were at run start (console.json, /api/runs/{id})
+    clarifies: dict | None = None   # follow-up: {parent_run_id, answer, previous_request} (console.json, run_task kwarg)
+    clarify: dict | None = None     # the agent's clarify event payload, once it arrives (late task matches check it)
+    verdict_started: bool = False   # _finish began: the task can't change any more
     started_ts: float = field(default_factory=time.time)
     ended_ts: float | None = None
     cfg: Any = None
@@ -100,6 +107,10 @@ class Run:
     stop_requested: bool = False
     task: asyncio.Task | None = None
     finished: threading.Event = field(default_factory=threading.Event)
+
+    @property
+    def parent_run_id(self) -> str | None:
+        return self.clarifies["parent_run_id"] if self.clarifies else None
 
 
 def as_dict(obj: Any) -> dict:
@@ -125,6 +136,13 @@ def run_dir_root(cfg: Any) -> Path | None:
 def start_url_for(sandbox_url: str, path: str | None, sid: str) -> str:
     path = path or "/"
     return f"{sandbox_url}{path}{'&' if '?' in path else '?'}sid={sid}"
+
+
+def start_page(url: str | None) -> str:
+    """The page a start URL or a task's start_path opens, without host and sid: '/settings?tab=accessibility'."""
+    parts = urlsplit(url or "/")
+    query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "sid")
+    return (parts.path or "/") + ("?" + "&".join(f"{k}={v}" for k, v in query) if query else "")
 
 
 class Runner:
@@ -161,11 +179,24 @@ class Runner:
             return {"run_id": run.run_id, "status": run.status, "request": run.request, "task_id": run.task_id,
                     "task_match": dict(run.task_match) if run.task_match else None, "options": dict(run.options),
                     "agent_run_id": run.agent_run_id, "result": run.result, "verdict": run.verdict,
-                    "endpoints": run.endpoints, "n_events": len(run.messages)}
+                    "endpoints": run.endpoints, "parent_run_id": run.parent_run_id,
+                    "clarifies": dict(run.clarifies) if run.clarifies else None, "n_events": len(run.messages)}
 
     def trace_dir(self, agent_run_id: str) -> Path | None:
         with self.lock:
             return self.trace_dirs.get(agent_run_id)
+
+    def agent_run_events(self, agent_run_id: str) -> tuple[dict | None, dict | None]:
+        """(the last done StepEvent, the start StepEvent) of the run this console ran as `agent_run_id`, from its
+        stream messages; (None, None) if this console didn't run it (look at its trace instead)."""
+        with self.lock:
+            run = next((r for r in reversed(list(self.runs.values())) if r.agent_run_id == agent_run_id), None)
+            if run is None:
+                return None, None
+            steps = [m.data for m in run.messages if m.event == "step"]
+        done = next((d for d in reversed(steps) if d.get("kind") == "done"), None)
+        start = next((d for d in steps if d.get("kind") == "start"), None)
+        return done, start
 
     def live_agent_run_ids(self) -> set[str]:
         """The agent run id of the run in progress (empty when idle or before the agent's first event)."""
@@ -181,10 +212,11 @@ class Runner:
     # --- start / stop --------------------------------------------------------------
 
     def start(self, request: str, task_id: str | None, options: dict, voice: dict | None = None,
-              endpoints: dict | None = None, *, task_match: dict | None = None) -> Run:
+              endpoints: dict | None = None, *, task_match: dict | None = None, clarifies: dict | None = None) -> Run:
         """Reset the sandbox session and schedule the agent. Raises Busy or StartFailed. Blocking (call off-loop).
         `voice`, `endpoints` and `task_match` are only recorded (console.json); the agent gets request, start_url
-        and cfg."""
+        and cfg, plus parent_run_id=clarifies["parent_run_id"] for a follow-up (only then: older agents and fakes
+        don't take it)."""
         task = self.tasks_by_id[task_id] if task_id else None
         run_id = "c-" + secrets.token_hex(4)
         sid = "console-" + run_id
@@ -192,7 +224,8 @@ class Runner:
                   start_url=start_url_for(self.sandbox_url, task["start_path"] if task else "/", sid),
                   voice=dict(voice) if voice else None,
                   task_match=dict(task_match) if task_match and task_id else None,
-                  endpoints=json.loads(json.dumps(endpoints)) if endpoints is not None else None)
+                  endpoints=json.loads(json.dumps(endpoints)) if endpoints is not None else None,
+                  clarifies=dict(clarifies) if clarifies else None)
         with self.lock:
             if self.active is not None:
                 raise Busy(self.active.run_id)
@@ -247,6 +280,39 @@ class Runner:
         if run.task is not None and not run.task.done():
             run.task.cancel()
 
+    # --- a late task match (the agent's restatement) ------------------------------------
+
+    def set_task_match(self, run: Run, task_id: str, match: dict) -> tuple[int, str | None]:
+        """Check a free-text run as `task_id`, because the agent's restatement of the request matches it
+        (match = {method: "restated", score, matched_from}). (200, None) when accepted, else (409 | 400, why).
+
+        Accepted only while it can't change what happened: the run has no task yet, its verdict isn't being computed,
+        the agent proceeded with a normalized_request equal to matched_from, and the task starts where this run
+        started: the same page (path and query, sid aside) and the default state (no initial_state_overrides),
+        since a free-text run's sandbox session was reset without a task."""
+        task = self.tasks_by_id[task_id]
+        with self.lock:
+            if run.task_id is not None:
+                return 409, f"this run is already checked as task {run.task_id}"
+            if run.verdict_started or run.closed:
+                return 409, "this run has ended: too late to choose a task for its verdict"
+            c = run.clarify
+            restated = c.get("normalized_request") if isinstance(c, dict) and c.get("action") == "proceed" else None
+            if not isinstance(restated, str) or not restated.strip():
+                return 409, "the agent has not restated this run's request (no clarify event that proceeded with one)"
+            if " ".join(restated.split()) != " ".join(match["matched_from"].split()):
+                return 400, f"matched_from must be the agent's restatement of this run's request: {restated!r}"
+            want, here = start_page(task.get("start_path")), start_page(run.start_url)
+            if want != here:
+                return 409, f"task {task_id} starts on {want}, but this run started on {here}"
+            overrides = task.get("initial_state_overrides") or {}
+            if overrides:
+                return 409, (f"task {task_id} starts from its own state ({', '.join(sorted(overrides))}), but this run "
+                             "started from the default state")
+            run.task_id, run.task_match = task_id, dict(match)
+            self._write_console_json(run, "running", force=True)
+        return 200, None
+
     # --- the run itself (worker loop) -------------------------------------------------
 
     async def _drive(self, run: Run, cfg: Any) -> None:
@@ -259,7 +325,8 @@ class Runner:
         try:
             if run.stop_requested:
                 raise asyncio.CancelledError
-            result = await self.run_task(run.request, start_url=run.start_url, cfg=cfg, on_event=on_event)
+            extra = {"parent_run_id": run.parent_run_id} if run.parent_run_id else {}
+            result = await self.run_task(run.request, start_url=run.start_url, cfg=cfg, on_event=on_event, **extra)
             rd = as_dict(result)
             with self.lock:
                 run.result = rd
@@ -290,17 +357,22 @@ class Runner:
                     aid = run.agent_run_id or p.parent.name
                     self.trace_dirs[aid] = p.parent
                     d[dst] = f"/runs/{quote(aid)}/{quote(p.name)}"
+            if d.get("kind") == "clarify" and isinstance(d.get("payload"), dict) and run.clarify is None:
+                run.clarify = dict(d["payload"])  # set_task_match checks a restated match against it
             if run.status == "starting":
                 self._append(run, "status", {"status": "running"})
             self._append(run, "step", d)
             self._write_console_json(run, "running")
 
     def _finish(self, run: Run, status: str, message: str | None) -> None:
-        """Verdict (if a task was given), final status, end. Runs once per run, whichever path gets here first."""
+        """Verdict (if the run has a task), final status, end. Runs once per run, whichever path gets here first.
+        From here on the task is fixed: set_task_match refuses (verdict_started)."""
         with self.lock:
             if run.closed:
                 return
-        verdict = self._verdict(run) if run.task_id else None
+            run.verdict_started = True
+            task_id = run.task_id
+        verdict = self._verdict(run, task_id) if task_id else None
         with self.lock:
             if run.closed:
                 return
@@ -329,18 +401,20 @@ class Runner:
                 d = (root / aid).resolve()
         return d
 
-    def _write_console_json(self, run: Run, status: str, final: bool = False) -> None:  # lock held
+    def _write_console_json(self, run: Run, status: str, final: bool = False, force: bool = False) -> None:  # lock held
         """Write console.json atomically into the run's trace dir. Mid-run only when that dir is new
-        (so about once per run); nothing after the final write. Never raises: logging must not break a run."""
+        (so about once per run) or when `force`d (a late task match); nothing after the final write. Never raises:
+        logging must not break a run."""
         if run.closed:
             return
         d = self._console_json_dir(run)
-        if d is None or (not final and d == run.console_json_dir):
+        if d is None or (not final and not force and d == run.console_json_dir):
             return
         doc = {"console_run_id": run.run_id, "agent": self.agent_name, "request": run.request,
                "task_id": run.task_id, "task_match": run.task_match, "options": dict(run.options), "sid": run.sid,
                "start_url": run.start_url,
-               "voice": run.voice, "endpoints": run.endpoints, "status": status, "result": run.result,
+               "voice": run.voice, "endpoints": run.endpoints, "parent_run_id": run.parent_run_id,
+               "clarifies": dict(run.clarifies) if run.clarifies else None, "status": status, "result": run.result,
                "verdict": run.verdict,
                "started_ts": round(run.started_ts, 3),
                "ended_ts": round(run.ended_ts, 3) if run.ended_ts is not None else None}
@@ -381,8 +455,8 @@ class Runner:
         if not ok:
             raise StartFailed(f"sandbox reset failed: HTTP {r.status_code} {r.text[:200]}")
 
-    def _verdict(self, run: Run) -> dict:
-        task = self.tasks_by_id[run.task_id]
+    def _verdict(self, run: Run, task_id: str) -> dict:
+        task = self.tasks_by_id[task_id]
         try:
             with self._client() as c:
                 r = c.get(f"{self.sandbox_url}/api/state", params={"sid": run.sid})
@@ -390,7 +464,7 @@ class Runner:
             passed, explanation = evaluate(r.json(), task["check"])
         except Exception as e:
             passed, explanation = False, f"could not read sandbox state: {type(e).__name__}: {e}"
-        return {"task_id": run.task_id, "passed": bool(passed), "explanation": explanation, "label": VERDICT_LABEL}
+        return {"task_id": task_id, "passed": bool(passed), "explanation": explanation, "label": VERDICT_LABEL}
 
     # --- messages ----------------------------------------------------------------------
 

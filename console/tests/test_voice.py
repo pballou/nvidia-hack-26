@@ -48,7 +48,8 @@ LONG_TASK = "message-support-meter"  # 7 steps: at 1 s per step it is still runn
 VIEWPORT = {"width": 1280, "height": 800}
 LOCAL_HOST = "127.0.0.1"
 FAKE_MIC = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
-DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}  # console default (--grounder)
+# the console's defaults (--grounder, --thinking, --clarify)
+DEFAULT_OPTIONS = {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"}
 HEARD_STUB = re.compile(r"^Heard \(stub, \d+ ms\): Turn on high contrast\.$")
 # The first press opens the microphone and records from its first frame; later presses find it warm.
 COLD_TOGGLE = "Listening… start speaking now, press again to send"

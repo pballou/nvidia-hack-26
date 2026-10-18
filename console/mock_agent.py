@@ -1,6 +1,6 @@
 """Mock GUI assist agent: the same interface, events and trace layout as T2's agent.core.
 
-    async run_task(request, *, start_url, cfg, on_event=None) -> dict (RunResult fields)
+    async run_task(request, *, start_url, cfg, on_event=None, parent_run_id=None) -> dict (RunResult fields)
 
 It drives a real Playwright Chromium against the sandbox from pixels alone, like the
 vision agent: page.goto, screenshots, mouse clicks and wheel, the keyboard, page.url
@@ -14,6 +14,16 @@ whitespace don't matter), and only when the run starts where the script was reco
 that page, so replaying them anywhere else would click the wrong things. Anything else
 gets a short generic run that looks at the screen and gives up with done(success=false),
 saying why.
+
+Request check (cfg.clarify on, like agent/clarify.py; off: no clarify event, as before): right after
+start, before the browser opens, a step-0 `clarify` event in agent/trace.py's shape. Two scripted
+unclear requests ask (CLARIFY_ASKS: "Allors towards my bill." and "Pay something toward my bill"):
+the run ends at once with done reason "needs_input" (no browser). Everything else proceeds, with
+normalized_request = the request trimmed, except a follow-up of a bill question answered with
+fifty dollars / $50 (agent.clarify.follow_up_request's "(clarified: ...)" format), which the mock
+restates as "Pay $50 toward my bill.". The restatement, not the user's words, then picks the script,
+so that follow-up replays pay-50. Like the real agent, a request already answered twice skips the
+check. A follow-up's start event carries parent_run_id.
 
 Every payload carries "mock": true. Plans say model "mock (no Lightning)", observations
 summary.model "mock (no VLM)", and prompt_version and prompt_sha are "mock" (the logs
@@ -64,6 +74,16 @@ MOCK_PROMPT_VERSION = "mock"
 MOCK_PROMPT_SHA = "mock"
 MOCK_PROMPT = {"prompt_version": MOCK_PROMPT_VERSION, "prompt_sha": MOCK_PROMPT_SHA}
 MOCK_SUMMARY_INFO = {"model": MOCK_SUMMARIZER, **MOCK_PROMPT}
+MOCK_CLARIFY_PROMPT = {"prompt_version": "clarify-v4 (mock)", "prompt_sha": MOCK_PROMPT_SHA}
+# The request check's scripted questions (keys: clarify_key of the request) and the follow-up it understands.
+CLARIFY_ASKS = {
+    "allors towards my bill": "What would you like to do with your bill?",
+    "pay something toward my bill": "How much would you like to pay toward your bill?",
+}
+FIFTY_DOLLARS = ("fifty dollars", "$50", "50 dollars", "$50.00")  # answers to a bill question (clarify_key)
+BILL_RESTATED = "Pay $50 toward my bill."
+CLARIFIED_MARK = "(clarified:"  # agent/clarify.py follow_up_request: previous + " (clarified: <answer>)"
+MAX_CLARIFICATIONS = 2          # agent/clarify.py: a request answered this often skips the check
 NO_CHANGE_NOTE = (  # same words as agent/observation.py
     "The screen did NOT change after your last action. The click probably missed or the "
     "element is not interactive: describe the target differently or try another way."
@@ -77,6 +97,7 @@ class MockConfig:
     grounder_model: str = "base"
     thinking: str = "retry"
     lightning: str = "hosted"
+    clarify: str | bool = "off"  # "on" | "off" (the console's option) or a bool: the request check
     headed: bool = False
     step_delay_s: float = 0.8
     scripts_path: str = str(SCRIPTS_PATH)
@@ -88,9 +109,14 @@ class MockConfig:
         p = Path(self.runs_dir)
         return p if p.is_absolute() else REPO_ROOT / p
 
+    @property
+    def clarify_on(self) -> bool:
+        return self.clarify is True or (isinstance(self.clarify, str) and self.clarify.strip().lower() == "on")
+
     def public_dict(self) -> dict:
         return {"agent": "mock", "sandbox_url": self.sandbox_url, "grounder_model": self.grounder_model,
-                "thinking": self.thinking, "lightning": self.lightning, "max_steps": self.max_steps,
+                "thinking": self.thinking, "lightning": self.lightning, "clarify": self.clarify_on,
+                "max_steps": self.max_steps,
                 "viewport": dict(VIEWPORT), "headed": self.headed, "step_delay_s": self.step_delay_s}
 
 
@@ -319,6 +345,32 @@ def _norm(text: str) -> str:
     return " ".join(str(text).split()).casefold()
 
 
+def clarify_key(text: str) -> str:
+    """_norm without trailing punctuation: 'Pay something toward my bill.' == 'pay something toward my bill'."""
+    return _norm(text).rstrip(" .!?,;:")
+
+
+def clarify_decision(request: str) -> dict:
+    """The mock's request check as a clarify event payload (agent/trace.py; emit adds "mock": true). No model runs,
+    so there is no latency or usage."""
+    out: dict[str, Any] = {"request": request, "model": MOCK_PLANNER, **MOCK_CLARIFY_PROMPT}
+    n_answers = request.count(CLARIFIED_MARK)
+    if n_answers >= MAX_CLARIFICATIONS:
+        return {"action": "proceed", **out, "skipped": f"already clarified {n_answers} times"}
+    question = None if n_answers else CLARIFY_ASKS.get(clarify_key(request))
+    if question:
+        return {"action": "ask", **out, "question": question,
+                "tool_call": {"name": "ask_user", "arguments": {"question": question}}}
+    base, _, rest = request.partition(CLARIFIED_MARK)
+    answer = clarify_key(rest.rpartition(")")[0]) if n_answers else ""
+    if clarify_key(base) in CLARIFY_ASKS and answer in FIFTY_DOLLARS:
+        restated = BILL_RESTATED
+    else:
+        restated = " ".join(request.split())
+    return {"action": "proceed", **out, "normalized_request": restated,
+            "tool_call": {"name": "proceed", "arguments": {"normalized_request": restated}}}
+
+
 def find_script(path: str | Path, request: str) -> tuple[dict | None, str | None]:
     """(script, None) on a match, (None, None) if no script matches, (None, error) if the file is unusable."""
     path = Path(path)
@@ -414,22 +466,33 @@ class _Run:
                                         "summary": dict(MOCK_SUMMARY_INFO)},
                         screenshot_path=self.save(img), timings_ms=timings_ms)
 
-    async def finish(self, success: bool, summary: str, reason: str) -> dict:
+    async def finish(self, success: bool, summary: str, reason: str, question: str | None = None) -> dict:
         if self.finished is None:
             self.stats["elapsed_ms"] = round((time.perf_counter() - self.t0) * 1000)
-            await self.emit("done", {"success_claimed": success, "summary": summary, "steps": self.step,
-                                     "reason": reason, "stats": dict(self.stats)})
+            done = {"success_claimed": success, "summary": summary, "steps": self.step, "reason": reason,
+                    "stats": dict(self.stats)}
+            if reason == "needs_input":  # agent/core.py: the console asks this, then starts a run with the answer
+                done.update(question=question, request=self.request)
+            await self.emit("done", done)
             self.finished = {"run_id": self.run_id, "success_claimed": success, "summary": summary,
-                             "steps": self.step, "trace_dir": str(self.dir)}
+                             "steps": self.step, "trace_dir": str(self.dir), "reason": reason, "question": question}
         return self.finished
+
+    async def check_request(self) -> dict:
+        """The step-0 clarify event (before the browser opens). Returns its payload."""
+        await self.pace(0.3)
+        c = clarify_decision(self.request)
+        await self.emit("clarify", c)
+        return c
 
     async def fail(self, message: str, where: str) -> dict:
         self.stats["failed"] += 1
         await self.emit("error", {"message": message, "where": where, "recoverable": False})
         return await self.finish(False, f"Mock run failed: {message}", "error")
 
-    async def play(self, page) -> dict:
-        script, script_error = find_script(self.cfg.scripts_path, self.request)
+    async def play(self, page, plan_request: str | None = None) -> dict:
+        """Replay the script for `plan_request` (the request check's restatement, else the request itself)."""
+        script, script_error = find_script(self.cfg.scripts_path, plan_request or self.request)
         elsewhere = recorded_elsewhere(script, self.start_url) if script is not None else None
         if elsewhere is not None:
             script = None
@@ -526,16 +589,27 @@ class _Run:
 
 
 async def run_task(request: str, *, start_url: str, cfg: MockConfig | None = None,
-                   on_event: Callable[[MockStepEvent], Awaitable[None]] | None = None) -> dict:
-    """Same contract as agent.core.run_task (contracts.md §5). Never raises, except CancelledError."""
+                   on_event: Callable[[MockStepEvent], Awaitable[None]] | None = None,
+                   parent_run_id: str | None = None) -> dict:
+    """Same contract as agent.core.run_task (contracts.md §5). Never raises, except CancelledError.
+    `parent_run_id`: the needs_input run this follow-up answers (recorded in the start event)."""
     cfg = cfg or MockConfig()
     run = _Run(request, start_url, cfg, on_event)
     try:
-        await run.emit("start", {"request": request, "start_url": start_url, "config": cfg.public_dict()})
+        start = {"request": request, "start_url": start_url, "config": cfg.public_dict()}
+        if parent_run_id:
+            start["parent_run_id"] = parent_run_id
+        await run.emit("start", start)
+        plan_request = request
         try:
+            if cfg.clarify_on:  # before the browser opens, like agent/core.py
+                c = await run.check_request()
+                if c["action"] == "ask":
+                    return await run.finish(False, c["question"], "needs_input", question=c["question"])
+                plan_request = c.get("normalized_request") or request
             async with open_page(cfg.headed) as page:  # closes the browser on the way out
                 try:
-                    return await run.play(page)
+                    return await run.play(page, plan_request)
                 except ScriptError as e:
                     return await run.fail(str(e), "mock_script")
                 except asyncio.CancelledError:

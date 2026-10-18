@@ -352,6 +352,16 @@ html.hc .voice-hint[data-tone="off"] { border: 1px solid var(--warn); }
   font-weight: 650; font-size: 0.95rem; overflow-wrap: anywhere;
 }
 html.hc .heard { border-width: 2px 2px 2px 6px; border-color: var(--accent); }
+/* the clarify step's restatement of the request: small, and labelled as the agent's words */
+.understood {
+  margin: 0 0 0.45rem;
+  padding: 0.2rem 0.6rem;
+  border-left: 3px solid var(--border-strong);
+  font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere;
+}
+.understood-label { font-weight: 700; }
+.understood-task { font-weight: 600; }
+html.hc .understood { border-left-width: 4px; }
 
 @media (prefers-reduced-motion: no-preference) {
   .mic-btn[data-state="transcribing"] .ico-spin { animation: mic-spin 0.9s linear infinite; }
@@ -379,6 +389,9 @@ html.hc #request-note { border: 1px solid var(--warn); }
 .options[open] .options-summary { display: none; }
 .options-body { display: grid; gap: 0.45rem; margin-top: 0.3rem; }
 .opt { border: 0; margin: 0; padding: 0; min-width: 0; }
+/* Thinking and "Ask when unclear" side by side (they wrap onto two rows when the panel is narrow) */
+.opt-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.45rem 1.4rem; }
+.opt-row .legend-hint { display: block; margin-left: 0; line-height: 1.25; }
 .opt legend { padding: 0 0 0.15rem; font-weight: 700; font-size: 0.95rem; line-height: 1.3; }
 .legend-hint { font-weight: 400; font-size: 0.8rem; color: var(--muted); margin-left: 0.3rem; }
 .opt:disabled .seg label { opacity: 0.55; cursor: not-allowed; }
@@ -449,7 +462,7 @@ html.hc .seg input:focus-visible + label { outline-width: 4px; }
 }
 .run-status[data-state="done"] { color: var(--ok); border-color: var(--ok); }
 .run-status[data-state="stopped"], .run-status[data-state="reconnecting"],
-.run-status[data-state="stuck"] { color: var(--warn); border-color: var(--warn); }
+.run-status[data-state="stuck"], .run-status[data-state="needs_input"] { color: var(--warn); border-color: var(--warn); }
 .run-status[data-state="error"] { color: var(--bad); border-color: var(--bad); }
 @media (prefers-reduced-motion: no-preference) {
   .run-status[data-state="running"]::before { animation: pulse 1.4s ease-in-out infinite; }
@@ -507,7 +520,7 @@ html.hc .step.is-shown { border-color: var(--accent); }
 .step.is-compact .step-reason,
 .step.is-compact .step-meta,
 .step.is-compact .step-screen,
-.step.is-compact .step-lines > :not(.step-error):not(.step-warn) { display: none; }
+.step.is-compact .step-lines > :not(.step-error):not(.step-warn):not(.step-followup) { display: none; }
 .step.is-compact .step-num { width: 1.6rem; height: 1.6rem; font-size: 0.8rem; margin: 0.1rem 0 0 0.2rem; }
 .step.is-compact .step-action {
   font-size: 0.95rem; font-weight: 600;
@@ -546,6 +559,8 @@ html.hc .step.is-shown { border-color: var(--accent); }
 .step-warn { color: var(--warn); font-weight: 600; }
 .step-error { color: var(--bad); font-weight: 650; }
 .step-ask { color: var(--text); font-weight: 600; }
+.step-understood { color: var(--text); }
+.step-followup { color: var(--text); font-weight: 600; }  /* shown even when step 0 is compact */
 .step-json { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
 .step-screen {
   margin: 0.3rem 0 0; padding: 0.5rem; max-height: 14rem; overflow: auto;
@@ -692,15 +707,17 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
 }
 .banner[data-tone="pass"] { border-color: var(--ok); background: var(--ok-bg); }
 .banner[data-tone="fail"], .banner[data-tone="error"] { border-color: var(--bad); background: var(--bad-bg); }
-.banner[data-tone="stopped"], .banner[data-tone="stuck"] { border-color: var(--warn); background: var(--warn-bg); }
-.banner[data-tone="stuck"] { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.banner[data-tone="stopped"], .banner[data-tone="stuck"],
+.banner[data-tone="ask"] { border-color: var(--warn); background: var(--warn-bg); }
+.banner[data-tone="stuck"], .banner[data-tone="ask"] { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
 .banner-verdict { display: flex; gap: 0.75rem; align-items: flex-start; }
 .banner-icon { font-size: 2.4rem; line-height: 1; font-weight: 900; }
 .banner[data-tone="pass"] .banner-icon, .banner[data-tone="pass"] .banner-title { color: var(--ok); }
 .banner[data-tone="fail"] .banner-icon, .banner[data-tone="fail"] .banner-title,
 .banner[data-tone="error"] .banner-icon, .banner[data-tone="error"] .banner-title { color: var(--bad); }
 .banner[data-tone="stopped"] .banner-icon, .banner[data-tone="stopped"] .banner-title,
-.banner[data-tone="stuck"] .banner-icon, .banner[data-tone="stuck"] .banner-title { color: var(--warn); }
+.banner[data-tone="stuck"] .banner-icon, .banner[data-tone="stuck"] .banner-title,
+.banner[data-tone="ask"] .banner-icon, .banner[data-tone="ask"] .banner-title { color: var(--warn); }
 .banner-title { font-size: 1.35rem; font-weight: 800; line-height: 1.2; }
 /* stuck: the agent's question to the user is the headline */
 .banner-question {
@@ -711,6 +728,23 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   overflow-wrap: anywhere;
 }
 .banner-task { font-size: 0.85rem; font-weight: 600; margin-top: 0.2rem; overflow-wrap: anywhere; }
+/* needs_input: the answer box under the question */
+.banner-answer { display: grid; gap: 0.2rem; margin: 0.35rem 0 0.15rem; }
+.answer-label { font-weight: 700; font-size: 0.92rem; }
+.answer-row { display: flex; gap: 0.5rem; align-items: stretch; }
+.answer-row input {
+  flex: 1 1 auto; min-width: 0;
+  padding: 0.35rem 0.65rem;
+  font-size: 1.05rem;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+}
+.btn-answer { min-width: 5.5rem; min-height: 2.6rem; font-size: 1rem; }
+.answer-hint { font-size: 0.8rem; color: var(--muted); }
+.answer-hint kbd { color: var(--text); }
+.banner-answer .form-error { font-size: 0.85rem; padding: 0.25rem 0.55rem; }
 .banner-label { font-size: 0.85rem; font-weight: 700; margin-top: 0.15rem; text-wrap: balance; }
 .banner-expl { font-size: 0.85rem; color: var(--muted); margin-top: 0.1rem; overflow-wrap: anywhere; }
 .banner-expl .btn-link { margin-left: 0.15rem; font-weight: 600; }
@@ -740,7 +774,7 @@ html.hc .btn-live[aria-pressed="true"][data-running="true"]:hover:not(:disabled)
   .screen { flex: none; min-height: 0; }
   .screen-wrap { container-type: inline-size; }
   .screen-img, .screen-empty { width: 100%; }
-  .banner { grid-template-columns: 1fr; }
+  .banner, .banner[data-tone="stuck"], .banner[data-tone="ask"] { grid-template-columns: 1fr; }
   .banner-agent { border-left: 0; padding-left: 0; }
 }
 @media (max-width: 480px) {

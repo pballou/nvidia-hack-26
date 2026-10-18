@@ -5,6 +5,7 @@
 # Ctrl-C stops whatever this script started.
 #
 # Usage: scripts/demo_up.sh [--agent mock|real] [--lightning hosted|local] [--grounder base|grounder]
+#                           [--thinking off|retry|on] [--clarify on|off]
 #                           [--vlm-url URL] [--summary-model base|grounder] [--vlm-label TEXT]
 #                           [--asr auto|parakeet|stub] [--headed] [--skip-models]
 #   --agent mock      scripted stand-in agent, no models needed (default)
@@ -12,6 +13,9 @@
 #   --lightning       which Lightning the console defaults to and this script checks (default local:
 #                     the official BF16 checkpoint served as `lightning` on :8000; hosted is slow)
 #   --grounder        the console's initial Grounder choice (default grounder = the LoRA; base = adapter off)
+#   --thinking        the console's initial Thinking choice (default off, the recording setting; retry, on)
+#   --clarify         the console's initial Request check (default on: one short Lightning call before the
+#                     browser opens; an unclear request gets a question, the answer starts a follow-up run)
 #   --vlm-url URL     the VLM's OpenAI base URL for the real agent and this script's check, e.g.
 #                     http://127.0.0.1:8011/v1 for the fully local Mac grounder (default: configs/agent.yaml
 #                     vlm.base_url, or $AGENT_VLM_BASE_URL)
@@ -37,8 +41,13 @@ usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' 
 
 AGENT=mock LIGHTNING=local ASR="${CONSOLE_ASR:-auto}" HEADED=0 SKIP_MODELS=0
 GROUNDER=grounder VLM_URL_ARG="" SUMMARY_MODEL_ARG="" VLM_LABEL="${CONSOLE_VLM_LABEL:-}"
+THINKING=off CLARIFY=on
 while [ $# -gt 0 ]; do
   case "$1" in
+    --thinking) THINKING="${2:?--thinking needs off|retry|on}"; shift 2 ;;
+    --thinking=*) THINKING="${1#*=}"; shift ;;
+    --clarify) CLARIFY="${2:?--clarify needs on|off}"; shift 2 ;;
+    --clarify=*) CLARIFY="${1#*=}"; shift ;;
     --agent) AGENT="${2:?--agent needs mock|real}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
     --lightning) LIGHTNING="${2:?--lightning needs hosted|local}"; shift 2 ;;
@@ -62,6 +71,8 @@ done
 case "$AGENT" in mock|real) ;; *) echo "--agent must be mock or real" >&2; exit 2 ;; esac
 case "$LIGHTNING" in hosted|local) ;; *) echo "--lightning must be hosted or local" >&2; exit 2 ;; esac
 case "$GROUNDER" in base|grounder) ;; *) echo "--grounder must be base or grounder" >&2; exit 2 ;; esac
+case "$THINKING" in off|retry|on) ;; *) echo "--thinking must be off, retry or on" >&2; exit 2 ;; esac
+case "$CLARIFY" in on|off) ;; *) echo "--clarify must be on or off" >&2; exit 2 ;; esac
 case "$SUMMARY_MODEL_ARG" in ""|base|grounder) ;; *) echo "--summary-model must be base or grounder" >&2; exit 2 ;; esac
 case "$VLM_URL_ARG" in ""|http://*|https://*) ;; *) echo "--vlm-url must be an http(s) URL, e.g. http://127.0.0.1:8011/v1" >&2; exit 2 ;; esac
 case "$ASR" in auto|parakeet|stub) ;; *) echo "--asr must be auto, parakeet or stub" >&2; exit 2 ;; esac
@@ -179,10 +190,10 @@ fi
 
 # 4. Console
 if up "$CONSOLE_URL/api/config"; then
-  echo "console  already running at $CONSOLE_URL (restart it to change --agent/--grounder/--vlm-url/--summary-model/--asr/--headed)"
+  echo "console  already running at $CONSOLE_URL (restart it to change --agent/--grounder/--thinking/--clarify/--vlm-url/--summary-model/--asr/--headed)"
 else
-  set -- --agent "$AGENT" --lightning "$LIGHTNING" --grounder "$GROUNDER" --asr "$ASR" --sandbox-url "$SANDBOX_URL" \
-    --port "$CONSOLE_PORT"
+  set -- --agent "$AGENT" --lightning "$LIGHTNING" --grounder "$GROUNDER" --thinking "$THINKING" --clarify "$CLARIFY" \
+    --asr "$ASR" --sandbox-url "$SANDBOX_URL" --port "$CONSOLE_PORT"
   if [ -n "$VLM_URL_ARG" ]; then set -- "$@" --vlm-url "$VLM_URL_ARG"; fi
   if [ -n "$SUMMARY_MODEL_ARG" ]; then set -- "$@" --summary-model "$SUMMARY_MODEL_ARG"; fi
   if [ -n "$VLM_LABEL" ]; then set -- "$@" --vlm-label "$VLM_LABEL"; fi
@@ -190,7 +201,7 @@ else
   scripts/run_console.sh "$@" >"$LOGS/console.log" 2>&1 &
   PIDS="$PIDS $!"
   wait_up "$CONSOLE_URL/api/config" console "$!"
-  desc="agent: $AGENT, lightning: $LIGHTNING, grounder: $GROUNDER"
+  desc="agent: $AGENT, lightning: $LIGHTNING, grounder: $GROUNDER, thinking: $THINKING, request check: $CLARIFY"
   if [ -n "$VLM_URL_ARG" ]; then desc="$desc, vlm: $VLM_URL_ARG"; fi
   if [ -n "$SUMMARY_MODEL_ARG" ]; then desc="$desc, summary: $SUMMARY_MODEL_ARG"; fi
   if [ -n "$VLM_LABEL" ]; then desc="$desc, vlm label: $VLM_LABEL"; fi

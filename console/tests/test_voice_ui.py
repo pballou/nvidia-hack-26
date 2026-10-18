@@ -400,8 +400,8 @@ def test_push_to_talk_fills_selects_and_runs_a_sandbox_task(voice, fast_console)
     assert len(v.run_bodies) == 1
     body = dict(v.run_bodies[0])
     voice = body.pop("voice")  # what was heard, for the logs page (console.json only; the agent never gets it)
-    assert body == {"request": TASK_REQUEST, "task_id": TASK,
-                    "options": {"grounder": "grounder", "thinking": "retry", "lightning": "local"}}
+    assert body == {"request": TASK_REQUEST, "task_id": TASK,  # the console's defaults
+                    "options": {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"}}
     assert voice["text"] == STUB_TEXT and voice["model"] == "stub" and voice["latency_ms"] >= 0, voice
     assert 0.6 < voice["duration_s"] < 2.0, voice
     s = v.state()

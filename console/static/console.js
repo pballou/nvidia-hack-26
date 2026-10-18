@@ -27,6 +27,20 @@
  * gets the user's request: a fuzzy match never swaps in the task's text. POST /api/run carries task_match {method:
  * picked|fuzzy, score, matched_from}; an exact match is left out (the backend records it). The banner says "Checked as
  * task: <id> (matched from your request)" or "(picked from the list)" above the verdict.
+ *
+ * "Ask when unclear" (options.clarify on|off, agent/clarify.py): with it on, the agent's step 0 is a `clarify` event
+ * (after start, before any observation). Without that event (off, or an agent without the step) nothing changes.
+ * - proceed: the step log says the request was clear, and "What the agent understood: <normalized_request>" shows
+ *   above the log (display only: the agent works from the user's words). A run with no task whose restatement
+ *   matches one (matchTaskDetailed) asks the backend to check it as that task: POST /api/runs/{id}/task_match
+ *   {task_id, method: "restated", score, matched_from}. The backend refuses (409/400, said in the log) unless the
+ *   run has no task or verdict yet and the task starts where the run did. The banner then says "Checked as task: <id>
+ *   (matched from the agent's restatement: "<text>")".
+ * - ask: the run ends with done reason "needs_input" (no browser opened). The banner asks the question with an
+ *   answer box; the answer starts a follow-up run: POST /api/run {request: previous + " (clarified: <answer>)",
+ *   clarifies: {parent_run_id: <the asking run's agent run id>, answer}, task_id/task_match from matching that text}.
+ *   The backend builds the same text (agent.clarify.follow_up_request) and refuses a different one. Voice input
+ *   answers too: while a question waits, the next transcript fills the answer box (voice.js, pendingQuestion()).
  */
 'use strict';
 
@@ -39,16 +53,19 @@
   const REASON_MAX = 200;
   const SUMMARY_MAX = 220;  // the banner's agent summary; longer ones get Show more
   const CHECK_HEAD_MAX = 110;  // longer sandbox-check explanations are cut, with the full text one click away
-  const OPTION_NAMES = ['grounder', 'thinking', 'lightning'];
+  const OPTION_NAMES = ['grounder', 'thinking', 'clarify', 'lightning'];
   const DIFFICULTIES = ['easy', 'medium', 'hard'];
   const TAG_WORDS = { icon_only: 'unlabeled icon buttons', canvas: 'canvas widget', scroll: 'needs scrolling' };
-  const TIMING_ORDER = ['plan', 'ground', 'act', 'summary'];
+  const TIMING_ORDER = ['clarify', 'plan', 'ground', 'act', 'summary'];
   const TIMING_HIDDEN = new Set(['settle', 'screenshot']);
-  const FINAL = new Set(['done', 'stopped', 'error', 'stuck']);
+  const FINAL = new Set(['done', 'stopped', 'error', 'stuck', 'needs_input']);
   const STATUS_TEXT = {
     idle: 'Idle', starting: 'Starting', running: 'Running', reconnecting: 'Reconnecting',
-    done: 'Done', stopped: 'Stopped', error: 'Error', stuck: 'Stuck',
+    done: 'Done', stopped: 'Stopped', error: 'Error', stuck: 'Stuck', needs_input: 'Needs your answer',
   };
+  const ANSWER_MAX = 300;               // POST /api/run clarifies.answer: 1..300 characters
+  const CLARIFIED = ' (clarified: ';    // agent/clarify.py follow_up_request: previous + " (clarified: <answer>)"
+  const TASK_MATCH_METHODS = ['picked', 'exact', 'fuzzy', 'restated'];
   // The header's Lightning line when the toggle isn't the server default (/api/config endpoints describe the
   // default only). The console's per-run choice always picks one of agent.yaml's two presets.
   const LIGHTNING_PRESET_LABELS = { local: 'local BF16 (:8000)', hosted: 'hosted API' };
@@ -59,6 +76,7 @@
   const OPTION_SHORT = {
     grounder: { base: 'base', grounder: 'LoRA grounder' },
     thinking: { off: 'thinking off', retry: 'thinking retry', on: 'thinking on' },
+    clarify: { on: 'asks if unclear', off: 'never asks first' },
     lightning: { local: 'local Lightning', hosted: 'hosted Lightning' },
   };
   const FREE_TEXT_LABEL = 'Free-text request: no sandbox check';
@@ -67,6 +85,7 @@
     stuck: 'Stopped: stuck',
     stopped: 'Stopped by the user.',
     error: 'Stopped after an error.',
+    needs_input: 'Stopped to ask you first.',
   };
 
   // --- storage (may be unavailable in private modes) -----------------------------
@@ -107,6 +126,7 @@
     timer: null,
     runSeq: 0,          // bumps per attached run (unique element ids)
     voice: null,        // {request, voice}: the last transcript put in the box (see setRequestText)
+    answerVoice: null,  // {answer, voice}: the last transcript put in the answer box (see setAnswerText)
     configAt: 0,        // when /api/config was last read (the header's endpoints; see refreshConfig)
     refreshing: false,
   };
@@ -126,6 +146,15 @@
     matchTask: (text) => matchTask(text),
     matchTaskDetailed: (text) => matchTaskDetailed(text),
     explainMatch: (text) => (S.matcher ? S.matcher.explain(oneLine(text)) : null),
+    matchSupport: (taskId, text) => (S.matcher ? S.matcher.support(taskId, oneLine(text)) : null),
+    // a needs_input question waiting for an answer: {question, request, parentRunId} | null (voice.js routes the
+    // next transcript to the answer box while there is one)
+    pendingQuestion: () => {
+      const q = pendingQuestion();
+      return q ? { question: q.question, request: q.request, parentRunId: q.parentRunId } : null;
+    },
+    setAnswer: (text, voice) => setAnswerText(text, voice),
+    answer: () => answerQuestion(),
   });
 
   function emit(name, detail) {
@@ -253,6 +282,9 @@
   function actionWords(s) {
     const call = s.toolCall || firstPlanCall(s.plan);
     if (call && call.name) return describeCall(str(call.name), call.arguments, call.description);
+    if (s.n === 0 && ((s.clarify && s.clarify.action === 'ask') || (s.done && s.done.reason === 'needs_input'))) {
+      return 'Asked you first, before opening the app';
+    }
     if (s.n === 0) return s.start && s.start.start_url ? `Started at ${displayUrl(s.start.start_url)}` : 'Start screen';
     if (s.plan) {
       const errs = s.errors.filter(isObj);
@@ -292,6 +324,9 @@
     if (c.summary_model) parts.push(`screen summary: ${c.summary_model}`);
     const thinking = c.thinking || o.thinking;
     if (thinking) parts.push(`thinking: ${thinking}`);
+    const clarify = 'clarify' in c ? c.clarify : o.clarify;  // AgentConfig: a bool; the options: 'on' | 'off'
+    if (clarify === true || clarify === 'on') parts.push('ask when unclear: on');
+    else if (clarify === false || clarify === 'off') parts.push('ask when unclear: off');
     const lightning = (isObj(c.lightning) && c.lightning.model) || o.lightning;
     if (lightning) parts.push(`Lightning: ${lightning}${o.lightning && o.lightning !== lightning ? ` (${o.lightning})` : ''}`);
     if (c.use_oracle_grounder) parts.push('oracle grounder (test only)');
@@ -352,6 +387,7 @@
       'options', 'options-summary', 'live-btn', 'view-toggle', 'view-before', 'view-after', 'screen-img', 'screen-empty',
       'screen', 'screen-caption', 'thumbs', 'sr-status', 'hc-toggle', 'agent-badge', 'endpoints', 'vlm-endpoint',
       'vlm-endpoint-text', 'vlm-warning', 'lightning-endpoint', 'grounder-note', 'banner-question', 'banner-task',
+      'banner-answer', 'answer-input', 'answer-btn', 'answer-error', 'understood',
     ]) ui[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = $(id);
     ui.optionSets = OPTION_NAMES.map((n) => $(`opt-${n}`));
 
@@ -371,6 +407,11 @@
       }
     });
     ui.request.addEventListener('input', onRequestInput);
+    ui.bannerAnswer.addEventListener('submit', (e) => { e.preventDefault(); answerQuestion(); });
+    ui.answerInput.addEventListener('input', () => {
+      clearAnswerError();
+      if (S.answerVoice && ui.answerInput.value !== S.answerVoice.answer) S.answerVoice = null;  // edited
+    });
     ui.request.addEventListener('change', () => syncMatch(true));  // leaving the box: the picker shows its match
     ui.taskSelect.addEventListener('change', onTaskChange);
     ui.stopBtn.addEventListener('click', stopRun);
@@ -1018,7 +1059,28 @@
       };
     }
 
-    return { detailed, explain };
+    /** Guard against a self-fulfilling restated match (orchestrator, 2026-10-18): every distinguishing word of the
+     *  task (its number/month/district/channel tokens, and required words no other task has) must already be in the
+     *  user's own words (original request + clarification answer). -> {ok, missing: [words]} */
+    function support(taskId, text) {
+      const m = models.find((x) => x.id === String(taskId));
+      if (!m) return { ok: false, missing: [] };
+      const R = new Set(fuzzyTokens(text).tokens);
+      const KEY_CLASSES = ['number', 'month', 'district', 'channel'];  // not on/off: polarity is the request's form
+      const distinguishing = (a) => KEY_CLASSES.includes(classOf(a)) || (df.get(a) || 0) === 1;
+      const missing = [];
+      for (const alts of m.need) {
+        if (alts.some(distinguishing) && !alts.some((a) => R.has(a))) missing.push(alts.join('|'));
+      }
+      for (const c of ['number', 'month', 'district', 'channel']) {
+        for (const tok of m.cls[c] || []) {
+          if (!R.has(tok) && !missing.some((x) => x.split('|').includes(tok))) missing.push(tok);
+        }
+      }
+      return { ok: missing.length === 0, missing };
+    }
+
+    return { detailed, explain, support };
   }
 
   function matchTaskDetailed(text) {
@@ -1158,12 +1220,12 @@
     return S.voice && S.voice.request.trim() === request ? S.voice.voice : null;
   }
 
-  function showFormError(message, activeRunId) {
-    ui.formError.replaceChildren(document.createTextNode(message));
+  function showFormError(message, activeRunId, where = ui.formError) {
+    where.replaceChildren(document.createTextNode(message));
     if (activeRunId) {
       const btn = h('button', { type: 'button', class: 'btn btn-small', text: 'Watch that run' });
-      btn.addEventListener('click', () => { clearFormError(); watchRun(activeRunId, {}); });
-      ui.formError.append(btn);
+      btn.addEventListener('click', () => { where.replaceChildren(); watchRun(activeRunId, {}); });
+      where.append(btn);
     }
   }
 
@@ -1213,55 +1275,170 @@
     const options = readOptions();
     const taskId = S.taskId;
     const taskMatch = taskId && S.taskMatch ? { ...S.taskMatch } : null;
+    const declined = taskId ? null : S.declined;  // the user chose Free text over this task: no late match to it
     // An exact match isn't sent: the backend records one itself when the request is the task's text.
     const sentMatch = taskMatch && taskMatch.method !== 'exact'
       ? { method: taskMatch.method, score: isNum(taskMatch.score) ? taskMatch.score : null,
         matched_from: str(taskMatch.method === 'picked' ? request : taskMatch.matched_from).slice(0, 500) }
       : null;
-    S.starting = true;
     if (document.activeElement === ui.runBtn) ui.request.focus();  // Run is disabled until the run ends
+    const data = await postRun({
+      request, task_id: taskId, options, ...(voice ? { voice } : {}), ...(sentMatch ? { task_match: sentMatch } : {}),
+    }, showFormError);
+    if (!data) return;
+    if (voice && S.voice && S.voice.voice === voice) S.voice = null;  // one transcript, one run
+    attach(String(data.run_id), {
+      request, taskId, taskMatch, options, startUrl: data.start_url, focusOnEnd: true, declined,
+    });
+  }
+
+  /** POST /api/run: the reply ({run_id, sid, start_url, request?}), or null once `showError(message, activeRunId?)`
+   *  (the form's error line, or the answer box's) has said why it didn't start. */
+  async function postRun(body, showError) {
+    S.starting = true;
     ui.runBtn.disabled = true;
+    ui.answerBtn.disabled = true;
     let res;
     let data = {};
     try {
       res = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          request, task_id: taskId, options, ...(voice ? { voice } : {}), ...(sentMatch ? { task_match: sentMatch } : {}),
-        }),
+        body: JSON.stringify(body),
       });
       data = await res.json().catch(() => ({}));
     } catch {
+      showError('Can’t reach the console backend. Is it still running?');
+      return null;
+    } finally {
       S.starting = false;
       ui.runBtn.disabled = false;
-      showFormError('Can’t reach the console backend. Is it still running?');
+      ui.answerBtn.disabled = false;
+    }
+    if (!isObj(data)) data = {};
+    if (res.ok && data.run_id) return data;
+    const msg = oneLine(data.error) || `HTTP ${res.status}`;
+    if (res.status === 409) {
+      showError(`Another run is already in progress${data.active_run_id ? ` (${data.active_run_id})` : ''}. `
+        + 'Wait for it to finish or stop it.', data.active_run_id);
+    } else if (res.status === 503) {
+      showError(`Can’t start: ${msg}. Check that the sandbox (and for the real agent, the models) are running.`);
+    } else {
+      showError(`Can’t start: ${msg}`);
+      if (/not served/.test(msg)) refreshConfig();  // the VLM changed since the page last looked: update the choices
+    }
+    return null;
+  }
+
+  // --- answering the agent's question (done reason "needs_input") -----------------------------
+  /** agent/clarify.py follow_up_request: the previous request plus " (clarified: <answer>)". */
+  function followUpRequest(previous, answer) {
+    const a = oneLine(answer);
+    const p = str(previous).trim();
+    return a ? `${p}${CLARIFIED}${a})` : p;
+  }
+
+  /** "<previous> (clarified: <answer>)" -> {previous, answer}, or null (a follow-up shown again, e.g. after a reload). */
+  function splitFollowUp(text) {
+    const t = str(text).trim();
+    const i = t.lastIndexOf(CLARIFIED);
+    if (i <= 0 || !t.endsWith(')')) return null;
+    return { previous: t.slice(0, i).trim(), answer: t.slice(i + CLARIFIED.length, -1).trim() };
+  }
+
+  /** The question a needs_input run asks: the done event's, else the result's, else the clarify event's. */
+  function questionOf(run) {
+    const done = isObj(run.done) ? run.done : {};
+    const result = isObj(run.result) ? run.result : {};
+    const c = isObj(run.clarify) ? run.clarify : {};
+    return oneLine(done.question || result.question || c.question || done.summary || result.summary)
+      || 'What would you like me to do?';
+  }
+
+  /** The request the question was about (the backend builds the follow-up from the done event's `request`). */
+  function previousRequest(run) {
+    const done = isObj(run.done) ? run.done : {};
+    const start = S.run === run && S.steps.get(0) && isObj(S.steps.get(0).start) ? S.steps.get(0).start : {};
+    return str(done.request || start.request || run.request).trim();
+  }
+
+  /** The question the shown run is waiting to have answered, or null: the run ended with done reason needs_input, the
+   *  agent's run id is known (the follow-up names it as its parent) and it wasn't answered yet. */
+  function pendingQuestion() {
+    const run = S.run;
+    if (!run || !run.finished || run.answered || S.starting || finalStatus(run) !== 'needs_input') return null;
+    const parentRunId = run.agentRunId || (isObj(run.result) ? str(run.result.run_id) : '');
+    if (!RUN_ID_RE.test(parentRunId)) return null;
+    return { question: questionOf(run), request: previousRequest(run), parentRunId, run };
+  }
+
+  /** Put text in the answer box (voice input). `voice` (the /api/transcribe reply) goes with the follow-up's POST
+   *  while the box still holds exactly this text. */
+  function setAnswerText(text, voice) {
+    const clean = oneLine(text).slice(0, ANSWER_MAX);
+    clearAnswerError();
+    ui.answerInput.value = clean;
+    const v = cleanVoice(voice);
+    S.answerVoice = v ? { answer: clean, voice: v } : null;
+    return { answer: clean };
+  }
+
+  function showAnswerError(message, activeRunId) {
+    showFormError(message, activeRunId, ui.answerError);
+  }
+
+  function clearAnswerError() {
+    if (ui.answerError.firstChild) ui.answerError.replaceChildren();
+  }
+
+  /** Answer: start the follow-up run. Its request is the asking run's request plus the answer; the backend builds
+   *  the same text from the parent run (clarifies) and refuses another one. The text is matched to a sandbox task
+   *  like any request (its task_id and task_match go with it). */
+  async function answerQuestion() {
+    const q = pendingQuestion();
+    if (!q || S.starting || isRunning()) return;
+    clearAnswerError();
+    const answer = oneLine(ui.answerInput.value);
+    if (!answer || answer.length > ANSWER_MAX) {
+      showAnswerError(answer ? `That answer is too long (${ANSWER_MAX} characters at most).` : 'Type your answer first.');
+      ui.answerInput.focus();
       return;
     }
-    S.starting = false;
-    ui.runBtn.disabled = false;
-    if (!res.ok || !data.run_id) {
-      const msg = oneLine(data.error) || `HTTP ${res.status}`;
-      if (res.status === 409) {
-        showFormError(`Another run is already in progress${data.active_run_id ? ` (${data.active_run_id})` : ''}. `
-          + 'Wait for it to finish or stop it.', data.active_run_id);
-      } else if (res.status === 503) {
-        showFormError(`Can’t start: ${msg}. Check that the sandbox (and for the real agent, the models) are running.`);
-      } else {
-        showFormError(`Can’t start: ${msg}`);
-        if (/not served/.test(msg)) refreshConfig();  // the VLM changed since the page last looked: update the choices
-      }
-      return;
-    }
-    if (voice && S.voice && S.voice.voice === voice) S.voice = null;  // one transcript, one run
+    const request = followUpRequest(q.request, answer);
+    const m = matchTaskDetailed(request);
+    const taskId = m ? String(m.task.id) : null;
+    const taskMatch = m ? { method: m.method, score: isNum(m.score) ? m.score : null, matched_from: request } : null;
+    const sentMatch = taskMatch && taskMatch.method !== 'exact'
+      ? { method: taskMatch.method, score: taskMatch.score, matched_from: request.slice(0, 500) } : null;
+    const voice = S.answerVoice && S.answerVoice.answer === answer ? S.answerVoice.voice : null;
+    const options = readOptions();
+    if (document.activeElement === ui.answerBtn) ui.answerInput.focus();
+    const data = await postRun({
+      // the page's text too (when it fits a request): the backend answers 400 if its own differs
+      ...(request.length <= 500 ? { request } : {}), task_id: taskId, options,
+      clarifies: { parent_run_id: q.parentRunId, answer },
+      ...(voice ? { voice } : {}), ...(sentMatch ? { task_match: sentMatch } : {}),
+    }, showAnswerError);
+    if (!data) return;
+    q.run.answered = true;
+    S.answerVoice = null;
+    const final = str(data.request).trim() || request;  // the backend's text: what the agent gets
+    // the request box and the picker describe the follow-up, as they do for any run shown
+    S.voice = null;
+    S.declined = null;
+    ui.request.value = final;
+    if (taskId && S.tasksById.has(taskId)) setTask(S.tasksById.get(taskId), taskMatch);
+    else clearTask();
+    ui.requestNote.textContent = '';
     attach(String(data.run_id), {
-      request, taskId, taskMatch, options, startUrl: data.start_url, focusOnEnd: true,
+      request: final, taskId, taskMatch, options, startUrl: data.start_url, focusOnEnd: true,
+      followUp: { parentRunId: q.parentRunId, previous: q.request, answer, question: q.question },
     });
   }
 
   /** GET /api/runs/{id} task_match ({method, score, matched_from}) as the page uses it, or null. */
   function cleanTaskMatch(v) {
-    if (!isObj(v) || !['picked', 'exact', 'fuzzy'].includes(v.method)) return null;
+    if (!isObj(v) || !TASK_MATCH_METHODS.includes(v.method)) return null;
     return { method: v.method, score: isNum(v.score) ? v.score : null, matched_from: str(v.matched_from) };
   }
 
@@ -1281,8 +1458,12 @@
     const taskId = info.task_id && S.tasksById.has(String(info.task_id)) ? String(info.task_id) : null;
     const taskMatch = taskId ? cleanTaskMatch(info.task_match) : null;
     S.declined = null;
-    if (taskId) setTask(S.tasksById.get(taskId), taskMatch || { method: 'picked', score: null, matched_from: str(info.request) });
-    else clearTask();
+    // a task matched from the agent's restatement isn't the request box's: the next run of that text is free text
+    if (taskId && !(taskMatch && taskMatch.method === 'restated')) {
+      setTask(S.tasksById.get(taskId), taskMatch || { method: 'picked', score: null, matched_from: str(info.request) });
+    } else {
+      clearTask();
+    }
     ui.requestNote.textContent = '';
     if (isObj(info.options)) for (const name of OPTION_NAMES) setRadio(name, info.options[name]);
     keepServedChoice();  // that run's grounder may not be served any more: the radios describe the next run
@@ -1291,7 +1472,18 @@
     attach(String(info.run_id || runId), {
       request: str(info.request), taskId: info.task_id || null, taskMatch, options: info.options,
       focusOnEnd: active || !quietIfDone, quiet: !active, agentRunId: info.agent_run_id || null,
+      followUp: followUpInfo(info),
     });
+  }
+
+  /** A follow-up run's {parentRunId, previous, answer} from GET /api/runs/{id} (clarifies, or parent_run_id plus
+   *  the request's "(clarified: …)"), or null. The start event's parent_run_id fills it in later otherwise. */
+  function followUpInfo(info) {
+    const c = isObj(info.clarifies) ? info.clarifies : {};
+    const parentRunId = str(c.parent_run_id || info.parent_run_id);
+    if (!parentRunId) return null;
+    const split = splitFollowUp(info.request) || { previous: '', answer: '' };
+    return { parentRunId, previous: split.previous, answer: oneLine(c.answer || info.answer) || split.answer };
   }
 
   async function stopRun() {
@@ -1345,6 +1537,11 @@
       result: null,
       verdict: null,
       agentRunId: info.agentRunId ? str(info.agentRunId) : null,  // the trace's id: /logs?run=<it>
+      followUp: isObj(info.followUp) ? info.followUp : null,  // {parentRunId, previous, answer}: it answers a question
+      clarify: null,     // the clarify event's payload (step 0)
+      lateMatch: null,   // {status: pending|ok|refused, taskId, match, reason}: the task its restatement matched
+      answered: false,   // needs_input: the follow-up was started
+      declined: info.declined ? str(info.declined) : null,  // a task the user chose Free text over (see lateMatch)
     };
     S.lastSeq = 0;
     S.runSeq += 1;
@@ -1355,10 +1552,16 @@
     if (prev && prev !== ui.request && (ui.banner.contains(prev) || ui.options.contains(prev))) ui.request.focus();
     setStatus('starting');
     setPending('Starting a browser session…');
-    if (!info.quiet) announce(`Run started: ${S.run.request}`);
+    renderViewer();  // "Waiting for the first screenshot…" (resetRunView rendered it for the previous run)
+    if (!info.quiet) {
+      const f = S.run.followUp;
+      announce(f && f.answer ? `Follow-up run started with your answer: ${f.answer}` : `Run started: ${S.run.request}`);
+    }
     S.timer = window.setInterval(tick, 1000);
     openStream(runId);
-    emit('acme:run-start', { runId, request: S.run.request, taskId: S.run.taskId });
+    emit('acme:run-start', {
+      runId, request: S.run.request, taskId: S.run.taskId, answer: S.run.followUp ? S.run.followUp.answer : null,
+    });
   }
 
   function openStream(runId) {
@@ -1385,7 +1588,17 @@
       S.run.result = d;
       if (!S.run.agentRunId && d.run_id) S.run.agentRunId = str(d.run_id);
     });
-    on('verdict', (d) => { S.run.verdict = d; });
+    on('verdict', (d) => {
+      const run = S.run;
+      run.verdict = d;
+      // checked as the task the agent's restatement matched, before that POST's reply got here
+      const late = run.lateMatch;
+      if (!run.taskId && d.task_id && late && late.taskId === str(d.task_id)) {
+        run.taskId = late.taskId;
+        run.taskMatch = late.match;
+        late.status = 'ok';
+      }
+    });
     on('end', () => finishRun());
     es.addEventListener('open', () => {
       if (S.es === es && S.run && S.run.reconnecting) {
@@ -1459,14 +1672,16 @@
     renderBanner();
     renderViewer();
     scrollLog();
-    if (run.focusOnEnd) ui.banner.focus();
-    emit('acme:run-end', { runId: run.id, request: run.request, taskId: run.taskId });
+    // a question to answer: focus goes straight to the answer box (its description reads the question)
+    if (run.focusOnEnd) (ui.bannerAnswer.hidden ? ui.banner : ui.answerInput).focus();
+    const q = pendingQuestion();
+    emit('acme:run-end', { runId: run.id, request: run.request, taskId: run.taskId, question: q ? q.question : null });
     if (!run.quiet) refreshConfig();  // e.g. a grounding error: is the VLM still up?
   }
 
   function finalStatus(run) {
     const reason = run.done && run.done.reason;
-    if (reason === 'stopped' || reason === 'error' || reason === 'stuck') return reason;
+    if (reason === 'stopped' || reason === 'error' || reason === 'stuck' || reason === 'needs_input') return reason;
     if (FINAL.has(run.status)) return run.status;
     return run.statusMessage ? 'error' : 'done';
   }
@@ -1524,6 +1739,12 @@
     ui.logEmpty.hidden = false;
     ui.followBtn.hidden = true;
     ui.banner.hidden = true;
+    ui.bannerAnswer.hidden = true;
+    ui.answerInput.value = '';
+    S.answerVoice = null;
+    clearAnswerError();
+    ui.understood.hidden = true;
+    ui.understood.replaceChildren();
     window.clearInterval(S.timer);
     S.timer = null;
     renderViewer();
@@ -1546,7 +1767,19 @@
         s.start = p;
         if (isNum(ev.ts)) run.startTs = ev.ts;
         if (!run.startUrl && p.start_url) run.startUrl = str(p.start_url);
-        setPending('Reading the screen…');
+        if (!run.followUp && p.parent_run_id) {  // a follow-up shown again: its start event names the asking run
+          const split = splitFollowUp(p.request || run.request) || { previous: '', answer: '' };
+          run.followUp = { parentRunId: str(p.parent_run_id), ...split };
+        }
+        setPending(clarifyOn(run, p) ? 'Checking your request…' : 'Reading the screen…');
+        break;
+      case 'clarify':
+        s.clarify = p;
+        run.clarify = p;
+        if (!(isObj(ev.timings_ms) && 'clarify' in ev.timings_ms) && isNum(p.latency_ms)) s.timings.clarify = p.latency_ms;
+        setPending(p.action === 'ask' ? 'Finishing…' : 'Reading the screen…');
+        renderUnderstood();
+        if (p.action !== 'ask') lateMatch(run, p);
         break;
       case 'observation':
         s.observation = p;
@@ -1601,7 +1834,12 @@
   /** One sentence per step for screen readers, once its outcome is known. The step log is not a live region:
    *  its timing line and grounder coordinates change several times per step and would be read out each time. */
   function announceStep(s, kind, p) {
-    if (!S.run || S.run.quiet || s.n === 0) return;
+    if (!S.run || S.run.quiet) return;
+    if (kind === 'clarify' && p.action !== 'ask' && oneLine(p.normalized_request)) {  // an ask is the banner's
+      announce(`Request check: clear. What the agent understood: ${oneLine(p.normalized_request)}`);
+      return;
+    }
+    if (s.n === 0) return;
     const sentence = (t) => (/[.!?…]$/.test(t) ? t : `${t}.`);
     let tail = null;
     if (kind === 'action') {
@@ -1622,6 +1860,126 @@
     }
     if (tail === null) return;
     announce(`${stepLabel(s)}: ${sentence(actionWords(s))}${tail ? ` ${tail}` : ''}`);
+  }
+
+  // --- the clarify step (agent/clarify.py) ------------------------------------------------------
+  /** Whether this run checks the request first: its options say so, or the agent's start config does. */
+  function clarifyOn(run, start) {
+    const c = isObj(start) && isObj(start.config) ? start.config.clarify : undefined;
+    if (c === true || c === 'on') return true;
+    if (c === false || c === 'off') return false;
+    return Boolean(run.options && run.options.clarify === 'on');
+  }
+
+  /** Step 0's lines for the clarify event: what the check decided, the question or the restatement. */
+  function clarifyLines(c) {
+    const out = [];
+    const why = (t) => oneLine(t).replace(/[.!]+$/, '');
+    // who checked it, with which prompt (the Logs page has the rest: usage, the tool call)
+    const by = [oneLine(c.model), oneLine(c.prompt_version), c.prompt_sha ? `sha ${oneLine(c.prompt_sha)}` : '']
+      .filter(Boolean).join(' · ');
+    if (c.action === 'ask') {
+      out.push(['clarify', '', 'Request check: unclear, so the agent asks before doing anything.', by]);
+      if (oneLine(c.question)) out.push(['ask', 'ask', `The agent asks: “${oneLine(c.question)}”`]);
+      return out;
+    }
+    if (c.error) {
+      out.push(['clarify', 'warn', `Request check failed (${why(c.error)}), so the agent went ahead anyway.`, by]);
+    } else if (c.skipped) {
+      out.push(['clarify', '', `Request check skipped (${why(c.skipped)}), so the agent goes ahead.`, by]);
+    } else {
+      out.push(['clarify', '', 'Request check: clear, so the agent goes ahead.', by]);
+    }
+    if (oneLine(c.normalized_request)) {
+      out.push(['understood', 'understood', `What the agent understood: “${oneLine(c.normalized_request)}”`]);
+    }
+    return out;
+  }
+
+  /** The step-0 line about the task the restatement matched: checked as it, or why it can't be. */
+  function lateMatchLine(run) {
+    const late = run.lateMatch;
+    if (!late || late.status === 'pending') return null;
+    if (late.status === 'ok') {
+      return ['latematch', '', `Checked as task ${late.taskId}: it matches the agent’s restatement, not your words.`];
+    }
+    const why = oneLine(late.reason).replace(/[.!]+$/, '') || 'the console refused';
+    return ['latematch', 'warn', `The agent’s restatement matches task ${late.taskId}, but this run can’t be checked `
+      + `as it: ${why}.`];
+  }
+
+  /** The line above the step log: what the agent understood (display only), and the task that restatement matched. */
+  function renderUnderstood() {
+    const run = S.run;
+    const c = run && isObj(run.clarify) ? run.clarify : null;
+    const text = c && c.action !== 'ask' ? oneLine(c.normalized_request) : '';
+    ui.understood.hidden = !text;
+    if (!text) return;
+    const parts = [h('span', { class: 'understood-label', text: 'What the agent understood: ' }),
+      document.createTextNode(`“${text}”`)];
+    const late = run.lateMatch;
+    if (late && late.status === 'ok' && run.taskId) {
+      parts.push(h('span', { class: 'understood-task', text: ` · checked as task ${run.taskId}` }));
+    }
+    ui.understood.replaceChildren(...parts);
+    ui.understood.title = 'The agent’s restatement of your request, shown only: the agent works from your words';
+  }
+
+  /** Contract C: a run with no sandbox task whose clarify restatement matches one asks the backend to check it as
+   *  that task (POST /api/runs/{id}/task_match). The backend refuses unless the run has no task or verdict yet and the
+   *  task starts where the run did; the step log says why. Live runs only, once. */
+  async function lateMatch(run, c) {
+    if (run.quiet || run.finished || run.taskId || run.lateMatch || run.verdict) return;
+    const text = oneLine(c.normalized_request).slice(0, 500);
+    const m = text ? matchTaskDetailed(text) : null;
+    if (!m || String(m.task.id) === run.declined) return;  // (the user said this isn't that task)
+    const taskId = String(m.task.id);
+    const sup = S.matcher.support(taskId, run.request);
+    if (!sup.ok) {  // the restatement brought in the task's distinguishing intent itself: no self-fulfilling ✓
+      run.lateMatch = { status: 'refused', taskId, match: null,
+        reason: `your own words don’t mention ${sup.missing.join(', ')}; only the agent’s restatement does` };
+      if (S.run !== run) return;
+      const first = S.steps.get(0);
+      if (first) renderStep(first);
+      renderUnderstood();
+      if (run.finished) renderBanner();
+      return;
+    }
+    const match = { method: 'restated', score: isNum(m.score) ? m.score : null, matched_from: text };
+    const late = { status: 'pending', taskId, match, reason: '' };
+    run.lateMatch = late;
+    let res;
+    let data = {};
+    try {
+      res = await fetch(`/api/runs/${encodeURIComponent(run.id)}/task_match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ task_id: taskId, ...match }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch {
+      res = null;
+    }
+    if (!isObj(data)) data = {};
+    if (res && res.ok) {
+      late.status = 'ok';
+      if (!run.taskId) {
+        run.taskId = taskId;
+        run.taskMatch = cleanTaskMatch(data.task_match) || match;
+      }
+    } else if (late.status === 'pending') {  // (the verdict may have shown it was accepted meanwhile)
+      late.status = 'refused';
+      late.reason = res ? oneLine(data.error) || `HTTP ${res.status}` : 'the console backend didn’t answer';
+    }
+    if (S.run !== run) return;
+    const step0 = S.steps.get(0);
+    if (step0) renderStep(step0);
+    renderUnderstood();
+    // one sentence with the restatement: announce() speaks only the last of a burst
+    if (late.status === 'ok' && !run.quiet) {
+      announce(`What the agent understood: ${text}. It will be checked as sandbox task ${taskId}.`);
+    }
+    if (run.finished) renderBanner();
   }
 
   function pendingFor(call) {
@@ -1654,7 +2012,7 @@
     if (s) return s;
     const prevLast = S.steps.size ? S.steps.get(lastStepNumber()) : null;
     s = {
-      n, start: null, observation: null, plan: null, toolCall: null, grounding: null, action: null, done: null,
+      n, start: null, clarify: null, observation: null, plan: null, toolCall: null, grounding: null, action: null, done: null,
       errors: [], unknown: [], timings: {}, overlayUrl: null, shotUrl: null, reasonOpen: false, screenOpen: false,
       lineEls: new Map(), thumb: null, thumbImg: null,
     };
@@ -1736,11 +2094,20 @@
     }
 
     const lines = [];
-    if (s.n === 0 && S.run && S.run.request) lines.push(['request', '', `You asked: “${S.run.request}”`]);
+    const f = s.n === 0 && S.run ? S.run.followUp : null;
+    if (f && f.previous) {  // a follow-up: what it follows, and the answer (the request box holds the combined text)
+      lines.push(['followup', 'followup', `Follow-up to: “${f.previous}”`]);
+      lines.push(['request', '', f.answer ? `Your answer: “${f.answer}”` : `You asked: “${S.run.request}”`]);
+    } else if (s.n === 0 && S.run && S.run.request) {
+      lines.push(['request', '', `You asked: “${S.run.request}”`]);
+    }
     if (s.start) {
       const c = configText(s.start.config, S.run && S.run.options);
       if (c) lines.push(['config', '', c]);
     }
+    if (s.clarify) lines.push(...clarifyLines(s.clarify));
+    const late = s.n === 0 && S.run ? lateMatchLine(S.run) : null;
+    if (late) lines.push(late);
     if (s.toolCall && s.toolCall.valid === false) {
       lines.push(['invalid', 'warn', `⚠ Invalid tool call${s.toolCall.error ? `: ${oneLine(s.toolCall.error)}` : ''}`]);
     }
@@ -1758,12 +2125,16 @@
       if (stuckVerdict(a) !== 'stuck') lines.push(['stuck', 'warn', REASON_WORDS.stuck]);
       const ask = stuckParts(s.done.summary).question;
       if (ask) lines.push(['done', 'ask', `The agent asks: “${ask}”`]);
+    } else if (s.done && s.done.reason === 'needs_input') {
+      // the question is the clarify line's (same key), unless that event is missing
+      const ask = oneLine(s.done.question || s.done.summary);
+      if (ask && !(s.clarify && oneLine(s.clarify.question))) lines.push(['ask', 'ask', `The agent asks: “${ask}”`]);
     } else if (s.done && s.done.reason && s.done.reason !== 'done') {
       lines.push(['done', s.done.reason === 'error' ? 'error' : 'warn',
         oneLine(s.done.summary) || REASON_WORDS[s.done.reason] || `Run ended (${oneLine(s.done.reason)}).`]);
     }
     s.unknown.forEach((u, i) => lines.push([`unknown${i}`, 'json', `${u.kind}: ${compactJson(u.payload)}`]));
-    for (const [key, cls, text] of lines) {
+    for (const [key, cls, text, title] of lines) {
       let node = s.lineEls.get(key);
       if (!node) {
         node = h('p');
@@ -1773,6 +2144,7 @@
       const className = `step-line${cls ? ` step-${cls}` : ''}`;
       if (node.className !== className) node.className = className;
       setText(node, text);
+      if (title) node.title = title;
     }
 
     const timing = timingsText(s.timings);
@@ -1872,9 +2244,13 @@
       ui.screenImg.hidden = true;
       ui.screenImg.removeAttribute('src');
       ui.screenEmpty.hidden = false;
-      setText(ui.screenEmpty, S.run ? 'Waiting for the first screenshot…'
-        : 'No screenshot yet. Run a request to watch the agent work.');
-      ui.screenCaption.replaceChildren(document.createTextNode(S.run ? 'Waiting for the first screenshot.' : 'Waiting for a run.'));
+      const over = Boolean(S.run && S.run.finished);
+      const asked = over && finalStatus(S.run) === 'needs_input';
+      setText(ui.screenEmpty, asked ? 'No screenshots: the agent asked you first, before opening the app.'
+        : over ? 'This run has no screenshots.'
+          : S.run ? 'Waiting for the first screenshot…' : 'No screenshot yet. Run a request to watch the agent work.');
+      ui.screenCaption.replaceChildren(document.createTextNode(over ? 'No screenshots for this run.'
+        : S.run ? 'Waiting for the first screenshot.' : 'Waiting for a run.'));
       ui.viewToggle.disabled = true;
       ui.viewBefore.checked = false;
       ui.viewAfter.checked = false;
@@ -2020,6 +2396,18 @@
         label = run.taskId ? 'No sandbox verdict received' : FREE_TEXT_LABEL;
         expl = 'Not done: the agent stopped to ask you.';
       }
+    } else if (st === 'needs_input') {  // the clarify step asked before the browser opened: nothing was done yet
+      tone = 'ask';
+      icon = '?';
+      title = 'The agent asks:';
+      question = questionOf(run);
+      agentSays = '';  // the summary is the question
+      if (v) {
+        label = oneLine(v.label) || 'verified by sandbox state, not seen by the agent';
+        expl = v.passed ? `✓ ${check.head}` : `✗ Not done yet. ${check.head}`;
+      } else if (run.taskId) {
+        label = 'No sandbox verdict received';
+      }
     } else if (v && st === 'stopped') {  // the stop is the headline; the sandbox check still says where things stand
       tone = 'stopped';
       icon = '■';
@@ -2056,22 +2444,31 @@
     setText(ui.bannerQuestion, question ? `“${question}”` : '');
     // focus lands here after a run: a screen reader then reads the question as the banner's name
     ui.banner.setAttribute('aria-labelledby', question ? 'banner-title banner-question' : 'banner-title');
+    // needs_input: answer here, and the follow-up run starts (pendingQuestion: the asking run's id is known)
+    const answerable = st === 'needs_input' && Boolean(pendingQuestion());
+    ui.bannerAnswer.hidden = !answerable;
     const task = taskLine(run, Boolean(v));
     ui.bannerTask.hidden = !task;
     setText(ui.bannerTask, task);
-    ui.bannerTask.title = run.taskMatch && run.taskMatch.method === 'fuzzy' && isNum(run.taskMatch.score)
-      ? `Close match (score ${run.taskMatch.score.toFixed(2)}): the agent got your words, the check is this task's` : '';
+    const how = run.taskMatch && isNum(run.taskMatch.score) ? run.taskMatch.method : '';
+    ui.bannerTask.title = how === 'fuzzy'
+      ? `Close match (score ${run.taskMatch.score.toFixed(2)}): the agent got your words, the check is this task's`
+      : how === 'restated' ? `Matched (score ${run.taskMatch.score.toFixed(2)}) from how the agent restated your `
+        + 'request; the agent got your words, the check is this task’s' : '';
     setText(ui.bannerLabel, label);
     renderCheck(expl, check.details, check.more);
 
-    renderSummary(agentSays, st === 'stuck' ? '' : 'The agent gave no summary.');
+    renderSummary(agentSays, st === 'stuck' || st === 'needs_input' ? '' : 'The agent gave no summary.');
     const claim = [];
-    if (claimed === true) claim.push('The agent claimed success.');
+    if (st === 'needs_input') claim.push('Nothing was done yet: it asked before opening the app.');
+    else if (claimed === true) claim.push('The agent claimed success.');
     else if (claimed === false) claim.push('The agent did not claim success.');
-    if (v && claimed !== null && v.passed !== claimed) {
+    if (v && claimed !== null && v.passed !== claimed && st !== 'needs_input') {
       claim.push(claimed ? 'The sandbox state says otherwise.' : 'The sandbox state shows it is done anyway.');
     }
-    if (st === 'stuck') claim.push('To answer, add what it needs to your request and run it again.');
+    if (st === 'stuck' || (st === 'needs_input' && !answerable)) {
+      claim.push('To answer, add what it needs to your request and run it again.');
+    }
     if (st === 'stopped') claim.push(run.stopRequested ? 'You stopped the run.' : 'The run was stopped.');
     if (st === 'error' && v && run.statusMessage) claim.push(`Error: ${run.statusMessage}`);
     const dur = fmtDuration(elapsedMs());
@@ -2089,7 +2486,7 @@
     ui.bannerExtra.replaceChildren();
     if (extra.length) ui.bannerExtra.append(document.createTextNode(extra.join(' · ')));
     const links = [];
-    const href = safeHttpUrl(run.startUrl);
+    const href = st === 'needs_input' ? null : safeHttpUrl(run.startUrl);  // needs_input: no browser was opened
     if (href) links.push(h('a', { href, target: '_blank', rel: 'noopener', text: 'Open this session in the sandbox' }));
     const traceId = run.agentRunId || (isObj(run.result) && run.result.run_id ? str(run.result.run_id) : '');
     if (RUN_ID_RE.test(traceId)) {
@@ -2103,13 +2500,16 @@
     ui.banner.hidden = false;
   }
 
-  /** "Checked as task: pay-50 (matched from your request)" (or "(picked from the list)"); "Sandbox task: …" when no
-   *  verdict came; '' for free text. The logs page shows the same line (console/logs.py task_line). */
+  /** "Checked as task: pay-50 (matched from your request)" (or "(picked from the list)", or "(matched from the
+   *  agent's restatement: "<normalized_request>")": never hide that the agent's words chose the check); "Sandbox task:
+   *  …" when no verdict came; '' for free text. The logs page shows the same line (console/logs.py task_line). */
   function taskLine(run, checked) {
     if (!run.taskId) return '';
-    const how = run.taskMatch && run.taskMatch.method;
+    const m = run.taskMatch;
+    const how = m && m.method;
     const why = how === 'picked' ? ' (picked from the list)'
-      : how === 'exact' || how === 'fuzzy' ? ' (matched from your request)' : '';
+      : how === 'exact' || how === 'fuzzy' ? ' (matched from your request)'
+        : how === 'restated' ? ` (matched from the agent's restatement: "${oneLine(m.matched_from)}")` : '';
     return `${checked ? 'Checked as task' : 'Sandbox task'}: ${run.taskId}${why}`;
   }
 

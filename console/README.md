@@ -17,7 +17,8 @@ Run from the repo root, with the sandbox up (`uvicorn sandbox.app:app --port 809
 .venv-gym/bin/python -m console --agent real --vlm-url http://127.0.0.1:8011/v1 --summary-model grounder \
     --vlm-label "Mac (vllm-metal)"
 # options: --lightning local|hosted (initial toggle, default local) --grounder base|grounder (initial choice,
-#          default grounder) --asr parakeet|stub --host 127.0.0.1 --port 8095
+#          default grounder) --thinking off|retry|on (initial choice, default off) --clarify on|off (initial
+#          request check, default on) --asr parakeet|stub --host 127.0.0.1 --port 8095
 #          --sandbox-url http://127.0.0.1:8090 --runs-dir runs --step-delay 0.8
 # real agent only: --vlm-url URL --summary-model base|grounder --vlm-label TEXT (or CONSOLE_VLM_LABEL)
 ```
@@ -31,6 +32,10 @@ Then open <http://127.0.0.1:8095> (the Logs page is <http://127.0.0.1:8095/logs>
   (`vlm={"base_url": URL}`, `summary_model=...`). Without them the agent's config decides,
   so `AGENT_VLM_BASE_URL` and `AGENT_SUMMARY_MODEL` keep working; a flag beats the env var.
   The mock ignores them (it runs no models).
+- `--thinking` and `--clarify` set the console's defaults (`/api/config` `defaults.thinking` /
+  `defaults.clarify`); each run can override them in `options`. `scripts/demo_up.sh` takes the
+  same two flags (defaults off / on) and passes them on. See
+  [Request check and follow-ups](#request-check-and-follow-ups).
 - `--runs-dir` and `--step-delay` only affect the mock. The real agent writes traces
   to its own `runs_dir` (`configs/agent.yaml`). The console serves images from wherever
   the events point.
@@ -49,18 +54,24 @@ Then open <http://127.0.0.1:8095> (the Logs page is <http://127.0.0.1:8095/logs>
   - `test_task_match.py` (about 6 s) checks [task matching](#matching-a-request-to-a-sandbox-task)
     in the real page: the full match table (run it with `-s` to print every score), the
     picker, Free text undoing a match, the banner and Logs lines, and the `task_match` API.
+  - `test_clarify_api.py` (about 12 s) checks the [request check](#request-check-and-follow-ups)
+    backend: defaults and flags (also `demo_up.sh`), the per-run option reaching the agent's
+    config, `clarifies` validation and the built request, `parent_run_id` reaching `run_task`,
+    the `console.json` links, the restated late match's rules and verdict, and the mock's
+    clarify flows (one e2e run: ask, follow-up, restated match, pay-50 replay, ✓).
 
 ## HTTP API (binding for `console/static`)
 
 | Route | Returns |
 | --- | --- |
 | `GET /`, `GET /static/*` | `console/static/index.html` and assets |
-| `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "grounder", thinking: "retry", lightning: "local"}, asr: {available, model, label, fixed_text?, error?}, endpoints: {vlm, lightning}}` (`--grounder` sets `defaults.grounder`, `--lightning` sets `defaults.lightning`; `endpoints` below) |
+| `GET /api/config` | `{agent: "mock"\|"real", sandbox_url, headed, defaults: {grounder: "grounder", thinking: "off", lightning: "local", clarify: "on"}, asr: {available, model, label, fixed_text?, error?}, endpoints: {vlm, lightning}}` (`--grounder`, `--lightning`, `--thinking` and `--clarify` set those defaults; `endpoints` below) |
 | `GET /api/tasks` | `[{id, request, start_path, tags, steps_min}]` from `sandbox/tasks.json` (no checks) |
-| `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local}, voice?: {text, model, latency_ms, duration_s}, task_match?: {method: picked\|exact\|fuzzy, score: 0..1\|null, matched_from: str (≤500)}}` (`voice` and `task_match` are logged in `console.json`, never sent to the agent; `task_match` needs a `task_id`, has exactly those three fields, and is recorded as `exact` when left out with a request that is the task's text) → `{run_id: "c-<hex>", sid, start_url}`. Errors: 400 `{error}` (validation; or `grounder model '<x>' is not served at <url> (serves: ...)` when the VLM's served names are known and lack it), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
-| `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, task_match, options, agent_run_id, result, verdict, endpoints, n_events}`. `n_events` counts stream messages (it equals the last `id`). `endpoints` is the snapshot taken at run start. |
+| `POST /api/run` | Body `{request (1..500 chars), task_id?: str\|null, options?: {grounder: base\|grounder, thinking: off\|retry\|on, lightning: hosted\|local, clarify: on\|off}, voice?: {text, model, latency_ms, duration_s}, task_match?: {method: picked\|exact\|fuzzy, score: 0..1\|null, matched_from: str (≤500)}, clarifies?: {parent_run_id, answer (1..300 chars)}}` (`voice` and `task_match` are logged in `console.json`, never sent to the agent; `task_match` needs a `task_id`, has exactly those three fields, and is recorded as `exact` when left out with a request that is the task's text; `clarifies` makes it a [follow-up](#request-check-and-follow-ups), and then `request` is optional) → `{run_id: "c-<hex>", sid, start_url, request}` (`request`: the text the agent gets; for a follow-up, the one the backend built). Errors: 400 `{error}` (validation; a follow-up whose parent is unknown, hasn't ended or didn't end with `needs_input`, or whose `request` isn't the backend's text; or `grounder model '<x>' is not served at <url> (serves: ...)` when the VLM's served names are known and lack it), 409 `{error, active_run_id}` (one run at a time), 503 `{error}` (sandbox unreachable, or the agent can't be imported or configured). |
+| `GET /api/runs/{run_id}` | `{run_id, status, request, task_id, task_match, options, agent_run_id, result, verdict, endpoints, parent_run_id, clarifies, n_events}`. `n_events` counts stream messages (it equals the last `id`). `endpoints` is the snapshot taken at run start. `task_id` / `task_match` can change during the run (a restated match). |
 | `GET /api/runs/{run_id}/events` | SSE stream (below) |
 | `POST /api/runs/{run_id}/stop` | `{ok: true}`. Idempotent; waits up to ~10 s for the agent to stop. |
+| `POST /api/runs/{run_id}/task_match` | Body `{task_id, method: "restated", score: 0..1\|null, matched_from}`: check this free-text run as `task_id`, because the agent's restatement matches it ([restated match](#a-task-from-the-agents-restatement)) → `{ok: true, run_id, task_id, task_match}`. 404 unknown run; 400 `{error}` bad body, or `matched_from` isn't the run's restatement; 409 `{error}` the run already has a task, it has ended (the verdict is decided), there's no restatement (clarify off, or it hasn't proceeded), or the task starts on another page or from its own state. |
 | `POST /api/transcribe` | Voice input. Body: a 16 kHz mono PCM16 WAV, either raw `audio/wav` or multipart field `audio`, 0.2–60 s → `{text, duration_s, latency_ms, model}`. Errors: 400 bad audio, 413 too large, 503 engine unavailable. |
 | `GET /runs/{agent_run_id}/{file}` | Trace PNG; `file` must match `step_XX.png` or `step_XX_overlay.png`. |
 | `GET /logs`, `GET /api/logs/runs[/{run_id}[/download]]` | The Logs page and its API (`console/logs.py`): every run and event from `runs/<id>/events.jsonl` plus `console.json` ([Logs page](#logs-page)) |
@@ -104,7 +115,7 @@ Messages arrive in this order:
 | --- | --- |
 | `status` | `{status: starting\|running\|done\|stopped\|error, message?}` |
 | `step` | A StepEvent (contracts.md §5: `run_id, step, kind, ts, payload, screenshot_path?, overlay_path?, timings_ms?`), plus `screenshot_url` / `overlay_url` when it has images. Kinds and payloads are in `agent/trace.py`. |
-| `result` | RunResult `{run_id, success_claimed, summary, steps, trace_dir}` (only when the agent returns) |
+| `result` | RunResult `{run_id, success_claimed, summary, steps, trace_dir, reason?, question?}` (only when the agent returns; `reason` is the done event's, `question` is set for `needs_input`) |
 | `verdict` | `{task_id, passed, explanation, label: "verified by sandbox state, not seen by the agent"}` (only when `task_id` was given, after any ending) |
 | `end` | `{}`, then the stream closes |
 
@@ -128,6 +139,19 @@ agent, and every payload carries `"mock": true`.
   the grounder. A request matches a script by its exact task text (case and whitespace
   don't matter). Any other request observes the screen, plans "Mock agent: no scripted
   plan for this request" and ends with `done(success=false)`.
+- **Request check** (`cfg.clarify` on, the console's default; off: no `clarify` event, as
+  before): a step-0 `clarify` event right after `start`, before the browser opens, in
+  `agent/trace.py`'s shape with `model: "mock (no Lightning)"`, `prompt_version: "clarify-v4
+  (mock)"`, `prompt_sha: "mock"` and no latency (no model ran).
+  - `Allors towards my bill.` and `Pay something toward my bill` (case and a final period
+    aside) ask "What would you like to do with your bill?" / "How much would you like to pay
+    toward your bill?", then `done(needs_input)` with `question`, `request` and `steps: 0`. No
+    browser opens.
+  - A follow-up of one of them answered `fifty dollars` / `$50` is restated as `Pay $50 toward my
+    bill.`; anything else proceeds with the request trimmed. The restatement, not the user's
+    words, picks the script, so that follow-up replays pay-50 (it starts on `/`, like free text).
+  - A request already answered twice skips the check (`skipped`), like `agent/clarify.py`.
+  - A follow-up's `start` event carries `parent_run_id`.
 - **Bad scripts:** a missing, malformed or stale script never crashes the agent. It
   emits an `error` event and then `done(reason="error")`. A script is stale when the page
   path after a step doesn't match the recorded one.
@@ -245,19 +269,31 @@ read-only and never reads sandbox state; the verdict is the one the console reco
 - **Sources:** `<root>/<run_id>/events.jsonl` (the agent's events) and `console.json`, for
   every root: `--runs-dir`, the agent's `cfg.run_dir_root`, and every root a run used.
 - **`console.json`** (written by `runner.py` into the trace dir as soon as it is known,
-  status `running`, then atomically at the end, before `end`):
-  `{console_run_id, agent, request, task_id, task_match, options, sid, start_url, voice,
-  endpoints, status, result, verdict, started_ts, ended_ts}`.
+  status `running`, then atomically at the end, before `end`, and when a restated match is
+  accepted): `{console_run_id, agent, request, task_id, task_match, options, sid, start_url, voice,
+  endpoints, parent_run_id, clarifies, status, result, verdict, started_ts, ended_ts}`.
+  `options.clarify` is the run's request check (`on` / `off`).
 - **RunSummary:** run and console ids, agent (`mock` when any payload says so), times,
   request, task, `task_match` and `task_line` ("Checked as task: pay-50 (matched from your
   request)" or "(picked from the list)", the banner's line, shown in the summary card's Task
   row; no parenthesis for a `console.json` from before `task_match`), models (Lightning, grounder, summary, ASR), status, steps, claimed and
   verified success, total time, p50 per stage (voice, summary, plan, ground, act), counts
   (events, errors, invalid tool calls, unreadable lines), `n_stuck_warnings`,
-  `n_stuck_stops`, `endpoints`, voice, prompt version and SHAs. A field the trace doesn't
-  have is `null` and shows as "—".
-- **Status:** the done event's reason (`done`, `max_steps`, `stuck`, `stopped`, `error`),
-  else `console.json` (`running` only while this console is running it), else `unknown`.
+  `n_stuck_stops`, `endpoints`, voice, prompt version and SHAs, and for the request check
+  `clarify` (`{action, question, normalized_request, model, prompt_version, prompt_sha, usage,
+  latency_ms, error, skipped}` or `null`), `question` (a `needs_input` run's), `parent_run_id`
+  and `child_run_ids`. A field the trace doesn't have is `null` and shows as "—".
+- **Status:** the done event's reason (`done`, `max_steps`, `stuck`, `needs_input`, `stopped`,
+  `error`), else `console.json` (`running` only while this console is running it), else `unknown`.
+- **Request check** (`agent/clarify.py`): a `clarify` row at step 0 ("Request check: unclear,
+  asked the user “…”" or "clear, went ahead · restated as “…”"; failures and skips say so),
+  with its model, latency, prompt version and SHA, tokens and tool call in the details. A run
+  that asked has the Needs input chip (also in the status filter) and a done row with the
+  question; the summary card has a Request check row.
+- **Follow-ups:** `parent_run_id` comes from `console.json`, else the start event;
+  `child_run_ids` are the runs whose parent is this run (oldest first, from every run found).
+  The summary card shows "Follow-up of `<id>` · your answer: “…”" and "Answered by `<id>`"
+  links that open the run in place; the table marks rows "follow-up" / "answered".
 - **Stuck** (`agent/progress.py`): the agent stopped a run that made no progress. The
   done summary is its question to the user ("I'm stuck: ..."), and `success_claimed` is
   false. The page shows:
@@ -292,6 +328,8 @@ read-only and never reads sandbox state; the verdict is the one the console reco
   - `fixtures/real_traces/` holds two real runs.
   - `fixtures/stuck_trace/` is a synthetic run in `agent/core.py`'s exact shapes. Its
     verdicts, reason and question come from `ProgressTracker`.
+  - `test_logs.clarify_traces()` is a synthetic needs_input run and its follow-up, with clarify
+    payloads from `agent.clarify.Clarification` itself (`test_logs_e2e.py` renders them).
 
 ## Matching a request to a sandbox task
 
@@ -332,6 +370,68 @@ in the page, for typed text and voice transcripts alike.
   score and what ruled it out. The table in `test_task_match.py` (run with `-s`) prints every case.
 - **The mock agent** only has scripts for the tasks' exact texts. A fuzzy-matched run under the
   mock gets "no scripted plan" and a ✗ verdict; the real agent reads the user's words.
+- **During a run:** a free-text run can still become a task when the agent's restatement matches
+  one (`method: "restated"`, [below](#a-task-from-the-agents-restatement)).
+
+## Request check and follow-ups
+
+The request check is `agent/clarify.py`: before the browser opens, one short Lightning call
+decides whether a request is clear enough to act on. It is on by default in the console
+(`--clarify on`, Options) and off everywhere else (`configs/agent.yaml`, the eval harness).
+
+- **Per run:** `options.clarify` (`on` / `off`) becomes the agent's `load_config` override
+  `{"clarify": value}` (the mock reads the same option); `console.json` records it in `options`.
+  With it off there is no `clarify` event at all, and everything else works as before.
+- **The event:** `clarify` at step 0, right after `start`, before any observation:
+  `{action: proceed|ask, request, question? (ask), normalized_request? (proceed), model,
+  prompt_version, prompt_sha, usage?, latency_ms?, error?, skipped?, tool_call?}`, with
+  `timings_ms.clarify`. `normalized_request` is shown, never planned with: the agent gets the
+  user's own words. `error`: the call failed, so the run went ahead anyway.
+- **An ask** ends the run at once: done reason `needs_input`, `steps: 0`, `success_claimed:
+  false`, `summary` = `question`, plus `question` and `request`. The console's status is `done`;
+  a verdict is computed only if the run had a task.
+
+### Follow-up runs
+
+The user's answer starts a new run: `POST /api/run` with `clarifies: {parent_run_id, answer}`.
+
+- `parent_run_id` is the **agent** run id of the run that asked (its trace dir name). The
+  backend looks for it in its own runs, then in the trace folders, and requires its done reason
+  to be `needs_input`.
+- The request is `agent.clarify.follow_up_request(<parent done.payload.request>, answer)`, i.e.
+  `previous + " (clarified: " + answer + ")"`, with the answer's whitespace collapsed (1–300
+  characters). The page may send its preview as `request` (to run its matcher on it); it must be
+  the same text, whitespace aside, or the run is refused with 400 and the backend's text.
+- The response's `request` is the built text. The agent gets `run_task(...,
+  parent_run_id=<parent>)` (only for follow-ups), and its start event records it.
+- `console.json` gets `parent_run_id` and `clarifies: {parent_run_id, answer,
+  previous_request}`; the Logs page links the two runs both ways.
+- A follow-up may carry a `task_id` and `task_match` like any run (the page matched the preview).
+
+### A task from the agent's restatement
+
+A free-text run has no task, so no verdict. When its `clarify` event proceeds with a
+`normalized_request` that matches a task (`matchTaskDetailed` in the page), and the task's
+distinguishing words are already in the user's own words, the page reports it.
+
+The distinguishing words are the task's number, month, district and channel tokens, plus
+required words no other task has (`matchSupport`). The user's own words are the request plus
+any clarification answer. This guard stops a self-fulfilling ✓: "Allors towards my bill.
+(clarified: fifty dollars)" supports pay-50, but a bare "Allors towards my bill." restated as
+"Pay $50 toward my bill." doesn't, so no task is picked and the line says why. When the
+guard passes, the page sends:
+`POST /api/runs/{console_run_id}/task_match {task_id, method: "restated", score, matched_from:
+<normalized_request>}`. The backend accepts it only if:
+
+- the run has no task yet and hasn't ended (the verdict isn't decided);
+- `matched_from` is the run's restatement (whitespace aside);
+- the task starts where the run started: the same page (free text starts on `/`) and the
+  default state (no `initial_state_overrides`), since the run's sandbox session was reset without
+  a task.
+
+The verdict at the end then checks that task. The banner and the Logs page say so, naming the
+text that chose it: `Checked as task: pay-50 (matched from the agent's restatement: "Pay $50
+toward my bill.")`. The agent never sees any of it.
 
 ## The no-DOM rule
 

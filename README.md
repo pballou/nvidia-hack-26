@@ -62,6 +62,7 @@ the sandbox's own state (the agent never sees that state).
 
 ```bash
 scripts/demo_up.sh --agent real                        # local Lightning; --lightning hosted to use the API; --headed to watch the browser
+# the console starts with thinking off and the request check on: --thinking retry|on, --clarify off change that
 ```
 
 **Fully local (Mac):** the merged grounder on :8011 also writes the screen summaries

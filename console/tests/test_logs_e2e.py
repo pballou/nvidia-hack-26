@@ -21,6 +21,10 @@
    chip and the runs table's status filter (keyboard, ?status= deep link), the "Stuck warning" / "Stopped as stuck"
    action rows, the done row with the agent's question, the progress check and where the models ran (console.json
    for the stuck run, the start event for the older ones) in the table and the summary card, AA contrast.
+6) The request check (agent/clarify.py; test_logs.clarify_traces, built with agent.clarify itself): a needs_input
+   run and the follow-up that answers it, checked as pay-50 through the agent's restatement. The Needs input chip
+   and status filter, the clarify rows (ask, proceed with the restatement), the done row's question, the
+   "Follow-up of" / "Answered by" links (mouse and keyboard), the restated task line, AA contrast.
 
 Every page also checks: no console errors, no request that leaves 127.0.0.1. DOM selectors are fine here (tests only).
 Marked `e2e` (about 25 s); skip with -m "not e2e".
@@ -45,8 +49,9 @@ from console import asr
 from console.app import CONSOLE_DIR, ConsoleSettings, create_app
 from console.runner import VERDICT_LABEL
 from console.tests.conftest import ServerThread
-from console.tests.test_logs import (CURRENT_RUN, GROUND_USAGE, SHA, STUCK_FIXTURES, STUCK_RUN, SUMMARY_ERROR,
-                                     SUMMARY_USAGE, current_agent_trace)
+from console.tests.test_logs import (CLARIFY_CHILD, CLARIFY_PARENT, CLARIFY_QUESTION, CLARIFY_RESTATED, CURRENT_RUN,
+                                     GROUND_USAGE, RESTATED_LINE, SHA, STUCK_FIXTURES, STUCK_RUN, SUMMARY_ERROR,
+                                     SUMMARY_USAGE, current_agent_trace, write_clarify_traces)
 
 pytestmark = pytest.mark.e2e
 
@@ -845,4 +850,100 @@ def test_stuck_run_rows_question_and_summary_card(page, stuck_console):
         res = pg.evaluate(CONTRAST_JS)
         assert res["n"] > 200 and res["low"] == [], (theme, res["low"])
         pg.screenshot(path=str(runs / f"stuck-{theme}.png"), full_page=True)
+    watch.assert_clean()
+
+
+# --- 6) the request check (agent/clarify.py) and follow-ups -------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def clarify_console(sandbox_url, tmp_path_factory):
+    """A needs_input run and the follow-up that answers it (test_logs.clarify_traces); the mock never runs."""
+    runs = tmp_path_factory.mktemp("e2e-clarify-runs")
+    write_clarify_traces(runs)
+    srv = _serve(sandbox_url, runs)
+    yield srv.start(), runs
+    srv.stop()
+
+
+def test_needs_input_clarify_rows_and_follow_up_links(page, clarify_console):
+    pg, watch = page
+    base, runs = clarify_console
+    open_logs(pg, base)
+    pg.wait_for_function("document.querySelectorAll('#runs-body tr').length === 2")
+    assert shown_run_ids(pg) == [CLARIFY_CHILD, CLARIFY_PARENT]
+    parent_tr, child_tr = (f"#runs-body tr[data-run-id='{r}']" for r in (CLARIFY_PARENT, CLARIFY_CHILD))
+    assert visible(pg, f"{parent_tr} .status-chip") == "Needs input"
+    assert "tone-warn" in pg.get_attribute(f"{parent_tr} .status-chip", "class")
+    assert visible(pg, f"{parent_tr} .thread-tag") == "answered" and visible(pg, f"{child_tr} .thread-tag") == "follow-up"
+    assert pg.get_attribute(f"{child_tr} .thread-tag", "title") == f"Follow-up of {CLARIFY_PARENT}: answers its question"
+    assert pg.locator("#runs-body a").count() == 2  # the table keeps one link per row (one tab stop)
+    options = pg.eval_on_selector_all("#status-filter option", "os => os.map(o => [o.value, o.textContent])")
+    assert options == [["", "All statuses (2)"], ["done", "Done (1)"], ["needs_input", "Needs input (1)"]]
+    pg.select_option("#status-filter", "needs_input")
+    assert shown_run_ids(pg) == [CLARIFY_PARENT]
+    assert pg.evaluate("new URLSearchParams(location.search).get('status')") == "needs_input"
+    pg.select_option("#status-filter", "")
+
+    # the run that asked: start, the clarify ask, done(needs_input) with the question
+    open_logs(pg, base, CLARIFY_PARENT)
+    assert pg.eval_on_selector_all("#event-list li.ev", "els => els.map(e => e.dataset.kind)") == [
+        "start", "clarify", "done"]
+    assert visible(pg, f"{ev_sel(1)} .ev-desc") == f"Request check: unclear, asked the user “{CLARIFY_QUESTION}”"
+    assert visible(pg, f"{ev_sel(1)} .ev-model") == "lightning" and visible(pg, f"{ev_sel(1)} .ev-lat") == "1.23 s"
+    assert pg.get_attribute(ev_sel(1), "data-tone") == "warn"
+    assert visible(pg, f"{ev_sel(2)} .ev-desc") == (f"Run ended: needs your input · 0 steps · the agent asks: "
+                                                    f"“{CLARIFY_QUESTION}”")
+    assert "Needs input" in visible(pg, "#run-badges")
+    assert visible(pg, "#kind-chips").startswith("start 1")
+    assert "clarify 1" in visible(pg, "#kind-chips")
+    from agent.clarify import CLARIFY_PROMPT_SHA
+
+    expand_all(pg)
+    det = text_of(pg, f"{ev_sel(1)} .ev-details")
+    for bit in ("ask: the request is unclear", CLARIFY_QUESTION, "clarify-v4", CLARIFY_PROMPT_SHA,
+                "1,021 prompt · 25 completion", "Pay something toward my bill", "ask_user"):
+        assert bit in det, (bit, det)
+    det = text_of(pg, f"{ev_sel(2)} .ev-details")
+    assert "The agent asks" in det and "About the request" in det and "needs_input" in det
+    assert kv_value(pg, "Request check").startswith(f"Asked: “{CLARIFY_QUESTION}”")
+    assert "the run ended before the browser opened" in kv_value(pg, "Request check")
+    assert kv_value(pg, "Follow-ups") == f"Answered by {CLARIFY_CHILD}"
+    summary = text_of(pg, "#run-summary")
+    assert "the request was unclear, so it asked you a question before acting" in summary  # the Status tile's note
+
+    # "Answered by <id>": a link that opens the follow-up in place (mouse)
+    pg.click(f"#run-summary a.run-ref[data-run-id='{CLARIFY_CHILD}']")
+    pg.wait_for_function(f"document.querySelector('#run-heading').textContent === 'Run {CLARIFY_CHILD}'")
+    assert pg.evaluate("location.search") == f"?run={CLARIFY_CHILD}"
+    pg.wait_for_function("document.querySelectorAll('#event-list li.ev').length > 3")
+    assert visible(pg, f"{ev_sel(0)} .ev-desc").endswith(f"· follow-up of {CLARIFY_PARENT}")
+    assert visible(pg, f"{ev_sel(1)} .ev-desc") == f"Request check: clear, went ahead · restated as “{CLARIFY_RESTATED}”"
+    assert pg.get_attribute(ev_sel(1), "data-tone") is None
+    assert kv_value(pg, "Follow-ups") == f"Follow-up of {CLARIFY_PARENT} · your answer: “fifty dollars”"
+    task = kv_value(pg, "Task")
+    assert task.startswith(RESTATED_LINE), task  # the restatement chose the check: said, not hidden
+    assert "the agent’s request check chose this check, not your words" in task
+    assert kv_value(pg, "Request check").startswith(f"Clear, went ahead · restated as “{CLARIFY_RESTATED}”")
+    assert pg.eval_on_selector_all("#event-list li.ev", "els => els.map(e => e.dataset.kind)")[-1] == "verdict"
+    assert "✓ Verified" in visible(pg, "#run-badges")
+
+    # "Follow-up of <id>" by keyboard: Tab to the link, Enter; Back returns
+    pg.focus(f"#run-summary a.run-ref[data-run-id='{CLARIFY_PARENT}']")
+    pg.keyboard.press("Enter")
+    pg.wait_for_function(f"document.querySelector('#run-heading').textContent === 'Run {CLARIFY_PARENT}'")
+    assert pg.evaluate("location.search") == f"?run={CLARIFY_PARENT}"
+    pg.go_back()
+    pg.wait_for_function(f"document.querySelector('#run-heading').textContent === 'Run {CLARIFY_CHILD}'")
+
+    for theme in ("0", "1"):  # the new rows keep AA contrast in both themes
+        pg.evaluate(f"localStorage.setItem('gui-assist.high-contrast', '{theme}')")
+        for rid in (CLARIFY_PARENT, CLARIFY_CHILD):
+            open_logs(pg, base, rid)
+            expand_all(pg)
+            pg.evaluate("document.activeElement.blur()")
+            res = pg.evaluate(CONTRAST_JS)
+            assert res["n"] > 60 and res["low"] == [], (theme, rid, res["low"])
+            pg.screenshot(path=str(runs / f"clarify-{rid}-{theme}.png"), full_page=True)
+    assert "mock" not in pg.evaluate("document.body.textContent").lower()
     watch.assert_clean()

@@ -257,7 +257,8 @@ def test_voice_run_body_and_runs_table_by_keyboard(page, logs_console, runs):
     pg, watch = page
     # the console sent what it heard with the run (console.json only; never passed to the agent)
     assert runs.voice_body == {"request": TASK_REQUEST, "task_id": TASK,  # the console's defaults (/api/config)
-                               "options": {"grounder": "grounder", "thinking": "retry", "lightning": "local"},
+                               "options": {"grounder": "grounder", "thinking": "off", "lightning": "local",
+                                           "clarify": "on"},
                                "voice": TRANSCRIPT}
     open_logs(pg, logs_console)
     pg.wait_for_function("document.querySelectorAll('#runs-body tr').length === 2")
@@ -445,7 +446,8 @@ def test_filters_by_kind_model_and_search_follow_the_url(page, logs_console, run
     assert content(pg, "#events-meta") == (
         f"Showing {counts['plan'] + counts['grounding']} of {len(kinds)} events")
     open_logs(pg, logs_console, f"?run={rid}&model=mock (no Lightning)")
-    assert visible_kinds(pg) == ["plan"] * counts["plan"]
+    # the planner's stand-in also wrote the request check (clarify is on by default)
+    assert visible_kinds(pg) == ["clarify"] + ["plan"] * counts["plan"]
     assert pg.input_value("#model-filter") == "mock (no Lightning)"
     open_logs(pg, logs_console, f"?run={rid}&q=Accessibility")
     assert 0 < len(visible_kinds(pg)) < len(kinds) and pg.input_value("#event-search") == "Accessibility"

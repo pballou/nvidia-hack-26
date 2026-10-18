@@ -97,17 +97,29 @@
               </div>
               <p id="grounder-note" class="legend-hint opt-msg" hidden></p>
             </fieldset>
-            <fieldset class="opt" id="opt-thinking">
-              <legend>Thinking <span class="legend-hint">retry = think only after a miss</span></legend>
-              <div class="seg">
-                <input type="radio" id="thinking-off" name="thinking" value="off">
-                <label for="thinking-off">off</label>
-                <input type="radio" id="thinking-retry" name="thinking" value="retry" checked>
-                <label for="thinking-retry">retry</label>
-                <input type="radio" id="thinking-on" name="thinking" value="on">
-                <label for="thinking-on">on</label>
-              </div>
-            </fieldset>
+            <div class="opt-row">
+              <fieldset class="opt" id="opt-thinking">
+                <legend>Thinking <span class="legend-hint">retry: only after a miss</span></legend>
+                <div class="seg">
+                  <input type="radio" id="thinking-off" name="thinking" value="off" checked>
+                  <label for="thinking-off">off</label>
+                  <input type="radio" id="thinking-retry" name="thinking" value="retry">
+                  <label for="thinking-retry">retry</label>
+                  <input type="radio" id="thinking-on" name="thinking" value="on">
+                  <label for="thinking-on">on</label>
+                </div>
+              </fieldset>
+              <!-- agent/clarify.py: one Lightning call before the browser opens; it may ask one question -->
+              <fieldset class="opt" id="opt-clarify">
+                <legend>Ask when unclear <span class="legend-hint">one question first</span></legend>
+                <div class="seg">
+                  <input type="radio" id="clarify-on" name="clarify" value="on" checked>
+                  <label for="clarify-on">on</label>
+                  <input type="radio" id="clarify-off" name="clarify" value="off">
+                  <label for="clarify-off">off</label>
+                </div>
+              </fieldset>
+            </div>
             <fieldset class="opt" id="opt-lightning">
               <legend>Lightning <span class="legend-hint">the planner</span></legend>
               <div class="seg">
@@ -146,6 +158,8 @@
           <button id="follow-btn" class="btn btn-small" type="button" hidden>Follow latest step</button>
         </div>
         <p id="heard" class="heard" hidden></p>
+        <!-- the clarify step's restatement of the request (display only: the agent works from the user's words) -->
+        <p id="understood" class="understood" hidden></p>
         <div id="log-scroll" class="log-scroll">
           <!-- not a live region: each step is announced once, as one sentence, through #sr-status -->
           <ol id="step-log" class="step-log" aria-labelledby="log-heading"></ol>
@@ -166,6 +180,18 @@
           <div>
             <h2 id="banner-title" class="banner-title"></h2>
             <p id="banner-question" class="banner-question" hidden></p>
+            <!-- done reason "needs_input": the answer starts a follow-up run (POST /api/run clarifies) -->
+            <form id="banner-answer" class="banner-answer" novalidate hidden>
+              <label class="answer-label" for="answer-input">Your answer</label>
+              <div class="answer-row">
+                <input id="answer-input" name="answer" type="text" maxlength="300" autocomplete="off"
+                       spellcheck="true" aria-describedby="banner-question answer-hint">
+                <button id="answer-btn" class="btn btn-primary btn-answer" type="submit">Answer</button>
+              </div>
+              <p id="answer-hint" class="answer-hint">Enter sends it: the agent runs your request again with your
+                answer.<span id="answer-voice" hidden></span></p>
+              <p id="answer-error" class="form-error" role="alert"></p>
+            </form>
             <p id="banner-task" class="banner-task" hidden></p>
             <p id="banner-label" class="banner-label"></p>
             <p id="banner-expl" class="banner-expl"></p>

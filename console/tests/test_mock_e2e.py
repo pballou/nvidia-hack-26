@@ -7,8 +7,12 @@ solvable by pixel clicks alone, and that the stream carries everything the conso
 words, grounding points with overlay images, screenshots, measured act/settle/screenshot timings, the done summary
 and the verdict.
 
-The two browser-driving tests are marked `e2e` and run in the default suite (about 45 s for all 12 tasks plus the
-free-text run). Skip them with -m "not e2e"; the fast script-integrity checks below still run.
+The console's request check is on by default (python -m console --clarify on), so every run here starts with the
+mock's step-0 clarify event (proceed, the request restated as itself) before the browser opens; one task also runs
+with the check off (no clarify event at all). The ask flows and the follow-up are in test_clarify_api.py.
+
+The browser-driving tests are marked `e2e` and run in the default suite (about 45 s for all 12 tasks plus the
+free-text runs). Skip them with -m "not e2e"; the fast script-integrity checks below still run.
 If it fails after a sandbox layout change, re-run python -m console.tools.calibrate_mock.
 """
 
@@ -34,7 +38,7 @@ TASKS = json.loads((REPO / "sandbox" / "tasks.json").read_text())
 SCRIPTS_FILE = json.loads(mock_agent.SCRIPTS_PATH.read_text())
 SCRIPTS = SCRIPTS_FILE["tasks"]
 W, H = mock_agent.VIEWPORT["width"], mock_agent.VIEWPORT["height"]
-OPTIONS = {"grounder": "base", "thinking": "retry", "lightning": "local"}
+OPTIONS = {"grounder": "base", "thinking": "retry", "lightning": "local"}  # clarify: the console's default (on)
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +52,9 @@ def mock_console(sandbox_url, tmp_path_factory):
     srv.stop()
 
 
-def run_via_console(base: str, request: str, task_id: str | None = None) -> tuple[dict, list[dict]]:
-    r = httpx.post(f"{base}/api/run", json={"request": request, "task_id": task_id, "options": OPTIONS})
+def run_via_console(base: str, request: str, task_id: str | None = None,
+                    options: dict | None = None) -> tuple[dict, list[dict]]:
+    r = httpx.post(f"{base}/api/run", json={"request": request, "task_id": task_id, "options": options or OPTIONS})
     assert r.status_code == 200, r.text
     run = r.json()
     stream = messages(read_sse(f"{base}/api/runs/{run['run_id']}/events", timeout=120))
@@ -98,6 +103,12 @@ def test_task_solved_by_pixel_clicks(mock_console, task):
 
     start = by_step[0]
     assert start["start"]["payload"]["start_url"] == run["start_url"]
+    # the request check: step 0, right after start and before the browser's first observation
+    assert [s["kind"] for s in steps[:3]] == ["start", "clarify", "observation"]
+    clar = start["clarify"]["payload"]
+    assert (clar["action"], clar["normalized_request"], clar["prompt_version"]) == (
+        "proceed", task["request"], "clarify-v4 (mock)")
+    assert start["start"]["payload"]["config"]["clarify"] is True and "timings_ms" not in start["clarify"]
     assert start["observation"]["payload"]["observation"]["screen_summary"] == script["start_screen"]
     assert start["observation"]["payload"]["summary"] == mock_agent.MOCK_SUMMARY_INFO
     assert set(start["observation"]["timings_ms"]) == {"screenshot"}  # measured; no summary latency invented
@@ -163,13 +174,14 @@ def test_free_text_request_has_no_verdict(mock_console):
     assert run["start_url"].endswith("/?sid=" + run["sid"])
 
     steps = [m["data"] for m in stream if m["event"] == "step"]
-    assert [s["kind"] for s in steps] == ["start", "observation", "plan", "tool_call", "action", "done"]
+    assert [s["kind"] for s in steps] == ["start", "clarify", "observation", "plan", "tool_call", "action", "done"]
     assert all(s["payload"]["mock"] is True for s in steps)
-    plan = steps[2]["payload"]
+    assert steps[1]["payload"]["normalized_request"] == "Please water my plants"  # clear: it proceeds
+    plan = steps[3]["payload"]
     assert plan["content"] == mock_agent.FALLBACK_PLAN and plan["tool_calls"][0]["name"] == "done"
-    assert steps[3]["payload"]["description"].startswith("Finishing: ")
+    assert steps[4]["payload"]["description"].startswith("Finishing: ")
     assert steps[-1]["payload"]["success_claimed"] is False and steps[-1]["payload"]["reason"] == "done"
-    obs = steps[1]
+    obs = steps[2]
     assert obs["payload"]["observation"]["url"].startswith(run["start_url"].split("?")[0])
     assert set(obs["timings_ms"]) == {"screenshot"}
     assert_png(base, obs["screenshot_url"])
@@ -193,13 +205,28 @@ def test_typed_task_text_from_another_page_falls_back_honestly(mock_console):
     kinds = [m["event"] for m in stream]
     assert "verdict" not in kinds and kinds[-3:] == ["result", "status", "end"], kinds
     steps = [m["data"] for m in stream if m["event"] == "step"]
-    assert [s["kind"] for s in steps] == ["start", "observation", "plan", "tool_call", "action", "done"]  # no error
+    assert [s["kind"] for s in steps] == ["start", "clarify", "observation", "plan", "tool_call", "action",
+                                          "done"]  # no error
     result = stream[-3]["data"]
     assert result["success_claimed"] is False and result["steps"] == 1
     assert "starts on /messages, but this run started on /," in result["summary"]
     assert "stale" not in json.dumps(steps) and "calibrate" not in json.dumps(steps)
-    assert steps[1]["payload"]["observation"]["screen_summary"] == mock_agent.NO_SUMMARY  # not the script's text
-    assert steps[2]["payload"]["content"].startswith("Mock agent: the scripted plan for this request starts on")
+    assert steps[2]["payload"]["observation"]["screen_summary"] == mock_agent.NO_SUMMARY  # not the script's text
+    assert steps[3]["payload"]["content"].startswith("Mock agent: the scripted plan for this request starts on")
+
+
+@pytest.mark.e2e
+def test_task_with_the_request_check_off(mock_console):
+    """--clarify off (or the per-run option): no clarify event at all, and the task still replays and verifies."""
+    base, _ = mock_console
+    task = next(t for t in TASKS if t["id"] == "high-contrast")
+    run, stream = run_via_console(base, task["request"], task["id"], {**OPTIONS, "clarify": "off"})
+    steps = [m["data"] for m in stream if m["event"] == "step"]
+    assert "clarify" not in [s["kind"] for s in steps] and [s["kind"] for s in steps[:2]] == ["start", "observation"]
+    assert steps[0]["payload"]["config"]["clarify"] is False
+    verdict = next(m["data"] for m in stream if m["event"] == "verdict")
+    assert verdict["task_id"] == "high-contrast" and verdict["passed"] is True, verdict
+    assert httpx.get(f"{base}/api/runs/{run['run_id']}").json()["options"]["clarify"] == "off"
 
 
 # --- what makes the run above meaningful: scripts and mock are pixel-only -----------------------

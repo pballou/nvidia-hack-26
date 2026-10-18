@@ -53,7 +53,9 @@ MAC_VLM = {"base_url": "http://127.0.0.1:8011/v1", "label": "Mac (vllm-metal)", 
 H200_VLM = {"base_url": "http://127.0.0.1:8001/v1", "label": "H200 via tunnel", "summary_model": "base",
             "served": ["base", "grounder"], "reachable": True}
 LOCAL_LIGHTNING = {"base_url": "http://127.0.0.1:8000/v1", "model": "lightning", "label": "local BF16 (:8000)"}
-REAL_DEFAULTS = {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
+REAL_DEFAULTS = {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"}
+# the console's defaults (python -m console --thinking off --clarify on)
+CONSOLE_DEFAULTS = {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"}
 
 
 def _console(sandbox_url: str, runs: Path, **kw) -> ServerThread:
@@ -239,7 +241,7 @@ def test_keyboard_only_sandbox_task(page, ui_console):
     assert "The agent claimed success." in pg.inner_text("#banner-claim")
     assert pg.inner_text("#run-status").startswith("Done")
     defaults = httpx.get(f"{ui_console}/api/config").json()["defaults"]  # the page runs with the server's defaults
-    assert defaults == {"grounder": "grounder", "thinking": "retry", "lightning": "local"}
+    assert defaults == CONSOLE_DEFAULTS
     assert watch.run_bodies == [{"request": TASK_REQUEST, "task_id": TASK, "options": defaults,  # picked: says so
                                  "task_match": {"method": "picked", "score": None, "matched_from": TASK_REQUEST}}]
     assert pg.inner_text("#banner-task") == f"Checked as task: {TASK} (picked from the list)"
@@ -589,19 +591,22 @@ def test_options_show_server_defaults_with_clear_labels(page, console, default_l
     labels = pg.eval_on_selector_all(".options .seg label", "els => els.map(l => [l.htmlFor, l.textContent])")
     assert labels == [["grounder-base", "base (adapter off)"], ["grounder-grounder", "grounder (LoRA)"],
                       ["thinking-off", "off"], ["thinking-retry", "retry"], ["thinking-on", "on"],
+                      ["clarify-on", "on"], ["clarify-off", "off"],
                       ["lightning-local", "Local (BF16 on :8000)"], ["lightning-hosted", "Hosted API"]]
+    legends = pg.eval_on_selector_all(".options legend", "els => els.map(l => l.firstChild.textContent.trim())")
+    assert legends == ["Grounder", "Thinking", "Ask when unclear", "Lightning"]
     checked = pg.eval_on_selector_all(".options input:checked", "els => els.map(i => i.id)")
-    assert checked == [f"grounder-{default_grounder}", "thinking-retry", f"lightning-{default_lightning}"]
+    assert checked == [f"grounder-{default_grounder}", "thinking-off", "clarify-on", f"lightning-{default_lightning}"]
     assert not pg.eval_on_selector_all(".options input:disabled", "els => els.map(i => i.id)")  # mock: no models
     summary = "local Lightning" if default_lightning == "local" else "hosted Lightning"
     grounder = "LoRA grounder" if default_grounder == "grounder" else "base"
-    assert pg.text_content("#options-summary") == f"{grounder} · thinking retry · {summary}"
+    assert pg.text_content("#options-summary") == f"{grounder} · thinking off · asks if unclear · {summary}"
     # the mock runs no models: its badge says so, and the header lists no endpoints
     assert pg.inner_text("#agent-badge") == "Agent: mock (scripted, no models)"
     assert pg.locator("#endpoints").is_hidden()
 
     # keyboard: the radio group is one tab stop, arrows change the choice, and the summary follows
-    tab_to(pg, lambda f: f["id"] == f"lightning-{default_lightning}", limit=10)
+    tab_to(pg, lambda f: f["id"] == f"lightning-{default_lightning}", limit=12)
     pg.keyboard.press("ArrowRight" if default_lightning == "local" else "ArrowLeft")
     other = "hosted" if default_lightning == "local" else "local"
     assert pg.is_checked(f"#lightning-{other}")
@@ -630,7 +635,7 @@ def test_endpoints_header_and_unserved_grounder(page, ui_console):
     assert pg.text_content("label[for='grounder-base']") == "base (adapter off) (not served at 127.0.0.1:8011)"
     assert pg.text_content("label[for='grounder-grounder']") == "grounder (LoRA)"
     assert pg.is_checked("#grounder-grounder") and pg.locator("#grounder-note").is_hidden()
-    assert pg.text_content("#options-summary") == "LoRA grounder · thinking retry · local Lightning"
+    assert pg.text_content("#options-summary") == "LoRA grounder · thinking off · asks if unclear · local Lightning"
     # the two segments still sit side by side (the note wraps inside its own segment)
     tops = pg.eval_on_selector_all("#opt-grounder .seg label", "els => els.map(l => l.getBoundingClientRect().top)")
     assert tops[0] == tops[1], tops
@@ -642,7 +647,7 @@ def test_endpoints_header_and_unserved_grounder(page, ui_console):
         pg.keyboard.press(key)
         assert focused(pg)["id"] == "grounder-grounder" and pg.is_checked("#grounder-grounder"), key
     pg.keyboard.press("Tab")
-    assert focused(pg)["id"] == "thinking-retry"
+    assert focused(pg)["id"] == "thinking-off"
 
     # the Lightning line follows the toggle (the endpoints describe the default; hosted is the other preset)
     pg.click("label[for='lightning-hosted']")

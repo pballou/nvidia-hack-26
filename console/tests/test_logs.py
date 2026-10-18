@@ -250,6 +250,7 @@ def _done(reason):
     (_done("done"), None, "done"),
     (_done("max_steps"), None, "max_steps"),
     (_done("stuck"), console_doc(status="done"), "stuck"),          # agent/progress.py's stop: its own status
+    (_done("needs_input"), console_doc(status="done"), "needs_input"),  # agent/clarify.py asked a question
     (_done("stopped"), console_doc(status="stopped"), "stopped"),
     (_done("error"), None, "error"),
     (_done("weird"), None, "unknown"),
@@ -338,6 +339,162 @@ def test_prompt_identity_tokens_and_reused_summaries(tmp_path):
     assert logs.event_prompt_sha({"kind": "observation", "payload": {"summary": "a string"}}) is None
     assert logs.event_prompt_sha({"kind": "action", "payload": {"prompt_sha": "x"}}) is None
     json.dumps(s, allow_nan=False)
+
+
+# --- the request check (agent/clarify.py) and follow-ups ------------------------------------------------
+
+CLARIFY_PARENT, CLARIFY_CHILD = "20261018-093000-a1b2c3", "20261018-093020-d4e5f6"
+CLARIFY_ASK = "Pay something toward my bill"
+CLARIFY_QUESTION = "How much would you like to pay toward your bill?"
+CLARIFY_RESTATED = "Pay $50 toward my bill."
+CLARIFY_ASK_USAGE = {"prompt_tokens": 1021, "completion_tokens": 25}
+RESTATED_LINE = 'Checked as task: pay-50 (matched from the agent\'s restatement: "Pay $50 toward my bill.")'
+
+
+def clarify_traces() -> dict[str, tuple[list[dict], dict]]:
+    """{run_id: (events, console.json)}: a real-agent needs_input run and the follow-up that answers it, checked as
+    pay-50 through the agent's restatement. The clarify payloads come from agent.clarify.Clarification itself and
+    the done shapes follow agent/core.py, so the fixture keeps up with the agent."""
+    from agent.clarify import Clarification, follow_up_request
+
+    cfg = {"lightning": {"base_url": "http://127.0.0.1:8000/v1", "model": "lightning",
+                         "root": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"},
+           "grounder_model": "grounder", "summary_model": "base", "thinking": "off", "clarify": True, "max_steps": 25,
+           "prompt_version": "agent-v6"}
+    stats0 = {k: 0 for k in ("n_tool_calls", "n_invalid_calls", "n_actions", "n_clicks", "n_failed_actions",
+                             "n_no_tool_call", "n_truncated", "n_no_change", "n_recoveries", "n_thinking_calls",
+                             "n_api_errors", "n_stuck_warnings", "n_stuck_stops")}
+    url = "http://127.0.0.1:8090/?sid=console-c-0a0a0a0a"
+
+    def e(rid, kind, step, ts, payload, **extra):
+        return {"run_id": rid, "step": step, "kind": kind, "ts": ts, "payload": payload, **extra}
+
+    ask = Clarification("ask", question=CLARIFY_QUESTION, latency_ms=1234.56, usage=CLARIFY_ASK_USAGE,
+                        tool_call={"name": "ask_user", "arguments": {"question": CLARIFY_QUESTION}})
+    p = CLARIFY_PARENT
+    parent = [
+        e(p, "start", 0, 3000.0, {"request": CLARIFY_ASK, "start_url": url, "config": cfg}),
+        e(p, "clarify", 0, 3001.2, ask.event_payload(CLARIFY_ASK, "lightning"), timings_ms={"clarify": 1234.6}),
+        e(p, "done", 0, 3001.3, {"success_claimed": False, "summary": CLARIFY_QUESTION, "steps": 0,
+                                 "reason": "needs_input", "stats": {**stats0, "latency_ms": {"clarify": [1234.6]}},
+                                 "question": CLARIFY_QUESTION, "request": CLARIFY_ASK}),
+    ]
+    request = follow_up_request(CLARIFY_ASK, "fifty dollars")
+    go = Clarification("proceed", normalized_request=CLARIFY_RESTATED, latency_ms=987.0,
+                       usage={"prompt_tokens": 1040, "completion_tokens": 31},
+                       tool_call={"name": "proceed", "arguments": {"normalized_request": CLARIFY_RESTATED}})
+    c = CLARIFY_CHILD
+    done_args = {"summary": "Paid $50 toward the bill.", "success": True}
+    child = [
+        e(c, "start", 0, 3020.0, {"request": request, "start_url": url.replace("0a0a0a0a", "0b0b0b0b"), "config": cfg,
+                                  "parent_run_id": p}),
+        e(c, "clarify", 0, 3021.0, go.event_payload(request, "lightning"), timings_ms={"clarify": 987.0}),
+        e(c, "observation", 0, 3022.0, {"observation": {"step": 0, "url": url, "title": "Acme Utilities",
+                                                        "screen_changed": None, "last_action_result": "",
+                                                        "screen_summary": "PAGE: Dashboard"},
+                                        "text": "Step 0 | URL: /", "summary": {"model": "base"}},
+          timings_ms={"screenshot": 40.0, "summary": 900.0}),
+        e(c, "plan", 1, 3024.0, {"content": "", "reasoning": "", "thinking": False,
+                                 "tool_calls": [{"name": "done", "arguments": done_args}], "model": "lightning",
+                                 "prompt_version": "agent-v6", "prompt_sha": "cc1d9edb42"}, timings_ms={"plan": 1500.0}),
+        e(c, "tool_call", 1, 3024.0, {"name": "done", "arguments": done_args, "valid": True,
+                                      "description": "Finishing: Paid $50 toward the bill."}),
+        e(c, "action", 1, 3024.1, {"name": "done", "arguments": done_args, "ok": True, "screen_changed": None,
+                                   "done": True}),
+        e(c, "done", 1, 3024.2, {"success_claimed": True, "summary": done_args["summary"], "steps": 1, "reason": "done",
+                                 "stats": {**stats0, "n_tool_calls": 1, "n_actions": 1,
+                                           "latency_ms": {"clarify": [987.0], "plan": [1500.0]}}}),
+    ]
+    options = {"grounder": "grounder", "thinking": "off", "lightning": "local", "clarify": "on"}
+    base = {"agent": "real", "options": options, "voice": None, "endpoints": None, "status": "done"}
+    parent_doc = {**base, "console_run_id": "c-0a0a0a0a", "request": CLARIFY_ASK, "task_id": None, "task_match": None,
+                  "sid": "console-c-0a0a0a0a", "start_url": url, "parent_run_id": None, "clarifies": None,
+                  "result": {"run_id": p, "success_claimed": False, "summary": CLARIFY_QUESTION, "steps": 0,
+                             "reason": "needs_input", "question": CLARIFY_QUESTION},
+                  "verdict": None, "started_ts": 2999.9, "ended_ts": 3001.4}
+    verdict = {"task_id": "pay-50", "passed": True, "explanation": "all 6 checks passed",
+               "label": "verified by sandbox state, not seen by the agent"}
+    child_doc = {**base, "console_run_id": "c-0b0b0b0b", "request": request, "task_id": "pay-50",
+                 "task_match": {"method": "restated", "score": 1.0, "matched_from": CLARIFY_RESTATED},
+                 "sid": "console-c-0b0b0b0b", "start_url": url.replace("0a0a0a0a", "0b0b0b0b"), "parent_run_id": p,
+                 "clarifies": {"parent_run_id": p, "answer": "fifty dollars", "previous_request": CLARIFY_ASK},
+                 "result": {"run_id": c, "success_claimed": True, "summary": done_args["summary"], "steps": 1,
+                            "reason": "done", "question": None},
+                 "verdict": verdict, "started_ts": 3019.9, "ended_ts": 3024.5}
+    return {p: (parent, parent_doc), c: (child, child_doc)}
+
+
+def write_clarify_traces(root: Path) -> None:
+    for rid, (events, doc) in clarify_traces().items():
+        write_run(root, rid, events, doc)
+
+
+def test_clarify_summary_needs_input_and_follow_up_links(tmp_path):
+    write_clarify_traces(tmp_path)
+    listed = {s["run_id"]: s for s in logs.list_runs([tmp_path])}
+    p, c = listed[CLARIFY_PARENT], listed[CLARIFY_CHILD]
+    assert (p["status"], p["steps"], p["success_claimed"], p["question"]) == ("needs_input", 0, False, CLARIFY_QUESTION)
+    assert (p["parent_run_id"], p["child_run_ids"]) == (None, [CLARIFY_CHILD])
+    assert (c["parent_run_id"], c["child_run_ids"], c["question"]) == (CLARIFY_PARENT, [], None)
+    from agent.clarify import CLARIFY_PROMPT_SHA, CLARIFY_PROMPT_VERSION
+
+    assert p["clarify"] == {"action": "ask", "question": CLARIFY_QUESTION, "normalized_request": None,
+                            "model": "lightning", "prompt_version": CLARIFY_PROMPT_VERSION,
+                            "prompt_sha": CLARIFY_PROMPT_SHA, "usage": CLARIFY_ASK_USAGE, "latency_ms": 1234.6,
+                            "error": None, "skipped": None}
+    assert c["clarify"]["action"] == "proceed" and c["clarify"]["normalized_request"] == CLARIFY_RESTATED
+    assert p["models"]["lightning"] == "lightning" and p["prompt_sha"]["lightning"] is None  # no plan: no planner SHA
+    assert (c["task_id"], c["task_line"], c["verified"]) == ("pay-50", RESTATED_LINE, True)
+    assert c["task_match"] == {"method": "restated", "score": 1.0, "matched_from": CLARIFY_RESTATED}
+    assert p["task_line"] is None and p["verified"] is None
+    # summarize_run alone can't see the other runs
+    assert logs.summarize_run(*clarify_traces()[CLARIFY_PARENT])["child_run_ids"] == []
+    # the detail's derived event fields: the clarify event's model and prompt SHA
+    d = logs.run_detail(tmp_path / CLARIFY_PARENT, CLARIFY_PARENT)
+    clar = next(x for x in d["events"] if x["kind"] == "clarify")
+    assert (clar["model"], clar["prompt_sha"]) == ("lightning", CLARIFY_PROMPT_SHA)
+    json.dumps(listed, allow_nan=False)
+
+
+def test_follow_up_links_over_http(console, tmp_path):
+    runs = tmp_path / "runs"
+    write_clarify_traces(runs)
+    base, _ = console(idle_agent(), runs_dir=runs)
+    parent = httpx.get(f"{base}/api/logs/runs/{CLARIFY_PARENT}").json()["summary"]
+    child = httpx.get(f"{base}/api/logs/runs/{CLARIFY_CHILD}").json()["summary"]
+    assert (parent["status"], parent["child_run_ids"], child["parent_run_id"]) == (
+        "needs_input", [CLARIFY_CHILD], CLARIFY_PARENT)
+    listed = httpx.get(f"{base}/api/logs/runs?limit=1").json()  # the newest only: its links still see every run
+    assert [s["run_id"] for s in listed["runs"]] == [CLARIFY_CHILD] and listed["runs"][0]["parent_run_id"] == CLARIFY_PARENT
+    listed = httpx.get(f"{base}/api/logs/runs").json()["runs"]
+    assert next(s for s in listed if s["run_id"] == CLARIFY_PARENT)["child_run_ids"] == [CLARIFY_CHILD]
+
+
+def test_parent_run_id_sources_and_child_order():
+    start = [ev("start", 0, 1.0, {"request": "x", "parent_run_id": "20261018-000000-aaaaaa"})]
+    assert logs.summarize_run(start)["parent_run_id"] == "20261018-000000-aaaaaa"  # the trace alone
+    assert logs.summarize_run(start, {"parent_run_id": "20261018-000000-bbbbbb"})["parent_run_id"] == \
+        "20261018-000000-bbbbbb"  # console.json first
+    assert logs.summarize_run([], {"clarifies": {"parent_run_id": "20261018-000000-cccccc"}})["parent_run_id"] == \
+        "20261018-000000-cccccc"
+    for bad in ("../x", "", 5, None):
+        assert logs.summarize_run([ev("start", 0, 1.0, {"parent_run_id": bad})])["parent_run_id"] is None
+    kids = logs.child_runs([{"run_id": "b", "parent_run_id": "p", "started_ts": 20.0},
+                            {"run_id": "a", "parent_run_id": "p", "started_ts": 10.0},
+                            {"run_id": "p", "parent_run_id": None, "started_ts": 1.0},
+                            {"run_id": "self", "parent_run_id": "self", "started_ts": 1.0}])
+    assert kids == {"p": ["a", "b"]}
+    assert logs.summarize_run([])["clarify"] is None  # clarify off, or a trace from before it
+
+
+def test_task_line_restated():
+    m = {"method": "restated", "score": 0.9, "matched_from": " Pay $50  toward my bill. "}
+    assert logs.task_line("pay-50", m, True) == RESTATED_LINE
+    assert logs.task_line("pay-50", m, False) == RESTATED_LINE.replace("Checked as task", "Sandbox task")
+    assert logs.task_line("pay-50", {"method": "restated", "score": None, "matched_from": None}, True) == \
+        "Checked as task: pay-50 (matched from the agent's restatement)"  # never hidden, even without the text
+    s = logs.summarize_run([], {"task_id": "pay-50", "task_match": m, "verdict": {"passed": True}})
+    assert s["task_match"]["method"] == "restated" and s["task_line"] == RESTATED_LINE
 
 
 # --- stuck (agent/progress.py) and endpoints -----------------------------------------------------------

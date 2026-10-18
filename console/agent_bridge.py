@@ -1,11 +1,13 @@
 """Picks the agent behind the console: `--agent mock` (console/mock_agent.py) or `--agent real` (T2's agent.core).
 
 get_agent(settings) -> (run_task, make_cfg). Both agents share contracts.md §5:
-    async run_task(request, *, start_url, cfg, on_event) -> RunResult
-make_cfg(options) turns the console's per-run options {grounder, thinking, lightning}
+    async run_task(request, *, start_url, cfg, on_event, parent_run_id=None) -> RunResult
+make_cfg(options) turns the console's per-run options {grounder, thinking, lightning, clarify}
 into that agent's config object. For the real agent that is agent.config.load_config with
-the console's overrides: the per-run options, the sandbox URL, --headed, and (when given)
---vlm-url -> vlm={"base_url": URL} and --summary-model -> summary_model. Env vars
+the console's overrides: the per-run options (clarify "on"|"off" -> {"clarify": value}, the
+pre-flight request check of agent/clarify.py), the sandbox URL, --headed, and (when given)
+--vlm-url -> vlm={"base_url": URL} and --summary-model -> summary_model. A follow-up run also
+gets run_task(..., parent_run_id=<the needs_input run it answers>) (console/runner.py). Env vars
 (AGENT_VLM_BASE_URL, AGENT_SUMMARY_MODEL, ...) keep working through load_config; an
 explicit console flag beats them.
 
@@ -46,8 +48,9 @@ def get_agent(settings) -> tuple[RunTask, MakeCfg]:
         def make_cfg(options: dict) -> MockConfig:
             return MockConfig(runs_dir=str(settings.runs_dir), sandbox_url=settings.sandbox_url,
                               grounder_model=options["grounder"], thinking=options["thinking"],
-                              lightning=options["lightning"], headed=settings.headed,
-                              step_delay_s=settings.step_delay_s, scripts_path=str(settings.mock_scripts))
+                              lightning=options["lightning"], clarify=options.get("clarify", "off"),
+                              headed=settings.headed, step_delay_s=settings.step_delay_s,
+                              scripts_path=str(settings.mock_scripts))
 
         return run_task, make_cfg
 
@@ -74,6 +77,7 @@ def real_overrides(settings, options: dict) -> dict:
         "grounder_model": options["grounder"],
         "thinking": options["thinking"],
         "lightning": options["lightning"],
+        **({"clarify": options["clarify"]} if "clarify" in options else {}),  # "on" | "off" (agent/config.py)
         "sandbox_url": settings.sandbox_url,
         **({"browser": {"headless": False}} if settings.headed else {}),
         **({"vlm": {"base_url": vlm_url}} if vlm_url else {}),
