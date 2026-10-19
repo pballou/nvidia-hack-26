@@ -52,7 +52,8 @@ Setup: fully local Mac.
     time. The planner then chose Other amount every time, and all 8 passed.
   - T1's four console runs ~02:50, on near-identical screenshots (one is 1 px shifted): the
     description had neither cue every time. The planner passed 1/4. The other 3 continued with the
-    preselected full balance, confirmed a dialog that said $142.37, and claimed $50.
+    preselected full balance, confirmed a dialog that said $142.37, and claimed success (all three
+    done summaries mention $142.37, and two say they paid it; per the traces, docs/research/console-runs.md).
   - **Cause: the console's headed browser.** The `:8011` serve command was identical in both
     sessions (T4), and within each session the dialog screenshot was byte-identical every run.
     The two sessions' screenshots differ in ~85k pixels of font rasterization. Rendering the
