@@ -69,9 +69,9 @@ Cutaways:
 - **Government:** much of the value is access for residents. The 2027 deadline still requires fixing the site itself.
 
 > **Post-submission correction (Sun 2026-10-18):** these savings assume 20–40% of all contacts move,
-> which is an opinion survey, not a measurement. Once adoption and our measured task success (~50%)
-> are factored in, the 2M-customer utility estimate drops to roughly **$0–0.75M/yr** with an open
-> planner, up to ~$2.2M with a frontier planner, and it can be negative at today's success rate. See
+> which is an opinion survey, not a measurement. Net of adoption and failed attempts, the 2M-customer
+> utility estimate is roughly **$0–0.75M/yr** at the 70–80% task success an open planner with gates
+> might reach, up to ~$2.2M with a frontier planner at 85%, and possibly negative at today's ~50%. See
 > [research/product-architecture.md](research/product-architecture.md) (§7).
 
 ## 6. Why now, and why small local models
