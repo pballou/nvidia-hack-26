@@ -12,7 +12,7 @@ watch it happen on the real site, with small models that run on the company's ow
 hardware. Market sizing, ROI assumptions and sources: [docs/pitch.md](docs/pitch.md).
 
 **On Hugging Face:** model [patrickballou/gui-assist-grounder](https://huggingface.co/patrickballou/gui-assist-grounder) ·
-data [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data). Run it yourself: [Quick start](#quick-start).
+data [patrickballou/gui-assist-data](https://huggingface.co/datasets/patrickballou/gui-assist-data) (temporarily private while we confirm the NVIDIA API Trial Terms allow sharing the hosted-API rewrites). Run it yourself: [Quick start](#quick-start).
 
 This is an accessibility agent built for the
 [NVIDIA x Red Hat Small Models Hack](https://luma.com/nvidia-redhat-small-models-hack)

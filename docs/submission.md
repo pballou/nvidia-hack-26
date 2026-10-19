@@ -56,7 +56,7 @@ Condensed from the organizers' bounty slides. "Open" is what a judge could push 
 - [ ] **Video:** recorded, uploaded to YouTube as **Unlisted**, link pasted into the README and the form (Charlie).
 - [x] **GitHub repo** public: https://github.com/pballou/nvidia-hack-26
 - [x] **HF model** public: https://huggingface.co/patrickballou/gui-assist-grounder
-- [x] **HF data** public: https://huggingface.co/datasets/patrickballou/gui-assist-data (10:27)
+- [x] **HF data** was public at 10:27. **Made private again Sun ~13:00** pending NVIDIA's OK: ToS §4.2 bars distributing hosted-API Generated Content (8,028 rows). The 1,003 local-BF16 rows are unrestricted (OpenMDW-1.1).
 - [ ] **Airtable form**, using the values below. Paste the description, then the three bounty boxes from §Form text.
   - Project / team: **GUI Assist** / **sherpas**
   - Members: Patrick (pballou@sherpa6.com), Kyle (kodonnell@sherpa6.com), Charlie (carleth@sherpa6.com)
